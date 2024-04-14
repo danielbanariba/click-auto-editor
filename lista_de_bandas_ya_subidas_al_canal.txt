@@ -1,0 +1,3 @@
+En el script de subir video, hacer una funcion que cuando termine de subir un X video, agregue el nombre con el album osea
+banda - album (full album) a esta lista, para que de esa manera cuando ejecute el script de scraping-death-grind, compare esta lista 
+y se descarte automaticamente para evitar buscarlo en youtube

@@ -11,7 +11,7 @@ AudioSegment.converter = "C:\\Program Files\\FFmpeg\\bin\\ffmpeg.exe"
 AudioSegment.ffmpeg = "C:\\Program Files\\FFmpeg\\bin\\ffprobe.exe"
 
 # Definir la ruta de la carpeta que contiene los audios
-main_dir_path = "D:\\01_edicion_automatizada\\01_limpieza_de_impurezas"
+main_dir_path = "D:\\01_edicion_automatizada\\audio_scripts"
 
 # Recorre todos los directorios en la ruta principal
 for folder_name in os.listdir(main_dir_path):
@@ -25,20 +25,22 @@ for folder_name in os.listdir(main_dir_path):
             shutil.move(folder_path, new_folder_path)
             folder_path = new_folder_path
 
-        # Crear una lista vacía para almacenar los audios
+        # Crear una lista vacía para almacenar datos de los audios
         audios = []
         audio_names = []
         audio_years = []
         audio_genres = []
-        # Crear una lista vacía para almacenar las duraciones de los audios
         audio_durations = []
-        # Crear una lista vacía para almacenar las rutas de los audios
         audio_paths = []
         band_names = []  
         album_names = []  
 
-        # Recorrer la carpeta
-        for file_name in os.listdir(folder_path):
+        # Si existe un archivo de audio en la carpeta, ignora la carpeta
+        audio_files = [file_name for file_name in os.listdir(folder_path) if file_name.endswith((".mp3", ".flac"))]
+        if len(audio_files) <= 1:
+            continue  
+        
+        for file_name in audio_files:
             # Verificar si el archivo es un audio
             if file_name.endswith((".mp3", ".flac")):
                 # Abrir el audio y agregarlo a la lista
@@ -67,11 +69,11 @@ for folder_name in os.listdir(main_dir_path):
                     album = audio_file.tag.album if audio_file.tag.album else "Unknown"  # Extract album name
                     album_names.append(album)
 
-        # Verificar si hay alguna imagen en el directorio
+        # Verificar si existe alguna imagen en el directorio
         image_formats = [".png", ".jpg", ".jpeg", ".jfif"]
         has_image = any(file_name.endswith(tuple(image_formats)) for file_name in os.listdir(folder_path))
 
-        # Si no hay ninguna imagen, recorrer la lista de audios
+        # Si no existe ninguna imagen, recorrer la lista de audios
         if not has_image:
             for audio_path in audio_paths:
                 audio_file = eyed3.load(audio_path)
@@ -94,7 +96,7 @@ for folder_name in os.listdir(main_dir_path):
         # Eliminar los archivos de audio originales
         for audio_path in audio_paths:
             try:
-                os.chmod(audio_path, stat.S_IWRITE)  # Change the file attributes to writable
+                os.chmod(audio_path, stat.S_IWRITE) # Cambiar los permisos del archivo para poder eliminarlo
                 os.remove(audio_path)
             except PermissionError:
                 print(f"Permission denied: '{audio_path}'. The file might be open, read-only or the script might not have the necessary permissions.")
@@ -102,19 +104,21 @@ for folder_name in os.listdir(main_dir_path):
     else:
         print(f"'{folder_path}' no es un directorio válido.")
 
-    #! Cambiar el (Full album) por el ep, compilacion o cualquiera segun sea la epoca
-    if audio_genres and audio_years and band_names and album_names:
+    #TODO Cambiar el (Full album) por el ep, compilacion o cualquiera segun sea la epoca
+    if audio_genres and audio_years and band_names and album_names: 
         text = f"{band_names[0]} - {album_names[0]} (Full Album)\n\nGenre: {audio_genres[0]}\nYear: {audio_years[0]}\n\n"
     else:
         text = "Unknown - Unknown\nGenre: Unknown\nYear: Unknown\n\n"
     total_duration = 0
 
+    # Agrega el nombre de cada audio y su duración al archivo de texto
     for i, audio in enumerate(audios):
         minutes, seconds = divmod(total_duration, 60)
         if i < len(audios):
             total_duration += audio_durations[i]
             text += f"{i+1} - {audio_names[i]} ({int(minutes):02d}:{int(seconds):02d})\n"
 
+    # Guardar la información recolectada y crea en un archivo de texto
     with open(os.path.join(folder_path, f"{folder_name}.txt"), "w", encoding='utf-8') as f:
         f.write(text)
 
