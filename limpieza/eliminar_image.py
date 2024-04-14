@@ -1,4 +1,5 @@
 import os
+import stat
 
 # Extensiones de archivos de imagen
 image_extensions = [".jpg", ".jpeg", ".png", ".gif"]
@@ -24,6 +25,10 @@ def delete_images(root_dir):
             for image_file in list(image_files):  # Crear una copia de la lista antes de recorrerla
                 file_path = os.path.join(foldername, image_file)
                 if os.path.exists(file_path):  # Verificar si el archivo existe antes de intentar eliminarlo
-                    os.remove(file_path)
-                    print(f"Deleted {file_path}")
-                    image_files.remove(image_file)  # Actualizar la lista después de cada eliminación
+                    try:
+                        os.chmod(file_path, stat.S_IWRITE)  # Change the file permissions
+                        os.remove(file_path)
+                        print(f"Deleted {file_path}")
+                        image_files.remove(image_file)  # Actualizar la lista después de cada eliminación
+                    except Exception as e:
+                        print(f"Failed to delete {file_path}. Reason: {e}")
