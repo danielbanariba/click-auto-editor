@@ -5,17 +5,8 @@ from google.auth.transport.requests import Request
 from googleapiclient.http import MediaFileUpload
 import os
 import json
-
-# Configura las credenciales de la API de YouTube
-CLIENT_SECRETS_FILE = "client_secrets.json"
-SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
-API_SERVICE_NAME = 'youtube'
-API_VERSION = 'v3'
-
-def get_authenticated_service():
-    flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
-    credentials = flow.run_local_server(port=0)
-    return build(API_SERVICE_NAME, API_VERSION, credentials = credentials)
+from subir_video import authenticate
+from subir_video import consulta_disponibilidad_API
 
 def initialize_upload(youtube, file):
     request = youtube.videos().insert(
@@ -37,5 +28,8 @@ def initialize_upload(youtube, file):
     print(response)
 
 if __name__ == '__main__':
-    youtube = get_authenticated_service()
+    youtube = authenticate()
     initialize_upload(youtube, 'prueba.mp4')
+    
+# consultar si ya puedo hacer petición a la API de youtube
+consulta_disponibilidad_API()

@@ -6,4 +6,4 @@ def contar_archivos_en_subdirectorios(directorio):
         if contador != 3:
             print(f'{contador} {ruta}')
 
-contar_archivos_en_subdirectorios('D:\\01_limpieza_de_impurezas')
+contar_archivos_en_subdirectorios('D:\\01_edicion_automatizada\\01_limpieza_de_impurezas')

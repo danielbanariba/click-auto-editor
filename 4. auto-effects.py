@@ -10,7 +10,7 @@ import random
 inside_color = '#000000'
 
 # Definir la ruta de la carpeta que contiene los audios
-main_dir_path = "D:\\audio_scripts"
+main_dir_path = "D:\\01_edicion_automatizada\\audio_scripts"
 
 # Recorre todos los directorios en la ruta principal
 for folder_name in os.listdir(main_dir_path):

@@ -58,7 +58,7 @@ from effects.sombra import add_shadow
 import stat
 
 # Definir la ruta de la carpeta principal
-main_dir_path = "D:\\01_limpieza_de_impurezas"
+main_dir_path = "D:\\01_edicion_automatizada\\01_limpieza_de_impurezas"
 
 # Recorrer todos los directorios en la ruta principal
 for folder_name in os.listdir(main_dir_path):

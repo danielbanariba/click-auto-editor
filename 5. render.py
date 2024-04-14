@@ -6,7 +6,7 @@ import random
 # Definir la ruta de la carpeta que contiene los archvivos de after effects
 main_dir_path = "C:\\Users\\banar\\Desktop\\save_after_effects"
 ruta_intro = "C:\\Users\\banar\\OneDrive\\Documents\\Intro Daniel Banariba"
-path_render = "D:\\audio_scripts"
+path_render = "D:\\01_edicion_automatizada\\audio_scripts"
 
 # Recorre todos los archivos en la ruta principal
 for file_name in os.listdir(main_dir_path):
