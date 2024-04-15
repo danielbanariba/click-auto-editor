@@ -6,7 +6,7 @@ files_to_delete = ["DeathGrindClub - The Most Brutal Music In The World!",
                    "DeathGrind.Club", "TechnicalDeathMetal", 
                    "DeathGrindClub • The Most Brutal Music In The World!", 
                    "DeathGrindClub", "DeathGrindClub ⋅ The Most Brutal Music In The World!", 
-                   ".DS_Store", "desktop.ini", "Thumbs.db", ]
+                   ".DS_Store", "desktop.ini", "Thumbs.db", "DeathGrindClub ⋅ The Most Brutal Music In The World!"]
 
 def delete_specific_files(root_dir):
     # Recorrer cada carpeta en el directorio raíz

@@ -50,16 +50,17 @@ for folder_name in os.listdir(main_dir_path):
                 audio_paths.append(audio_path)
                 # Extraer el nombre del audio y su duración
                 audio_file = eyed3.load(audio_path)
-                if audio_file.tag is not None:
-                    title = audio_file.tag.title if audio_file.tag.title else "Unknown"
+                if audio_file is not None:
+                    title = audio_file.tag.title if audio_file.tag and audio_file.tag.title else "Unknown"
+                    audio_names.append(title)
+                    duration = audio_file.info.time_secs
+                    audio_durations.append(duration)
                 else:
-                    title = "Unknown"
-                audio_names.append(title)
-                duration = audio_file.info.time_secs
-                audio_durations.append(duration)
-        
+                    audio_names.append("Unknown")
+                    audio_durations.append(0)  # Add a default duration if audio_file is None
+                
                 # Extraer el año y el género solo de la primera canción
-                if not audio_years and not audio_genres and not band_names and not album_names:
+                if not audio_years and not audio_genres and not band_names and not album_names and audio_file is not None:
                     year = audio_file.tag.getBestDate() if audio_file.tag.getBestDate() else "Unknown"
                     audio_years.append(year)
                     genre = audio_file.tag.genre if audio_file.tag.genre else "Unknown"
@@ -72,20 +73,23 @@ for folder_name in os.listdir(main_dir_path):
         # Verificar si existe alguna imagen en el directorio
         image_formats = [".png", ".jpg", ".jpeg", ".jfif"]
         has_image = any(file_name.endswith(tuple(image_formats)) for file_name in os.listdir(folder_path))
-
+        
         # Si no existe ninguna imagen, recorrer la lista de audios
         if not has_image:
             for audio_path in audio_paths:
                 audio_file = eyed3.load(audio_path)
-                # Extraer las imágenes del archivo de audio
-                for image in audio_file.tag.images:
-                    # Guardar la primera imagen como "Cover.jpg" y terminar el bucle
-                    img = Image.open(io.BytesIO(image.image_data))
-                    img.save(os.path.join(folder_path, "Cover.jpg"))
+                if audio_file is not None and audio_file.tag is not None:
+                    # Extraer las imágenes del archivo de audio
+                    for image in audio_file.tag.images:
+                        # Guardar la primera imagen como "Cover.jpg" y terminar el bucle
+                        img = Image.open(io.BytesIO(image.image_data))
+                        if img.mode == 'RGBA':
+                            img = img.convert('RGB')
+                        img.save(os.path.join(folder_path, "Cover.jpg"), 'JPEG')
+                        break
+                    else:
+                        continue
                     break
-                else:
-                    continue
-                break
 
         # Juntar los audios
         combined = sum(audios, AudioSegment.empty())

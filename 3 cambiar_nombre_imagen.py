@@ -5,7 +5,7 @@ from PIL import Image
 from effects.sombra import add_shadow
 
 # Definir la ruta de la carpeta principal
-main_dir_path = "D:\\01_limpieza_de_impurezas"
+main_dir_path = "D:\\01_edicion_automatizada\\audio_scripts"
 
 # Recorrer todos los directorios en la ruta principal
 # for folder_name in os.listdir(main_dir_path):
@@ -58,7 +58,7 @@ from effects.sombra import add_shadow
 import stat
 
 # Definir la ruta de la carpeta principal
-main_dir_path = "D:\\01_edicion_automatizada\\01_limpieza_de_impurezas"
+main_dir_path = "D:\\01_edicion_automatizada\\audio_scripts"
 
 # Recorrer todos los directorios en la ruta principal
 for folder_name in os.listdir(main_dir_path):
@@ -86,16 +86,26 @@ for folder_name in os.listdir(main_dir_path):
                 with Image.open(nuevo_nombre) as img:
                     # Cambiar el tamaño de la imagen a 2050x2050
                     img_resized = img.resize((2050, 2050))
+                
+                    # Convertir la imagen a RGB si es RGBA
+                    if img_resized.mode == 'RGBA':
+                        img_resized = img_resized.convert('RGB')
+                
                     img_resized.save(f"{nuevo_nombre}_2050x2050.{extension}")
-
+                
                     # Intentar añadir una sombra a la imagen
                     try:
                         add_shadow(f"{nuevo_nombre}_2050x2050.{extension}", f"{nuevo_nombre}_2050x2050_shadow.png", 255, 135, 53, 37)
                     except Exception as e:
                         print(f"Error adding shadow to {nuevo_nombre}_2050x2050.{extension}: {e}")
-
+                
                     # Cambiar el tamaño de la imagen a 4050x4050
                     img_resized = img.resize((4050, 4050))
+                
+                    # Convertir la imagen a RGB si es RGBA
+                    if img_resized.mode == 'RGBA':
+                        img_resized = img_resized.convert('RGB')
+                
                     img_resized.save(f"{nuevo_nombre}_4050x4050.{extension}")
 
                 # Get the current permissions
