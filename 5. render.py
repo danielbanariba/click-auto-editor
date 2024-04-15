@@ -24,7 +24,7 @@ for file_name in os.listdir(main_dir_path):
         pyautogui.write('Premier')  # escribe el nombre del programa
         time.sleep(1)
         pyautogui.press('enter')  # abre el programa
-        time.sleep(10)  # espera a que el programa se abra
+        time.sleep(16)  # espera a que el programa se abra
     
     #---------------------------------------------------------------------------------------------------------    
         # Segunda parte: Crear un nuevo proyecto
@@ -113,7 +113,9 @@ for file_name in os.listdir(main_dir_path):
         pyautogui.hotkey('ctrl', 'm')
         time.sleep(2)
         pyautogui.click(2644, 146)
+        time.sleep(1)
         pyautogui.write(name_proyect + ".mp4")
+        time.sleep(1)
         pyautogui.click(2424, 203)
         time.sleep(1)
         pyautogui.click(2569, 100)

@@ -12,6 +12,9 @@ inside_color = '#000000'
 # Definir la ruta de la carpeta que contiene los audios
 main_dir_path = "D:\\01_edicion_automatizada\\audio_scripts"
 
+# Definir la ruta del directorio de destino
+destination_dir_path = "D:\\01_edicion_automatizada\\after_effects_terminado"
+
 # Recorre todos los directorios en la ruta principal
 for folder_name in os.listdir(main_dir_path):
     folder_path = os.path.join(main_dir_path, folder_name)
@@ -181,5 +184,9 @@ for folder_name in os.listdir(main_dir_path):
         pyautogui.click(3809, 8)
         #pyautogui.hotkey('alt', 'f4')
         time.sleep(5)
+        
     #---------------------------------------------------------------------------------------------------------
+        # Mueve la carpeta al directorio de destino después de terminar de editar
+        shutil.move(folder_path, os.path.join(destination_dir_path, os.path.basename(folder_path)))
+        
         #Se repite el proceso para cada carpeta en la ruta principal

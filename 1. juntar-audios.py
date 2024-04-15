@@ -110,7 +110,7 @@ for folder_name in os.listdir(main_dir_path):
 
     #TODO Cambiar el (Full album) por el ep, compilacion o cualquiera segun sea la epoca
     if audio_genres and audio_years and band_names and album_names: 
-        text = f"{band_names[0]} - {album_names[0]} (Full Album)\n\nGenre: {audio_genres[0]}\nYear: {audio_years[0]}\n\n"
+        text = f"{band_names[0]} - {album_names[0]} (Full Album)\n\nGenre: {audio_genres[0]}\nYear: {audio_years[0]}\n\nTracklist:\n\n"
     else:
         text = "Unknown - Unknown\nGenre: Unknown\nYear: Unknown\n\n"
     total_duration = 0
