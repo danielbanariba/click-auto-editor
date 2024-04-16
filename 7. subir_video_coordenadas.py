@@ -3,10 +3,8 @@ import pyautogui
 import time
 import random
 import webbrowser
-import shutil
 
 root_dir = "D:\\01_edicion_automatizada\\audio_scripts"
-upload_dir = "D:\\01_edicion_automatizada\\upload_video"
 url_upload = 'https://www.youtube.com/upload'
 
 # Create a list of directories that contain at least one .mp4 file
@@ -21,13 +19,6 @@ for _ in range(3):
     # Select a random directory
     dirpath = random.choice(dirs_with_videos)
     filenames = os.listdir(dirpath)
-
-    # Move the entire directory to the upload directory
-    shutil.move(dirpath, os.path.join(upload_dir, os.path.basename(dirpath)))
-
-    # Update the dirpath to the new location
-    dirpath = os.path.join(upload_dir, os.path.basename(dirpath))
-    filenames = os.listdir(dirpath)  # Update the filenames list to reflect the new directory location
 
     for filename in filenames:
         if filename.endswith('.mp4'):

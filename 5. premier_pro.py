@@ -61,7 +61,7 @@ for file_name in os.listdir(main_dir_path):
         pyautogui.write(name_proyect + ".aep") # nombre del archivo
         time.sleep(2)
         pyautogui.press('enter')
-        time.sleep(15)
+        time.sleep(13)
         # Esta parte se repite dos veces para evitar errores
         pyautogui.click(2730, 419)
         pyautogui.click(2947, 732)
@@ -69,14 +69,14 @@ for file_name in os.listdir(main_dir_path):
         pyautogui.click(2947, 732)
         time.sleep(2)
         pyautogui.hotkey('ctrl', 'i') # importarmos el intro del video
-        time.sleep(20)
+        time.sleep(45)
         pyautogui.click(2333, 102)
         pyautogui.write(ruta_intro) # ruta del intro
         pyautogui.press('enter')
         time.sleep(2)
         pyautogui.click(2175, 543)
         pyautogui.write("Intro_Daniel_Banariba.aep")
-        time.sleep(2)
+        time.sleep(5)
         pyautogui.press('enter')
         time.sleep(2)
         # Esta parte se repite dos veces para evitar errores
