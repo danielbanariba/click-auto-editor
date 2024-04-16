@@ -3,39 +3,44 @@ import pyautogui
 import time
 import random
 import webbrowser
-import os
+import shutil
 
-# Directorio raíz donde comenzar la búsqueda
 root_dir = "D:\\01_edicion_automatizada\\audio_scripts"
-
+upload_dir = "D:\\01_edicion_automatizada\\upload_video"
 url_upload = 'https://www.youtube.com/upload'
 
-#---------------------------------------------------------------------------------------------------------
-    # Primera parte: Abrir 7 ventanas en blanco en el navegador
+# Create a list of directories that contain at least one .mp4 file
+dirs_with_videos = [dirpath for dirpath, dirnames, filenames in os.walk(root_dir) if any(filename.endswith('.mp4') for filename in filenames)]
+
+# Primera parte: Abrir 7 ventanas en blanco en el navegador
 for _ in range(7):
     webbrowser.open_new_tab(url_upload)
 
-#TODO hacer la seleccion de los videos de manera aleatoria y que al momento de seleccionarlo lleve la carpeta a una nueva direccion que es el "D:\01_edicion_automatizada\upload_video"
-# Recorrer todas las subcarpetas y archivos en el directorio raíz
-for dirpath, dirnames, filenames in os.walk(root_dir):
-    # Recorrer todos los archivos en la carpeta actual
+# Process only 3 videos
+for _ in range(3):
+    # Select a random directory
+    dirpath = random.choice(dirs_with_videos)
+    filenames = os.listdir(dirpath)
+
+    # Move the entire directory to the upload directory
+    shutil.move(dirpath, os.path.join(upload_dir, os.path.basename(dirpath)))
+
+    # Update the dirpath to the new location
+    dirpath = os.path.join(upload_dir, os.path.basename(dirpath))
+    filenames = os.listdir(dirpath)  # Update the filenames list to reflect the new directory location
+
     for filename in filenames:
-        # Si el archivo es un .mp4, procesarlo
         if filename.endswith('.mp4'):
             print(os.path.join(dirpath, filename))
-
-            # Buscar el archivo .txt en la misma carpeta
             for txt_filename in filenames:
                 if txt_filename.endswith('.txt'):
-                    # Leer el contenido del archivo .txt
                     with open(os.path.join(dirpath, txt_filename), 'r', encoding='utf-8') as f:
                         content = f.read()
 
-                    # Dividir el contenido en título y descripción
-                    paragraphs = content.split('\n\n')  # Supone que los párrafos están separados por dos saltos de línea
+                    paragraphs = content.split('\n\n')
                     titulo_video = paragraphs[0]
                     descripcion_video = '\n\n'.join(paragraphs[1:])
-                    
+
                     # Segunda parte: Abrir Una nueva pestanna
                     pyautogui.click(3594, 18)
                     time.sleep(5)
@@ -47,6 +52,7 @@ for dirpath, dirnames, filenames in os.walk(root_dir):
                     #Tercera parte: Subir el video
                     pyautogui.click(2881, 505)
                     time.sleep(5)
+                    # Update the path to the new location of the video file
                     pyautogui.write(os.path.join(dirpath, filename))
                     pyautogui.press('enter')
                     time.sleep(5)

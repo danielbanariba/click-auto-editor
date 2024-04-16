@@ -23,8 +23,12 @@ for folder_name in os.listdir(main_dir_path):
         new_folder_path = folder_path.replace('–', '-')
         # Mueve el directorio si el nombre ha cambiado
         if folder_path != new_folder_path:
-            shutil.move(folder_path, new_folder_path)
-            folder_path = new_folder_path
+            try:
+                shutil.move(folder_path, new_folder_path)
+                folder_path = new_folder_path
+            except PermissionError:
+                print(f"PermissionError: The folder {folder_path} is currently in use by another process.")
+                continue
 
         # Use the folder_path as the ruta in your script
         ruta = folder_path

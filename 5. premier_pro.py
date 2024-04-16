@@ -28,7 +28,7 @@ for file_name in os.listdir(main_dir_path):
     
     #---------------------------------------------------------------------------------------------------------    
         # Segunda parte: Crear un nuevo proyecto
-        pyautogui.click(1989, 195) # hace clic en "New Project"
+        pyautogui.click(1992, 190) # hace clic en "New Project"
         time.sleep(2)
         random_numbers = str(random.randint(0, 9)) + str(random.randint(0, 9))
         pyautogui.write(name_proyect + random_numbers)
@@ -61,7 +61,7 @@ for file_name in os.listdir(main_dir_path):
         pyautogui.write(name_proyect + ".aep") # nombre del archivo
         time.sleep(2)
         pyautogui.press('enter')
-        time.sleep(30)
+        time.sleep(15)
         # Esta parte se repite dos veces para evitar errores
         pyautogui.click(2730, 419)
         pyautogui.click(2947, 732)
@@ -112,20 +112,21 @@ for file_name in os.listdir(main_dir_path):
         #Exportarlo a media encoder
         pyautogui.hotkey('ctrl', 'm')
         time.sleep(2)
-        pyautogui.click(2644, 146)
+        pyautogui.click(2424, 203) # Selecionar la ruta de guardado
+        time.sleep(1)
+        pyautogui.click(2569, 100) # Pone el nombre al video
+        pyautogui.write((path_render + "\\" + name_proyect)[:-2])
+        pyautogui.press('enter')
+        time.sleep(1)
+        pyautogui.click(2712, 548)
+        time.sleep(1)
+        pyautogui.click(2644, 146) # Pone el nombre al video (File Name)
         time.sleep(1)
         pyautogui.write(name_proyect + ".mp4")
         time.sleep(1)
-        pyautogui.click(2424, 203)
-        time.sleep(1)
-        pyautogui.click(2569, 100)
-        pyautogui.write((path_render + "\\" + name_proyect)[:-2])
-        pyautogui.press('enter')
-        pyautogui.click(2712, 548)
-        time.sleep(1)
         pyautogui.click(2496, 240)# preset
         time.sleep(2)
-        pyautogui.click(2406, 374) # 4k
+        pyautogui.click(2413, 537) # 4k
         time.sleep(2)
         pyautogui.click(3632, 1030) # Send to media encoder
         time.sleep(5)
