@@ -35,10 +35,9 @@ for _ in range(7):
     webbrowser.open_new_tab(pleca)
 time.sleep(30)
 
-# Process only 3 videos
-for _ in range(3):
-    # Select a random directory
-    dirpath = random.choice(dirs_with_videos)
+# Process all videos
+# Select a random directory
+for dirpath in dirs_with_videos:
     filenames = os.listdir(dirpath)
 
     for filename in filenames:
@@ -79,28 +78,28 @@ for _ in range(3):
                     time.sleep(5)
                     
                     #Quita parte: Publicar el video
-pyautogui.click(3296, 1001) #Click en siguiente
-time.sleep(1)
-pyautogui.click(3262, 520) #Añadir pantalla Final
-time.sleep(1)
-pyautogui.click(2546, 382) #Añadir elemento
-time.sleep(1)
-pyautogui.click(3285, 226) #Guardar
-time.sleep(5)
-pyautogui.click(3296, 1001) #Click en siguiente
-pyautogui.click(3296, 1001) #Click en siguiente
-time.sleep(1)
-pyautogui.click(2942, 767) #Programar
-pyautogui.click(2671, 603) #Fecha
-pyautogui.click(2671, 603) 
-pyautogui.hotkey('ctrl', 'a')
-time.sleep(1)
-pyautogui.write(publish_date_string)#Ponemos cualquier fecha aleatoria en el intervalo de 30 dias
-time.sleep(1)
-pyautogui.press('enter')
-time.sleep(1)
-pyautogui.click(2795, 604)
-pyautogui.hotkey('ctrl', 'a')
-pyautogui.write(publish_time_string)#Ponemos cualquier hora aleatoria con intervalo de 15 minutos
-pyautogui.press('enter')
-pyautogui.click(3294, 1005) #Programar
+                    pyautogui.click(3296, 1001) #Click en siguiente
+                    time.sleep(1)
+                    pyautogui.click(3262, 520) #Añadir pantalla Final
+                    time.sleep(1)
+                    pyautogui.click(2546, 382) #Añadir elemento
+                    time.sleep(1)
+                    pyautogui.click(3285, 226) #Guardar
+                    time.sleep(5)
+                    pyautogui.click(3296, 1001) #Click en siguiente
+                    pyautogui.click(3296, 1001) #Click en siguiente
+                    time.sleep(1)
+                    pyautogui.click(2942, 767) #Programar
+                    pyautogui.click(2671, 603) #Fecha
+                    pyautogui.click(2671, 603) 
+                    pyautogui.hotkey('ctrl', 'a')
+                    time.sleep(1)
+                    pyautogui.write(publish_date_string)#Ponemos cualquier fecha aleatoria en el intervalo de 30 dias
+                    time.sleep(1)
+                    pyautogui.press('enter')
+                    time.sleep(1)
+                    pyautogui.click(2795, 604)
+                    pyautogui.hotkey('ctrl', 'a')
+                    pyautogui.write(publish_time_string)#Ponemos cualquier hora aleatoria con intervalo de 15 minutos
+                    pyautogui.press('enter')
+                    pyautogui.click(3294, 1005) #Programar
