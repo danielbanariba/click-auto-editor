@@ -6,33 +6,15 @@ import webbrowser
 from datetime import datetime, timedelta
 import locale
 
-# Set the locale to Spanish
-locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")
-
-# Genera una fecha aleatoria dentro del próximo mes
-current_date = datetime.now()
-random_days = random.randint(1, 30)  # Genera un número aleatorio entre 1 y 30
-publish_date = current_date + timedelta(days=random_days)
-day = publish_date.strftime("%d")
-month = publish_date.strftime("%b").replace('.', '')  # Remove the period
-year = publish_date.strftime("%Y")
-publish_date_string = f"{day} {month} {year}"  # Convertir a formato "16 abr 2025"
-
-# Genera una hora aleatoria en intervalos de 15 minutos
-random_hour = random.randint(0, 23)  # Genera un número aleatorio entre 0 y 23
-random_minute = random.choice([0, 15, 30, 45])  # Elige un número aleatorio de la lista [0, 15, 30, 45]
-publish_time_string = f"{random_hour:02d}:{random_minute:02d}"  # Convertir a formato "14:30"
-
 root_dir = "D:\\01_edicion_automatizada\\upload_video"
 url_upload = 'https://www.youtube.com/upload'
-pleca = ' '
 
 # Create a list of directories that contain at least one .mp4 file
 dirs_with_videos = [dirpath for dirpath, dirnames, filenames in os.walk(root_dir) if any(filename.endswith('.mp4') for filename in filenames)]
 
 # Primera parte: Abrir 7 ventanas en blanco en el navegador
 for _ in range(7):
-    webbrowser.open_new_tab(pleca)
+    webbrowser.open_new_tab(url_upload)
 time.sleep(30)
 
 # Process all videos
@@ -47,6 +29,23 @@ for dirpath in dirs_with_videos:
                 if txt_filename.endswith('.txt'):
                     with open(os.path.join(dirpath, txt_filename), 'r', encoding='utf-8') as f:
                         content = f.read()
+                        
+                    # Set the locale to Spanish
+                    locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")
+
+                    # Genera una fecha aleatoria dentro del próximo mes
+                    current_date = datetime.now()
+                    random_days = random.randint(1, 7)  # Genera un número aleatorio entre 1 y 30
+                    publish_date = current_date + timedelta(days=random_days)
+                    day = publish_date.strftime("%d")
+                    month = publish_date.strftime("%b").replace('.', '')  # Remove the period
+                    year = publish_date.strftime("%Y")
+                    publish_date_string = f"{day} {month} {year}"  # Convertir a formato "16 abr 2025"
+
+                    # Genera una hora aleatoria en intervalos de 15 minutos
+                    random_hour = random.randint(0, 23)  # Genera un número aleatorio entre 0 y 23
+                    random_minute = random.choice([0, 15, 30, 45])  # Elige un número aleatorio de la lista [0, 15, 30, 45]
+                    publish_time_string = f"{random_hour:02d}:{random_minute:02d}"  # Convertir a formato "14:30"
 
                     paragraphs = content.split('\n\n')
                     titulo_video = paragraphs[0]
@@ -81,7 +80,7 @@ for dirpath in dirs_with_videos:
                     pyautogui.click(3296, 1001) #Click en siguiente
                     time.sleep(1)
                     pyautogui.click(3262, 520) #Añadir pantalla Final
-                    time.sleep(1)
+                    time.sleep(3)
                     pyautogui.click(2546, 382) #Añadir elemento
                     time.sleep(1)
                     pyautogui.click(3285, 226) #Guardar
