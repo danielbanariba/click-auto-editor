@@ -50,6 +50,10 @@ for dirpath in dirs_with_videos:
                     paragraphs = content.split('\n\n')
                     titulo_video = paragraphs[0]
                     descripcion_video = '\n\n'.join(paragraphs[1:])
+                    
+                    # Agrega el título del video a la lista
+                    with open("bandas-subidas-al-canal.txt", "a", encoding='utf-8') as f:
+                        f.write((titulo_video)[:-13] + "\n")
 
                     # Segunda parte: Abrir Una nueva pestanna
                     pyautogui.click(3594, 18)
