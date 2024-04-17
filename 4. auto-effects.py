@@ -126,7 +126,7 @@ for folder_name in os.listdir(main_dir_path):
         pyautogui.write("C:\\Users\\banar\\Desktop\\click-auto-editor\\Affter Effects\\audio_to_keyframes.jsx")
         time.sleep(2)
         pyautogui.press('enter')
-        time.sleep(50)
+        time.sleep(75)
     
     #---------------------------------------------------------------------------------------------------------
         # Septima parte: Darle movimiento a la imagen
@@ -187,10 +187,13 @@ for folder_name in os.listdir(main_dir_path):
         #Ultima parte: Cerrar Adobe After Effects
         pyautogui.click(3809, 8)
         #pyautogui.hotkey('alt', 'f4')
-        time.sleep(5)
+        time.sleep(10)
         
     #---------------------------------------------------------------------------------------------------------
         # Mueve la carpeta al directorio de destino después de terminar de editar
-        shutil.move(folder_path, os.path.join(destination_dir_path, os.path.basename(folder_path)))
+        try:
+            shutil.move(folder_path, os.path.join(destination_dir_path, os.path.basename(folder_path)))
+        except PermissionError:
+            print(f"PermissionError: No se puede mover la carpeta: {folder_path} Porque un archivo dentro de esta esta siendo utilizado por otro proceso.")
         
         #Se repite el proceso para cada carpeta en la ruta principal
