@@ -35,7 +35,7 @@ for dirpath in dirs_with_videos:
 
                     # Genera una fecha aleatoria dentro del próximo mes
                     current_date = datetime.now()
-                    random_days = random.randint(1, 7)  # Genera un número aleatorio entre 1 y 30
+                    random_days = random.randint(1, 30)  # Genera un número aleatorio entre 1 y 30
                     publish_date = current_date + timedelta(days=random_days)
                     day = publish_date.strftime("%d")
                     month = publish_date.strftime("%b").replace('.', '')  # Remove the period
