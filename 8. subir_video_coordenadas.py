@@ -12,14 +12,17 @@ url_upload = 'https://www.youtube.com/upload'
 # Create a list of directories that contain at least one .mp4 file
 dirs_with_videos = [dirpath for dirpath, dirnames, filenames in os.walk(root_dir) if any(filename.endswith('.mp4') for filename in filenames)]
 
+# Randomly select 5 directories
+selected_dirs = random.sample(dirs_with_videos, 3)
+
 # Primera parte: Abrir 7 ventanas en blanco en el navegador
-for _ in range(7):
-    webbrowser.open_new_tab(url_upload)
-time.sleep(30)
+# for _ in range(7):
+#     webbrowser.open_new_tab(url_upload)
+# time.sleep(30)
 
 # Process all videos
 # Select a random directory
-for dirpath in dirs_with_videos:
+for dirpath in selected_dirs:
     filenames = os.listdir(dirpath)
 
     for filename in filenames:
@@ -29,10 +32,8 @@ for dirpath in dirs_with_videos:
                 if txt_filename.endswith('.txt'):
                     with open(os.path.join(dirpath, txt_filename), 'r', encoding='utf-8') as f:
                         content = f.read()
-                        
                     # Set the locale to Spanish
                     locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")
-
                     # Genera una fecha aleatoria dentro del próximo mes
                     current_date = datetime.now()
                     random_days = random.randint(1, 30)  # Genera un número aleatorio entre 1 y 30
@@ -41,12 +42,10 @@ for dirpath in dirs_with_videos:
                     month = publish_date.strftime("%b").replace('.', '')  # Remove the period
                     year = publish_date.strftime("%Y")
                     publish_date_string = f"{day} {month} {year}"  # Convertir a formato "16 abr 2025"
-
                     # Genera una hora aleatoria en intervalos de 15 minutos
                     random_hour = random.randint(0, 23)  # Genera un número aleatorio entre 0 y 23
                     random_minute = random.choice([0, 15, 30, 45])  # Elige un número aleatorio de la lista [0, 15, 30, 45]
                     publish_time_string = f"{random_hour:02d}:{random_minute:02d}"  # Convertir a formato "14:30"
-
                     paragraphs = content.split('\n\n')
                     titulo_video = paragraphs[0]
                     descripcion_video = '\n\n'.join(paragraphs[1:])
@@ -54,7 +53,6 @@ for dirpath in dirs_with_videos:
                     # Agrega el título del video a la lista
                     with open("bandas-subidas-al-canal.txt", "a", encoding='utf-8') as f:
                         f.write((titulo_video)[:-13] + "\n")
-
                     # Segunda parte: Abrir Una nueva pestanna
                     pyautogui.click(3594, 18)
                     time.sleep(15)

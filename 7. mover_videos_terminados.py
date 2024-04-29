@@ -40,7 +40,7 @@ for filename in os.listdir(after_effects_dir):
 for filename in os.listdir(premier_pro_dir):
     if filename.endswith('.prproj'):
         # Remove the extension and the last two characters from the filename
-        filename_without_extension = filename[:-8]
+        filename_without_extension = os.path.splitext(filename)[0]
         if filename_without_extension == os.path.basename(premier_pro_dir):
             print(f"\nFile: {filename}")
             confirm = input("\nType 'YES' to move this file to the upload directory: ")

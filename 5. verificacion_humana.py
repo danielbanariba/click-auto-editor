@@ -27,5 +27,5 @@ for i in range(len(folder_names)):
     response = input("Esta en Youtube? ")
     if response.lower() == 'yes':
         shutil.rmtree(os.path.join('D:\\01_edicion_automatizada\\after_effects_terminado', folder_name))
-        
-# Me gustaria hacer un algoritmo que agarre los nombres de las carpetas y vaya eliminando los archivos que cuyos nombres no se encuentren en la carpeta
+    elif response.lower() == 'no':
+        shutil.move(os.path.join('D:\\01_edicion_automatizada\\after_effects_terminado', folder_name), 'D:\\01_edicion_automatizada\\audio_scripts')

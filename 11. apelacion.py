@@ -22,9 +22,9 @@ mensaje = "Hola nuevamente! Lastima que rechazaron mi solicitud, la razon por la
 firma = "Daniel Alejandro Barrientos Anariba"
 #------------------------------------------
 #------------------------------------------
-#apelar = 2542, 760
-apelar = 2596, 415
-entiendo_los_riesgos = 2433, 876
+apelar_abajo = 2542, 760
+apelar_arriba = 2596, 415
+entiendo_los_riesgos = 2432, 864
 nombre_y_apellido_coordenadas = 2540, 501
 nombre_y_apellido = "Daniel Alejandro Barrientos Anariba"
 dirreccion_postal_coordenadas = 3045, 498
@@ -42,11 +42,17 @@ codigo_postal_coordenadas = 3206, 658
 codigo_postal = "12101"
 
 # Resto de tu código
-for i in range(8):
+for i in range(9):
+    if keyboard.is_pressed('p'):
+        break
     pyautogui.click(seleccionar_cancion)  
     time.sleep(1)
-    pyautogui.click(apelar)
+    pyautogui.click(apelar_abajo)
+    pyautogui.click(apelar_arriba)
     pyautogui.click(continuar1)
+    pyautogui.click(3184, 708)
+    pyautogui.scroll(-1000)
+    time.sleep(1)
     pyautogui.click(entiendo_los_riesgos)
     pyautogui.click(continuar2)
     pyautogui.click(nombre_y_apellido_coordenadas)

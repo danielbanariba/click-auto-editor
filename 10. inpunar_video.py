@@ -1,5 +1,6 @@
 import pyautogui
 import time
+import keyboard
 
 continuar1 = 3287, 882
 continuar2 = 3287, 930
@@ -7,6 +8,7 @@ licencia = 2463, 564
 seleccionar_cancion = 3221, 694
 accepto_los_terminos = 2433, 772
 impugnar = 2763, 428
+impugnar2 = 2571, 762
 informacion_de_tu_licencia = 2640, 467
 click_firma = 2506, 818
 check1 = 2437, 653
@@ -21,10 +23,13 @@ firma = "Daniel Alejandro Barrientos Anariba"
 
 
 # Resto de tu código
-for i in range(10):
+for i in range(5):
+    if keyboard.is_pressed('p'):
+        break
     pyautogui.click(seleccionar_cancion)  
     time.sleep(1)
     pyautogui.click(impugnar)
+    pyautogui.click(impugnar2)
     pyautogui.click(continuar1)
     pyautogui.click(continuar2)
     pyautogui.click(licencia)
@@ -33,7 +38,7 @@ for i in range(10):
     pyautogui.click(continuar2)
     pyautogui.click(informacion_de_tu_licencia)
     pyautogui.write(mensaje)
-    time.sleep(3)
+    time.sleep(2)
     pyautogui.click(check1)
     pyautogui.click(check2)
     pyautogui.click(check3)
@@ -41,6 +46,6 @@ for i in range(10):
     pyautogui.write(firma)
     time.sleep(1)
     pyautogui.click(continuar2)
-    time.sleep(5)
+    time.sleep(4)
     pyautogui.click(cerrar)
-    time.sleep(5)
+    time.sleep(4)
