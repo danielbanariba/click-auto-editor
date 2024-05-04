@@ -41,14 +41,15 @@ Departamento = "Francisco Morazan"
 codigo_postal_coordenadas = 3206, 658
 codigo_postal = "12101"
 
-# Resto de tu código
-for i in range(9):
+num = int(input("Cuantas canciones deseas inpugnar? "))
+
+for i in range(num):
     if keyboard.is_pressed('p'):
         break
     pyautogui.click(seleccionar_cancion)  
     time.sleep(1)
-    pyautogui.click(apelar_abajo)
     pyautogui.click(apelar_arriba)
+    pyautogui.click(apelar_abajo)
     pyautogui.click(continuar1)
     pyautogui.click(3184, 708)
     pyautogui.scroll(-1000)

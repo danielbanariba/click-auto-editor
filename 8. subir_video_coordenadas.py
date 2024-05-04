@@ -5,15 +5,30 @@ import random
 import webbrowser
 from datetime import datetime, timedelta
 import locale
+import shutil  # Import the shutil module
 
 root_dir = "D:\\01_edicion_automatizada\\upload_video"
+uploading_dir = "D:\\01_edicion_automatizada\\upload_video\\00. videos_que_se_estan_subiendo"  # Define the uploading directory
 url_upload = 'https://www.youtube.com/upload'
 
 # Create a list of directories that contain at least one .mp4 file
-dirs_with_videos = [dirpath for dirpath, dirnames, filenames in os.walk(root_dir) if any(filename.endswith('.mp4') for filename in filenames)]
+dirs_with_videos = [dirpath for dirpath, dirnames, filenames in os.walk(root_dir) 
+                    if any(filename.endswith('.mp4') for filename in filenames) 
+                    and "00. videos_que_se_estan_subiendo" not in dirpath]  # Exclude the uploading directory
 
-# Randomly select 5 directories
-selected_dirs = random.sample(dirs_with_videos, 3)
+# Randomly select 7 directories
+selected_dirs = random.sample(dirs_with_videos, 7)
+
+# Move the selected directories to the uploading directory and update selected_dirs
+for i, dirpath in enumerate(selected_dirs):
+    new_dirpath = shutil.move(dirpath, uploading_dir)
+    selected_dirs[i] = new_dirpath  # Update the path in selected_dirs
+
+# Sort selected_dirs in normal order
+selected_dirs.sort()
+
+# Now, change the root directory to the uploading directory
+root_dir = uploading_dir
 
 # Primera parte: Abrir 7 ventanas en blanco en el navegador
 # for _ in range(7):
@@ -24,7 +39,6 @@ selected_dirs = random.sample(dirs_with_videos, 3)
 # Select a random directory
 for dirpath in selected_dirs:
     filenames = os.listdir(dirpath)
-
     for filename in filenames:
         if filename.endswith('.mp4'):
             print(os.path.join(dirpath, filename))
@@ -55,12 +69,12 @@ for dirpath in selected_dirs:
                         f.write((titulo_video)[:-13] + "\n")
                     # Segunda parte: Abrir Una nueva pestanna
                     pyautogui.click(3594, 18)
-                    time.sleep(15)
+                    time.sleep(7)
                     pyautogui.click(3231, 64)
                     pyautogui.write(url_upload)
                     pyautogui.press('enter')
                     time.sleep(5)
-                
+                    
                     #Tercera parte: Subir el video
                     pyautogui.click(2881, 505)
                     time.sleep(5)

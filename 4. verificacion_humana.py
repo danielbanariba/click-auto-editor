@@ -8,7 +8,7 @@ import time
 def get_folder_names(path):
     return [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
 
-folder_names = get_folder_names('D:\\01_edicion_automatizada\\after_effects_terminado')
+folder_names = get_folder_names('D:\\01_edicion_automatizada\\audio_scripts')
 
 for i in range(len(folder_names)):
     folder_name = folder_names[i]
@@ -26,6 +26,6 @@ for i in range(len(folder_names)):
 
     response = input("Esta en Youtube? ")
     if response.lower() == 'yes':
-        shutil.rmtree(os.path.join('D:\\01_edicion_automatizada\\after_effects_terminado', folder_name))
+        shutil.rmtree(os.path.join('D:\\01_edicion_automatizada\\audio_scripts', folder_name))
     elif response.lower() == 'no':
-        shutil.move(os.path.join('D:\\01_edicion_automatizada\\after_effects_terminado', folder_name), 'D:\\01_edicion_automatizada\\audio_scripts')
+        shutil.move(os.path.join('D:\\01_edicion_automatizada\\audio_scripts', folder_name), 'D:\\01_edicion_automatizada\\audio_scripts')

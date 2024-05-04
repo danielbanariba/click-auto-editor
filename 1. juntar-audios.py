@@ -36,13 +36,13 @@ for folder_name in os.listdir(main_dir_path):
         album_names = []  
 
         # Si existe un archivo de audio en la carpeta, ignora la carpeta
-        audio_files = [file_name for file_name in os.listdir(folder_path) if file_name.endswith((".mp3", ".flac"))]
+        audio_files = [file_name for file_name in os.listdir(folder_path) if file_name.endswith((".mp3", ".flac", ".wav"))]
         if len(audio_files) <= 1:
             continue  
         
         for file_name in audio_files:
             # Verificar si el archivo es un audio
-            if file_name.endswith((".mp3", ".flac")):
+            if file_name.endswith((".mp3", ".flac", ".wav")):
                 # Abrir el audio y agregarlo a la lista
                 audio_path = os.path.join(folder_path, file_name)
                 audio = AudioSegment.from_file(audio_path)
@@ -117,6 +117,9 @@ for folder_name in os.listdir(main_dir_path):
 
     # Agrega el nombre de cada audio y su duración al archivo de texto
     for i, audio in enumerate(audios):
+        # Agrega 8 segundos solo al inicio de la primera canción por el intro del video 
+        if i == 0:
+            total_duration += 8
         minutes, seconds = divmod(total_duration, 60)
         if i < len(audios):
             total_duration += audio_durations[i]
