@@ -41,7 +41,7 @@ Departamento = "Francisco Morazan"
 codigo_postal_coordenadas = 3206, 658
 codigo_postal = "12101"
 
-num = int(input("Cuantas canciones deseas inpugnar? "))
+num = int(input("Cuantas canciones deseas apelar? "))
 
 for i in range(num):
     if keyboard.is_pressed('p'):
