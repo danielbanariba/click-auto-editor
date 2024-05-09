@@ -16,8 +16,10 @@ dirs_with_videos = [dirpath for dirpath, dirnames, filenames in os.walk(root_dir
                     if any(filename.endswith('.mp4') for filename in filenames) 
                     and "00. videos_que_se_estan_subiendo" not in dirpath]  # Exclude the uploading directory
 
+num = int(input("Cuantas videos desea subir hoy? "))
+
 # Randomly select 7 directories
-selected_dirs = random.sample(dirs_with_videos, 2)
+selected_dirs = random.sample(dirs_with_videos, num)
 
 # Move the selected directories to the uploading directory and update selected_dirs
 for i, dirpath in enumerate(selected_dirs):

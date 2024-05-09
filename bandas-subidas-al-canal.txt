@@ -32,15 +32,15 @@ Funeral Mist - Maranatha
 Landmine Marathon - Sovereign Descent
 Desecrated Dreams - Die!mensions
 Desecration - Gore and Perversion 2
-Decomposition Of Entrails - Abnormality (Instrumental Edition)Dark Fortress - Tales from Eternal Dusk (320)
-Cobalt 60 - The Grim Defiance (320)
+Decomposition Of Entrails - Abnormality (Instrumental Edition)Dark Fortress - Tales from Eternal Dusk
+Cobalt 60 - The Grim Defiance
 Destinity - In Excelsis Dementia
 Неживой - Пять Башен
 Decomposition Of Entrails - Abnormality (Instrumental Edition)
 Devourer - Dawn of Extinction
 Deserted Fear - Drowned By Humanity
 Darkmoon - Apocalyptic Syndrome
-Disillumination - Into the Darkness of the Eternal Word (320)
+Disillumination - Into the Darkness of the Eternal Word
 Maleït - Maleïnt el Món
 Evil Warriors - Expressions Of Endless Dreams
 Eminenz - Nemesis Noctura
@@ -52,7 +52,7 @@ Clandestine Revelation - Desecrated Existence (EP)
 Eminenz - Nemesis Noctura
 Maleït - Maleïnt el Món
 Diocletian - Amongst the Flames of a Burning God
-Echidna - All Dead (320)
+Echidna - All Dead
 In Hell - Satanica Mundi
 Crest Of Darkness - Give Us The Power To Do Your Evil
 Hornwood Fell - Cursed Thoughts - Part I
@@ -67,7 +67,7 @@ Hukutus - Oksitosiini
 In The Fire - The Living Horror Show
 Void Dweller - Night in Hell
 Earth Rot - Follow The Black Smoke
-Hierarchy - Hierarchy (320)
+Hierarchy - Hierarchy
 Granulocytic Blastoma - Moments Of Tarsotomy
 Doombringer - The Grand Sabbath
 Fractal Reality - A Plague For Eternity
@@ -87,11 +87,11 @@ Dei Aemeth - Apotheosis
 Hellfire - Thirty Five Stairs
 Ichor - Hadal Ascending
 Front - Iron Overkill
-Horned Almighty - To Fathom the Master's Grand Design (320)
+Horned Almighty - To Fathom the Master's Grand Design
 Ichor - Hadal Ascending
 Hellfire - Thirty Five Stairs
 Hunting the Beast - When Night Falls...
-Embodied - Perception Perverse (320)
+Embodied - Perception Perverse
 Crest Of Darkness - In The Presence Of Death
 Fractal Reality - A Plague For Eternity
 Devourer - Raptus
@@ -108,16 +108,16 @@ Freakhate - It Comes from the Grave
 Infesticyde - Infesticyde
 Markarth - Curse of Origins
 Errorgeist - Agendas Elite
-Dispyt - Den ständigt närvarande ångesten (320)
+Dispyt - Den ständigt närvarande ångesten
 Haunter - Thrinodía (Remixed & Remastered 2020)
 Darkmoon - Decline
 Kafirun - Eschaton
 Tanvarpmenkv - Goatizm
 Unknown - Unknown
-Dark Fortress - Profane Genocidal Creations (320)
+Dark Fortress - Profane Genocidal Creations
 Hekseri - Hekseri
 In Shadows and Dust - A Fleur de Peau
-Martyrium - Ideology of Death (320)
+Martyrium - Ideology of Death
 Kyterion - Inferno I
 Hands Of Thieves - Feasting On Dark Intentions
 Hacavitz - Nex Nihil
@@ -127,34 +127,86 @@ Hot Graves - Magnificent Death
 Hell-Born - Hellblast
 Noctem - Credo Certe Ne Cras
 Feretral - Cataclysmic Oppositors Vomiting Iconoclastic Diseases
-Martyrium - Ideology of Death (320)
+Martyrium - Ideology of Death
 Horror God - Planet of Ruins
 Nebulah - Down of Knowledge
-Occult Burial - Burning Eerie Lore (320)
+Occult Burial - Burning Eerie Lore
 North - Czekajac Na Sztorm
 Kaoteon - Veni Vedi Vomui
 Hot Graves - Magnificent Death
 EQUINOXIO - Ritos Abominables
-Mysthicon - Silva - Oculis - Corvi (320)
+Mysthicon - Silva - Oculis - Corvi
 Hellbomb - Hellbomb
 Lycanthropy - Hannibal Ante Portas
 Usurper - Necronemesis
-Coprolith - Cold Grief Relief (320)
+Coprolith - Cold Grief Relief
 Sprengkopf - Sprengkopf
 Kalibas - Rumors of Our Demise Have Been Barely Exaggerated (Watchmen Mix)
 Kyterion - Inferno I
-Mordenom - Agnvs Dei (320)
+Mordenom - Agnvs Dei
 Mutilation Rites - Empyrean
-Necrophobic - Dawn of the Damned (320)
+Necrophobic - Dawn of the Damned
 Buried Dreams - Beyond Your Mind
 Grief of Emerald - Christian Termination
 Haunter - Thrinodía (Remixed & Remastered 2020)
-Horned Almighty - To Fathom the Master's Grand Design (320)
+Horned Almighty - To Fathom the Master's Grand Design
 Unknown - Unknown
 Mortuary - Sublime the Decline
-Nastergal - The Untold War
 Crest of Darkness - Sinister Scenario
 Eradication of the Unworthy Infants - Change is Good
 Obscene Eulogy - Defining Hate - The Truth Undead
-Handful of Hate - To Perdition (320)
+Handful of Hate - To Perdition
 Iria - Pagan Terror
+Gloria Morti - Lifestream Corrosion
+Kommandant - Stormlegion
+Machina Baphometa - Shame of the Proud Angel
+Mordenom - Agnvs Dei 
+Nemoris - Esoteric Visions of the Old Ritual
+Vanum - Ageless Fire
+Mortals - Cursed To See The Future
+Mechanism - Inspired Horrific
+Miscreation - AeOnd
+Nyogthaeblisz - Abrahamic Godhead Besieged by Adversarial Usurpation
+Panzergod - Deathshrouds Bestowed
+Buried Dreams - Beyond Your Mind
+In Shadows and Dust - A Fleur de Peau
+Misanthropic Might - Feindt
+Overnoise - Lethal Ways To Hell's Kitchen Doors
+Postumo Lumbre - Empirikkal
+Hacavitz - Nex Nihil
+Unknown - Unknown
+Mordenom - Agnvs Dei
+Nastergal - The Untold War
+Nekroza - Procesija Ucrvanih
+Nemoris - Esoteric Visions of the Old Ritual
+Odem - Timeless Past Above
+Otargos - No God, No Satan
+Outlaw - Path to Darkness
+Profundi - The Omega Rising
+Realm Of Carnivora - Vikati Vari Te Palgel, Saabub Aeg Ja Teras Langeb... Vengeance Shall Come !!!
+Coprolith - Cold Grief Relief (320)
+Usurper - Necronemesis
+Eradication of the Unworthy Infants - Change is Good
+Horned Almighty - To Fathom the Master's Grand Design (320)
+Obscene Eulogy - Defining Hate - The Truth Undead
+Order From Chaos - Stillbirth Machine
+Revel Decay - Eternal Decay
+Machina Baphometa - Shame of the Proud Angel
+Overnoise - Lethal Ways To Hell's Kitchen Doors
+Rudra - The Aryan Crusade
+Sad - Abandoned And Forgotten
+Gloria Morti - Lifestream Corrosion
+Grief of Emerald - Christian Termination
+Vanum - Ageless Fire
+Realm Of Carnivora - Vikati Vari Te Palgel, Saabub Aeg Ja Teras Langeb... Vengeance Shall Come !!!
+Deathening - Antifascist Death Metal
+Mechanism - Inspired Horrific
+Philip H. Anselmo & The Illegals - Choosing Mental Illness As A Virtue
+Psycophobia - Reality of a Psychotic Underworld
+Serpent Noir - Death Clan OD (320)
+Shrine of Insanabilis - Vast Vortex Litanies (320)
+Siaskel - Jatenentopen Thejin
+Siaskel - Haruwen Airen
+Sinsaenum - Repulsion for Humanity
+Unknown - Unknown
+The Black Sorcery - Wolven Degrade
