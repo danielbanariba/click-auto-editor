@@ -5,6 +5,7 @@ import shutil
 folder_path = "D:\\01_edicion_automatizada\\audio_scripts"
 save_premier_pro_path = "C:\\Users\\banar\\Desktop\\save_premier_pro"
 save_after_effects_path = "C:\\Users\\banar\\Desktop\\save_after_effects"
+upload_video_path = "D:\\01_edicion_automatizada\\upload_video"
 
 # Recorre todas las subcarpetas y archivos en la carpeta de origen
 for root, dirs, files in os.walk(folder_path):
@@ -29,3 +30,6 @@ for root, dirs, files in os.walk(folder_path):
                         if save_file.split('.')[0][:-2] == shortened_name:
                             # Mueve el archivo a la carpeta correspondiente
                             shutil.move(os.path.join(save_folder, save_file), os.path.join(root, save_file))
+
+            # Mueve la carpeta que contiene el video a la carpeta de carga de video
+            shutil.move(root, upload_video_path)
