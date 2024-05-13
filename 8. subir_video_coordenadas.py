@@ -50,10 +50,10 @@ for dirpath in selected_dirs:
                         content = f.read()
                     # Set the locale to Spanish
                     locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")
-                    # Genera una fecha aleatoria dentro del próximo mes
-                    current_date = datetime.now()
+                    # Establece una fecha base en el año 2025
+                    base_date = datetime(2026, 1, 1)
                     random_days = random.randint(1, 30)  # Genera un número aleatorio entre 1 y 30
-                    publish_date = current_date + timedelta(days=random_days)
+                    publish_date = base_date + timedelta(days=random_days)
                     day = publish_date.strftime("%d")
                     month = publish_date.strftime("%b").replace('.', '')  # Remove the period
                     year = publish_date.strftime("%Y")
