@@ -19,6 +19,7 @@ cerrar2 = 3120, 690
 
 mensaje = "Hola! Lastimosamente no pude conseguir los permisos correspondientes del álbum debido a que no encontré correo de algún representante, integrante de la banda o de la banda misma para poder comunicarme con ustedes y hacer la solicitud, por eso mando este mensaje, para pedirles permiso de poder subir su musica a mi canal de YouTube, estaré complacido si se comunican conmigo y podamos llegar a un acuerdo! saludos desde Honduras!"
 #mensaje = "Hola, creo y reafirmo firmemente que se trata de un error, ya que solo es un ritmo normal de bateria, no es una pista de audio protegida por derechos de autor, por favor, revisenlo y eliminen la reclamación de derechos de autor. Gracias."
+#mensaje = "Hola miembros de arsenal! solo queria pedirles permiso para publicar su album, ya me conocen, soy Daniel Banariba :) el que anda con ustedes a todos lados y que les anda grabando los conciertos."
 
 firma = "Daniel Alejandro Barrientos Anariba"
 

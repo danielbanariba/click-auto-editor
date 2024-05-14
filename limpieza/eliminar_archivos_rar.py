@@ -5,7 +5,7 @@ from unidecode import unidecode
 
 
 def eliminar_archivos_rar(root_dir):
-    compression_extensions = ['.zip', '.rar', '.7z', '.tar', '.gz', 'zipx', '.001', '.zipx']
+    compression_extensions = ['.zip', '.rar', '.7z', '.tar', '.gz', '.001', '.zipx']
 
     # Directorio raíz desde donde comenzar la búsqueda
     root_dir = root_dir

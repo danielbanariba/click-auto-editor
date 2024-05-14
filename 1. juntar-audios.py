@@ -60,7 +60,7 @@ for folder_name in os.listdir(main_dir_path):
                     audio_durations.append(0)  # Add a default duration if audio_file is None
                 
                 # Extraer el año y el género solo de la primera canción
-                if not audio_years and not audio_genres and not band_names and not album_names and audio_file is not None:
+                if not audio_years and not audio_genres and not band_names and not album_names and audio_file is not None and audio_file.tag is not None:
                     year = audio_file.tag.getBestDate() if audio_file.tag.getBestDate() else "Unknown"
                     audio_years.append(year)
                     genre = audio_file.tag.genre if audio_file.tag.genre else "Unknown"
