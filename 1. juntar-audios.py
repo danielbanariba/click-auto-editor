@@ -11,7 +11,7 @@ AudioSegment.converter = "C:\\Program Files\\FFmpeg\\bin\\ffmpeg.exe"
 AudioSegment.ffmpeg = "C:\\Program Files\\FFmpeg\\bin\\ffprobe.exe"
 
 # Definir la ruta de la carpeta que contiene los audios
-main_dir_path = "D:\\01_edicion_automatizada\\audio_scripts"
+main_dir_path = "D:\\01_edicion_automatizada\\02_juntar_audios"
 
 # Recorre todos los directorios en la ruta principal
 for folder_name in os.listdir(main_dir_path):

@@ -45,9 +45,7 @@ main_dir_path = "D:\\01_edicion_automatizada\\audio_scripts"
             
 #             # Remove the first created image (2050x2050)
 #             os.remove(f"{nuevo_nombre}_2050x2050.{extension}")
-            
-            
-            
+
 #! IMPORTANTE!         
 # #Esto es bien raro, a mi siempre me ha funcionado el de arriba pero ahora ya no quiero funcionar la maldita esta, asi que si falla, descomentar el de abaajo
 
@@ -60,7 +58,7 @@ import stat
 # Definir la ruta de la carpeta principal
 main_dir_path = "D:\\01_edicion_automatizada\\YA"
 # Definir la ruta del directorio destino
-destination_dir_path = "D:\\01_edicion_automatizada\\audio_scripts"
+destination_dir_path = "D:\\01_edicion_automatizada\\verificacion"
 
 # Recorrer todos los directorios en la ruta principal
 for folder_name in os.listdir(main_dir_path):

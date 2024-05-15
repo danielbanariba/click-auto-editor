@@ -1,7 +1,7 @@
 import os
 import shutil
 
-ruta_principal = 'D:\\01_edicion_automatizada\\audio_scripts'
+ruta_principal = 'D:\\01_edicion_automatizada\\02_juntar_audios'
 ruta_temporal = 'D:\\01_edicion_automatizada\\Ya'
 ruta_sin_portada = 'D:\\01_edicion_automatizada\\no_tienen_portada'
 ruta_raro = 'D:\\01_edicion_automatizada\\raro'
