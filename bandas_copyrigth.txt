@@ -6,6 +6,7 @@ Carnage - Carnage's Ceremony
 Detest - Sacred Revelation
 Desecrated Dreams - Feelings Of Guilt
 Hierophant - Peste
+Eradication of the Unworthy Infants - Change is Good
 Eminenz - Nemesis Noctura
 Desecration - Gore and Perversion 2
 Denouncement Pyre - Forever Burning 
@@ -13,10 +14,12 @@ Darkmoon - Apocalyptic Syndrome
 Dark Fortress - Tales from Eternal Dusk
 Doombringer - The Grand Sabbath
 Miscreation - AeOnd
+Nastergal - The Untold War
 Godtoth - Satanic Holocaust 
 Perdition Winds - Aura of Suffering
 Feretral - Cataclysmic Oppositors Vomiting Iconoclastic Diseases
 Earth Rot - Follow The Black Smoke
+Hacavitz - Nex Nihil
 Hukutus - Oksitosiini
 Lantern - II: Morphosis
 Hell-Born - Legacy Of The Nephilim
@@ -25,3 +28,5 @@ Destinity - The Inside
 Obscene Eulogy - Defining Hate - The Truth Undead
 Gloria Morti - Lifestream Corrosion
 Outlaw - Path to Darkness
+Odem - Timeless Past Above
+Infest - Everlasting Genocide
