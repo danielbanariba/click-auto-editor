@@ -43,6 +43,8 @@ codigo_postal = "12101"
 
 num = int(input("Cuantas canciones deseas apelar? "))
 
+#time.sleep(10)
+
 for i in range(num):
     if keyboard.is_pressed('p'):
         break

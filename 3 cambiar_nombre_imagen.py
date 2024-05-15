@@ -58,7 +58,9 @@ from effects.sombra import add_shadow
 import stat
 
 # Definir la ruta de la carpeta principal
-main_dir_path = "D:\\01_edicion_automatizada\\audio_scripts"
+main_dir_path = "D:\\01_edicion_automatizada\\YA"
+# Definir la ruta del directorio destino
+destination_dir_path = "D:\\01_edicion_automatizada\\audio_scripts"
 
 # Recorrer todos los directorios en la ruta principal
 for folder_name in os.listdir(main_dir_path):
@@ -119,3 +121,6 @@ for folder_name in os.listdir(main_dir_path):
                 
                 # Eliminar la imagen redimensionada creada primero (2050x2050)
                 os.remove(f"{nuevo_nombre}_2050x2050.{extension}")
+
+        # Mover la carpeta procesada al directorio destino
+        shutil.move(folder_path, os.path.join(destination_dir_path, folder_name))

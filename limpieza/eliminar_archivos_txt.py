@@ -1,7 +1,7 @@
 import os
 
 # Extensiones de archivos para eliminar
-extensions_to_delete = [".pdf", ".txt", ".log", ".url"]
+extensions_to_delete = [".pdf", ".txt", ".log", ".url", ".cue", ".mht", ".db", ".nfo", ".m3u", ".pls", ".sfv"]
 
 def eliminar_archivos_txt(root_dir):
     # Variable para rastrear si se ha eliminado algún archivo
