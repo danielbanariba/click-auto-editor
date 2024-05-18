@@ -84,18 +84,18 @@ for folder_name in os.listdir(main_dir_path):
         # Tercera parte: Importar los archivos que se va a editar
         pyautogui.click(2559, 100)
         pyautogui.write(ruta) # Ruta de la carpeta que contiene los archivos a editar
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.press('enter')  # confirma la nueva direccion
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.click(2721, 274)
         pyautogui.hotkey('ctrl', 'a') #seleccionar todos los archivos en la carpeta
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.keyDown('ctrl') # No selecionar el archivo txt
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.click(2262, 218) 
         pyautogui.keyUp('ctrl')
         pyautogui.press('enter')
-        time.sleep(3)
+        time.sleep(2)
         pyautogui.press('enter')
     
     #---------------------------------------------------------------------------------------------------------
@@ -103,16 +103,16 @@ for folder_name in os.listdir(main_dir_path):
         pyautogui.mouseDown(2133, 903)
         pyautogui.moveTo(2134, 853, duration=1)
         pyautogui.mouseUp()
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.hotkey('ctrl', 'x') # Elimina los archivos de la composicion ya que el suprimir no funciona
-        time.sleep(2)
+        time.sleep(1)
     
     #---------------------------------------------------------------------------------------------------------
         # Quinta parte: Llevar los archivos a la composicion
         pyautogui.mouseDown(1995, 336)
         pyautogui.moveTo(2013, 282, duration=1)
         pyautogui.mouseUp()
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.mouseDown(2013, 282)  
         pyautogui.moveTo(2127, 864, duration=1)  
         pyautogui.mouseUp()  
@@ -122,11 +122,11 @@ for folder_name in os.listdir(main_dir_path):
         pyautogui.click(1945, 38)
         pyautogui.click(1984, 541)
         pyautogui.click(2317, 539)
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.write("C:\\Users\\banar\\Desktop\\click-auto-editor\\Affter Effects\\audio_to_keyframes.jsx")
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.press('enter')
-        time.sleep(75)
+        time.sleep(60)
     
     #---------------------------------------------------------------------------------------------------------
         # Septima parte: Darle movimiento a la imagen
@@ -135,32 +135,32 @@ for folder_name in os.listdir(main_dir_path):
         pyautogui.click(2317, 539)
         time.sleep(2)
         pyautogui.write("C:\\Users\\banar\\Desktop\\click-auto-editor\\Affter Effects\\imagen_movimiento.jsx")
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.press('enter')
-        time.sleep(2)
+        time.sleep(1)
     
     #---------------------------------------------------------------------------------------------------------
         # Octava parte: Crear el espectro de audio
         pyautogui.click(1945, 38)
         pyautogui.click(1984, 541)
         pyautogui.click(2317, 539)
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.write("C:\\Users\\banar\\Desktop\\click-auto-editor\\Affter Effects\\espectro_de_audio.jsx")
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.press('enter')
-        time.sleep(2)
+        time.sleep(1)
         
     #---------------------------------------------------------------------------------------------------------
         # Novena parte: Cambiar de color en el espectro del audio
         pyautogui.click(2107, 82)
         pyautogui.click(2106, 363) # Abrimos el menu del Inside Color
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.write(inside_color) # Escribimos el color en hexadecimal 
         pyautogui.press('enter')
         
         pyautogui.click(2107, 82)
         pyautogui.click(2112, 382) # Abrimos el menu del Outside Color
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.write(inside_color) # Escribimos el color en hexadecimal 
         pyautogui.press('enter')
         pyautogui.click(2625, 1002)
@@ -168,26 +168,26 @@ for folder_name in os.listdir(main_dir_path):
     #---------------------------------------------------------------------------------------------------------    
         # Decima parte: Guardar el proyecto
         pyautogui.hotkey('ctrl', 'shift', 's')
-        time.sleep(2)
+        time.sleep(1)
         random_numbers = str(random.randint(0, 9)) + str(random.randint(0, 9))
         pyautogui.write(folder_name + random_numbers)
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.click(2506, 108)
         pyautogui.write("C:\\Users\\banar\\Desktop\\save_after_effects")
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.press('enter')
-        time.sleep(2)
+        time.sleep(1)
         pyautogui.press('enter')
-        time.sleep(2)
+        time.sleep(1)
         print("El proyecto " + folder_name + " ha sido editado excitosamente")
         pyautogui.click(2722, 547)
-        time.sleep(2)
+        time.sleep(1)
 
     #---------------------------------------------------------------------------------------------------------
         #Ultima parte: Cerrar Adobe After Effects
         pyautogui.click(3809, 8)
         #pyautogui.hotkey('alt', 'f4')
-        time.sleep(10)
+        time.sleep(8)
         
     #---------------------------------------------------------------------------------------------------------
         # Mueve la carpeta al directorio de destino después de terminar de editar
@@ -195,5 +195,5 @@ for folder_name in os.listdir(main_dir_path):
             shutil.move(folder_path, os.path.join(destination_dir_path, os.path.basename(folder_path)))
         except PermissionError:
             print(f"PermissionError: No se puede mover la carpeta: {folder_path} Porque un archivo dentro de esta esta siendo utilizado por otro proceso.")
-        
+        time.sleep(3)
         #Se repite el proceso para cada carpeta en la ruta principal

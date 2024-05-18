@@ -36,13 +36,13 @@ for folder_name in os.listdir(main_dir_path):
         album_names = []  
 
         # Si existe un archivo de audio en la carpeta, ignora la carpeta
-        audio_files = [file_name for file_name in os.listdir(folder_path) if file_name.endswith((".mp3", ".flac", ".wav"))]
+        audio_files = [file_name for file_name in os.listdir(folder_path) if file_name.endswith((".MP3",".Mp3", ".mp3", ".flac", ".wav", ".wma", ".m4a"))]
         if len(audio_files) <= 1:
             continue  
         
         for file_name in audio_files:
             # Verificar si el archivo es un audio
-            if file_name.endswith((".mp3", ".flac", ".wav")):
+            if file_name.endswith((".MP3",".Mp3", ".mp3", ".flac", ".wav", ".wma", ".m4a")):
                 # Abrir el audio y agregarlo a la lista
                 audio_path = os.path.join(folder_path, file_name)
                 audio = AudioSegment.from_file(audio_path)
@@ -71,7 +71,7 @@ for folder_name in os.listdir(main_dir_path):
                     album_names.append(album)
 
         # Verificar si existe alguna imagen en el directorio
-        image_formats = [".png", ".jpg", ".jpeg", ".jfif"]
+        image_formats = [".png", ".jpg", ".jpeg", ".jfif", ".gif"]
         has_image = any(file_name.endswith(tuple(image_formats)) for file_name in os.listdir(folder_path))
         
         # Si no existe ninguna imagen, recorrer la lista de audios

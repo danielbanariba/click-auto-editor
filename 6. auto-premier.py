@@ -3,15 +3,21 @@ import pyautogui
 import time
 import random
 
-# Definir la ruta de la carpeta que contiene los archvivos de after effects
+# Definir la ruta de la carpeta que contiene los archivos de after effects
 main_dir_path = "C:\\Users\\banar\\Desktop\\save_after_effects"
 ruta_intro = "C:\\Users\\banar\\OneDrive\\Documents\\Intro Daniel Banariba"
 path_render = "D:\\01_edicion_automatizada\\audio_scripts"
 
-# Recorre todos los archivos en la ruta principal
-for file_name in os.listdir(main_dir_path):
+# Obtener una lista de todas las carpetas en el directorio principal
+folders = [os.path.join(main_dir_path, f) for f in os.listdir(main_dir_path) if os.path.isdir(os.path.join(main_dir_path, f))]
+
+# Seleccionar una carpeta aleatoriamente de la lista
+selected_folder = random.choice(folders)
+
+# Recorre todos los archivos en la carpeta seleccionada aleatoriamente
+for file_name in os.listdir(selected_folder):
     if file_name.endswith('.aep'):
-        file_path = os.path.join(main_dir_path, file_name)
+        file_path = os.path.join(selected_folder, file_name)
 
         # Extraer el nombre del proyecto del archivo
         name_proyect = os.path.splitext(file_name)[0]
