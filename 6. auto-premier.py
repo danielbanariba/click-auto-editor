@@ -1,36 +1,35 @@
-import os
-import pyautogui
 import time
 import random
+import os
+import pyautogui
 
-# Definir la ruta de la carpeta que contiene los archivos de after effects
+# Definir la ruta de la carpeta que contiene los archivos de After Effects
 main_dir_path = "C:\\Users\\banar\\Desktop\\save_after_effects"
 ruta_intro = "C:\\Users\\banar\\OneDrive\\Documents\\Intro Daniel Banariba"
 path_render = "D:\\01_edicion_automatizada\\audio_scripts"
 
-# Obtener una lista de todas las carpetas en el directorio principal
-folders = [os.path.join(main_dir_path, f) for f in os.listdir(main_dir_path) if os.path.isdir(os.path.join(main_dir_path, f))]
+# Obtener todos los archivos .aep en la ruta principal
+aep_files = [file for file in os.listdir(main_dir_path) if file.endswith('.aep')]
 
-# Seleccionar una carpeta aleatoriamente de la lista
-selected_folder = random.choice(folders)
-
-# Recorre todos los archivos en la carpeta seleccionada aleatoriamente
-for file_name in os.listdir(selected_folder):
-    if file_name.endswith('.aep'):
-        file_path = os.path.join(selected_folder, file_name)
+# Recorre todos los archivos en la ruta principal
+for file_name in os.listdir(main_dir_path):
+    # Seleccionar un archivo .aep de forma aleatoria
+    if aep_files:  # Verificar si la lista no está vacía
+        file_name = random.choice(aep_files)
+        file_path = os.path.join(main_dir_path, file_name)
 
         # Extraer el nombre del proyecto del archivo
         name_proyect = os.path.splitext(file_name)[0]
 
         save_premier_pro = "C:\\Users\\banar\\Desktop\\save_premier_pro"
-    #---------------------------------------------------------------------------------------------------------
-        # Primera parte: Abrir premier pro
+        #---------------------------------------------------------------------------------------------------------
+        # Primera parte: Abrir Premier Pro
         pyautogui.press('winleft')  # abre el menú de inicio
         time.sleep(1)
         pyautogui.write('Premier')  # escribe el nombre del programa
         time.sleep(1)
         pyautogui.press('enter')  # abre el programa
-        time.sleep(14)  # espera a que el programa se abra
+        time.sleep(16)  # espera a que el programa se abra
     
     #---------------------------------------------------------------------------------------------------------    
         # Segunda parte: Crear un nuevo proyecto
@@ -38,17 +37,16 @@ for file_name in os.listdir(selected_folder):
         time.sleep(2)
         random_numbers = str(random.randint(0, 9)) + str(random.randint(0, 9))
         pyautogui.write(name_proyect + random_numbers)
-        pyautogui.click(2500, 108)
-        time.sleep(1)
-        pyautogui.click(2474, 205)
-        time.sleep(1)
-        pyautogui.click(2473, 238)
-        time.sleep(1)
-        pyautogui.click(2385, 272)
-        pyautogui.click(2568, 99)
-        time.sleep(1)
-        pyautogui.write(save_premier_pro)
-        time.sleep(1)
+        # pyautogui.click(2500, 108)
+        # time.sleep(1)
+        # pyautogui.click(2474, 205)
+        # time.sleep(1)
+        # pyautogui.click(2473, 238)
+        # time.sleep(1)
+        # pyautogui.click(2385, 272)
+        # pyautogui.click(2568, 99)
+        # time.sleep(1)
+        #pyautogui.write(save_premier_pro)
         pyautogui.press('enter')
         time.sleep(1)
         pyautogui.click(2700, 554)
@@ -94,19 +92,18 @@ for file_name in os.listdir(selected_folder):
         
         #jalamos los archivos a la linea de tiempo
         pyautogui.mouseDown(2239, 786)
-        pyautogui.moveTo(2650, 859, duration=1)
+        pyautogui.moveTo(2650, 859, duration=2)
         pyautogui.mouseUp()
-        time.sleep(1)
+        time.sleep(2)
         pyautogui.mouseDown(2035, 789)  
         pyautogui.moveTo(3210, 880, duration=2)  
         pyautogui.mouseUp()
         time.sleep(2)
         
         #ponemos la transicion vhs
-        pyautogui.click(2427, 662)
-        time.sleep(1)
-        pyautogui.click(2446, 776)
-        pyautogui.click(1977, 692)
+        pyautogui.click(2473, 664)
+        pyautogui.click(2492, 776)
+        pyautogui.click(1980, 691)
         pyautogui.write('vhs')
         #Arreglamos la transicion vhs
         pyautogui.mouseDown(2049, 894)
@@ -134,12 +131,10 @@ for file_name in os.listdir(selected_folder):
         time.sleep(2)
         pyautogui.click(2496, 240)# preset
         time.sleep(3)
-        pyautogui.click(2413, 537) # 4k
+        pyautogui.click(2408, 506) # 4k
         time.sleep(3)
         pyautogui.click(3632, 1030) # Send to media encoder
-        time.sleep(6)
-        #pyautogui.click(3723, 6)# Minimizar media encoder
-        #time.sleep(2)
+        time.sleep(10)
         pyautogui.click(3811, 2) # Cerramos premier pro
         pyautogui.press('enter')
         time.sleep(3)
