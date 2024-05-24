@@ -75,14 +75,14 @@ for file_name in os.listdir(main_dir_path):
         pyautogui.click(2947, 732)
         time.sleep(2)
         pyautogui.hotkey('ctrl', 'i') # importarmos el intro del video
-        time.sleep(65)
+        time.sleep(125)
         pyautogui.click(2333, 102)
         pyautogui.write(ruta_intro) # ruta del intro
         pyautogui.press('enter')
         time.sleep(2)
         pyautogui.click(2175, 543)
         pyautogui.write("Intro_Daniel_Banariba.aep")
-        time.sleep(5)
+        time.sleep(10)
         pyautogui.press('enter')
         time.sleep(2)
         # Esta parte se repite dos veces para evitar errores

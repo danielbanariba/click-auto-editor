@@ -36,6 +36,7 @@ for i in range(num):
     pyautogui.click(continuar1)
     pyautogui.click(continuar2)
     pyautogui.click(licencia)
+    time.sleep(0.8)
     pyautogui.click(continuar2)
     pyautogui.click(accepto_los_terminos)
     pyautogui.click(continuar2)
