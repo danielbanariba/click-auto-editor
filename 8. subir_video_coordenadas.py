@@ -97,6 +97,36 @@ for dirpath in selected_dirs:
                     #Quita parte: Publicar el video
                     pyautogui.click(3296, 1001) #Click en siguiente
                     time.sleep(1)
+                    # COMENTAR ABAJO SI ME QUITAN LA MONETIZACION
+                    #Activamos la monetizacion
+                    pyautogui.click(2689, 461)
+                    pyautogui.click(2689, 461)
+                    pyautogui.click(2801, 543) #Hecho
+                    pyautogui.click(2555, 642) #Revisar Colocacion de anuncios
+                    time.sleep(1)
+                    pyautogui.click(2754, 279) #Colocar anuncios automaticamente
+                    time.sleep(1)
+                    pyautogui.click(3170, 668) #Aceptar
+                    time.sleep(1)
+                    pyautogui.click(3276, 233) #Continuar
+                    time.sleep(1)
+                    pyautogui.click(3320, 994) #Click en siguiente
+                    pyautogui.click(3131, 497) #Click de la nada
+                    pyautogui.scroll(-1000)
+                    time.sleep(1)
+                    pyautogui.scroll(-1000)
+                    time.sleep(1)
+                    pyautogui.scroll(-1000)
+                    time.sleep(1)
+                    pyautogui.scroll(-1000)
+                    time.sleep(1)
+                    pyautogui.click(2467, 940) #Nada de lo anterior
+                    time.sleep(1)
+                    pyautogui.click(3126, 408) #Enviar calificacion
+                    time.sleep(2)
+                    pyautogui.click(3311, 998) #Siguiente
+                    time.sleep(1)
+                    # COMENTAR ARRIBA SI ME QUITAN LA MONETIZACION
                     pyautogui.click(3262, 520) #Añadir pantalla Final
                     time.sleep(3)
                     pyautogui.click(2546, 382) #Añadir elemento
@@ -104,19 +134,21 @@ for dirpath in selected_dirs:
                     pyautogui.click(3285, 226) #Guardar
                     time.sleep(5)
                     pyautogui.click(3296, 1001) #Click en siguiente
-                    pyautogui.click(3296, 1001) #Click en siguiente
                     time.sleep(1)
-                    pyautogui.click(2942, 767) #Programar
-                    pyautogui.click(2671, 603) #Fecha
-                    pyautogui.click(2671, 603) 
+                    pyautogui.click(3296, 1001) #Click en siguiente
+                    time.sleep(2)
+                    pyautogui.click(2942, 818) #Programar
+                    pyautogui.click(2633, 705) #Fecha
                     pyautogui.hotkey('ctrl', 'a')
                     time.sleep(1)
                     pyautogui.write(publish_date_string)#Ponemos cualquier fecha aleatoria en el intervalo de 30 dias
                     time.sleep(1)
                     pyautogui.press('enter')
                     time.sleep(1)
-                    pyautogui.click(2795, 604)
+                    pyautogui.click(2761, 711)
                     pyautogui.hotkey('ctrl', 'a')
                     pyautogui.write(publish_time_string)#Ponemos cualquier hora aleatoria con intervalo de 15 minutos
                     pyautogui.press('enter')
                     pyautogui.click(3294, 1005) #Programar
+                    time.sleep(1)
+                    pyautogui.click(3041, 660)
