@@ -10,8 +10,8 @@ from limpieza.crear_nuevas_carpetas import procesar_archivos_audio
 import time
 
 # Directorio raíz desde donde comenzar la búsqueda
-root_dir = "D:\\01_edicion_automatizada\\01_limpieza_de_impurezas"
-no_tienen_carpetas = "D:\\01_edicion_automatizada\\no_tienen_carpetas"
+root_dir = "E:\\01_edicion_automatizada\\01_limpieza_de_impurezas"
+no_tienen_carpetas = "E:\\01_edicion_automatizada\\no_tienen_carpetas"
 
 # Paso 1 - Eliminar archivos RAR
 print("************************************************************************************************************************************************")

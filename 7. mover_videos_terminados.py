@@ -2,10 +2,10 @@ import os
 import shutil
 
 # Define las rutas de las carpetas
-folder_path = "D:\\01_edicion_automatizada\\audio_scripts"
+folder_path = "E:\\01_edicion_automatizada\\audio_scripts"
 save_premier_pro_path = "C:\\Users\\banar\\Desktop\\save_premier_pro"
 save_after_effects_path = "C:\\Users\\banar\\Desktop\\save_after_effects"
-upload_video_path = "D:\\01_edicion_automatizada\\upload_video"
+upload_video_path = "E:\\01_edicion_automatizada\\upload_video"
 
 # Recorre todas las subcarpetas y archivos en la carpeta de origen
 for root, dirs, files in os.walk(folder_path):

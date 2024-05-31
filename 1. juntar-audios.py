@@ -11,7 +11,7 @@ AudioSegment.converter = "C:\\Program Files\\FFmpeg\\bin\\ffmpeg.exe"
 AudioSegment.ffmpeg = "C:\\Program Files\\FFmpeg\\bin\\ffprobe.exe"
 
 # Definir la ruta de la carpeta que contiene los audios
-main_dir_path = "D:\\01_edicion_automatizada\\02_juntar_audios"
+main_dir_path = "E:\\01_edicion_automatizada\\02_juntar_audios"
 
 # Recorre todos los directorios en la ruta principal
 for folder_name in os.listdir(main_dir_path):
@@ -107,7 +107,7 @@ for folder_name in os.listdir(main_dir_path):
 
     else:
         print(f"'{folder_path}' no es un directorio válido.")
-
+            
     #TODO Cambiar el (Full album) por el ep, compilacion o cualquiera segun sea la epoca
     if audio_genres and audio_years and band_names and album_names: 
         text = f"{band_names[0]} - {album_names[0]} (Full Album)\n\nGenre: {audio_genres[0]}\nYear: {audio_years[0]}\n\nTracklist:\n\n"
@@ -130,7 +130,7 @@ for folder_name in os.listdir(main_dir_path):
         f.write(text)
 
     print(folder_name, "completado")
-    
+
 print("************************************************************************************************************************************************")
 print("----------------------------------------------------SE TERMINO CON EXITO---------------------------------------------------------------------")
 print("************************************************************************************************************************************************")

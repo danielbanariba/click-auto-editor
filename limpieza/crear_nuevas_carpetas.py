@@ -5,8 +5,8 @@ import os
 import shutil
 
 # Directorios de origen y destino
-dir_origen = "D:\\01_edicion_automatizada\\no_tienen_carpetas"
-dir_destino = "D:\\01_edicion_automatizada\\01_limpieza_de_impurezas"
+dir_origen = "E:\\01_edicion_automatizada\\no_tienen_carpetas"
+dir_destino = "E:\\01_edicion_automatizada\\01_limpieza_de_impurezas"
 
 def limpiar_nombre(nombre):
     caracteres_invalidos = ['\\', '/', ':', '*', '?', '"', '<', '>', '|']

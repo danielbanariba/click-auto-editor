@@ -3,7 +3,7 @@ import shutil
 
 def mover_archivos(main_dir_path):
     # Definir la carpeta de destino
-    dest_dir_path = "D:\\01_edicion_automatizada\\no_tienen_carpetas"
+    dest_dir_path = "E:\\01_edicion_automatizada\\no_tienen_carpetas"
 
     # Listar todos los archivos en el directorio principal
     for file in os.listdir(main_dir_path):

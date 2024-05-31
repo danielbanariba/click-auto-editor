@@ -6,7 +6,7 @@ import pyautogui
 # Definir la ruta de la carpeta que contiene los archivos de After Effects
 main_dir_path = "C:\\Users\\banar\\Desktop\\save_after_effects"
 ruta_intro = "C:\\Users\\banar\\OneDrive\\Documents\\Intro Daniel Banariba"
-path_render = "D:\\01_edicion_automatizada\\audio_scripts"
+path_render = "E:\\01_edicion_automatizada\\audio_scripts"
 
 # Obtener todos los archivos .aep en la ruta principal
 aep_files = [file for file in os.listdir(main_dir_path) if file.endswith('.aep')]

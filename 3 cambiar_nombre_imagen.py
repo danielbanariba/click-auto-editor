@@ -5,7 +5,7 @@ from PIL import Image
 from effects.sombra import add_shadow
 
 # Definir la ruta de la carpeta principal
-main_dir_path = "D:\\01_edicion_automatizada\\audio_scripts"
+main_dir_path = "E:\\01_edicion_automatizada\\audio_scripts"
 
 # Recorrer todos los directorios en la ruta principal
 # for folder_name in os.listdir(main_dir_path):
@@ -55,9 +55,9 @@ from effects.sombra import add_shadow
 import stat
 
 # Definir la ruta de la carpeta principal
-main_dir_path = "D:\\01_edicion_automatizada\\YA"
+main_dir_path = "E:\\01_edicion_automatizada\\YA"
 # Definir la ruta del directorio destino
-destination_dir_path = "D:\\01_edicion_automatizada\\verificacion"
+destination_dir_path = "E:\\01_edicion_automatizada\\verificacion"
 
 # Recorrer todos los directorios en la ruta principal
 for folder_name in os.listdir(main_dir_path):

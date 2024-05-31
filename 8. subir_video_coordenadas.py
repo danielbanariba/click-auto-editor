@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 import locale
 import shutil  # Import the shutil module
 
-root_dir = "D:\\01_edicion_automatizada\\upload_video"
-uploading_dir = "D:\\01_edicion_automatizada\\upload_video\\00. videos_que_se_estan_subiendo"  # Define the uploading directory
+root_dir = "E:\\01_edicion_automatizada\\upload_video"
+uploading_dir = "E:\\01_edicion_automatizada\\upload_video\\00. videos_que_se_estan_subiendo"  # Define the uploading directory
 url_upload = 'https://www.youtube.com/upload'
 
 # Create a list of directories that contain at least one .mp4 file
@@ -123,7 +123,7 @@ for dirpath in selected_dirs:
                     pyautogui.click(2467, 940) #Nada de lo anterior
                     time.sleep(1)
                     pyautogui.click(3126, 408) #Enviar calificacion
-                    time.sleep(2)
+                    time.sleep(7)
                     pyautogui.click(3311, 998) #Siguiente
                     time.sleep(1)
                     # COMENTAR ARRIBA SI ME QUITAN LA MONETIZACION

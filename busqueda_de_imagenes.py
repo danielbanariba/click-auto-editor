@@ -9,7 +9,7 @@ import requests
 from PIL import Image
 from io import BytesIO
 
-directorio = "D:\\01_edicion_automatizada\\no_tienen_portada"
+directorio = "E:\\01_edicion_automatizada\\no_tienen_portada"
 
 def extraer_primer_parrafo(archivo_txt):
     with open(archivo_txt, 'r', encoding='utf-8') as archivo:
