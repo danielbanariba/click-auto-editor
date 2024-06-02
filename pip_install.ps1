@@ -19,3 +19,4 @@ pip install eyed3
 pip install pydub
 pip install webdriver-manager
 pip install mutagen
+pip install keyboard

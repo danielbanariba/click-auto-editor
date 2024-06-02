@@ -1,4 +1,5 @@
 import os
+import PIL
 import eyed3
 from pydub import AudioSegment
 import shutil
@@ -50,7 +51,7 @@ for folder_name in os.listdir(main_dir_path):
                 audio_paths.append(audio_path)
                 # Extraer el nombre del audio y su duración
                 audio_file = eyed3.load(audio_path)
-                if audio_file is not None:
+                if audio_file is not None and audio_file.info is not None:
                     title = audio_file.tag.title if audio_file.tag and audio_file.tag.title else "Unknown"
                     audio_names.append(title)
                     duration = audio_file.info.time_secs
@@ -82,14 +83,23 @@ for folder_name in os.listdir(main_dir_path):
                     # Extraer las imágenes del archivo de audio
                     for image in audio_file.tag.images:
                         # Guardar la primera imagen como "Cover.jpg" y terminar el bucle
-                        img = Image.open(io.BytesIO(image.image_data))
-                        if img.mode == 'RGBA':
-                            img = img.convert('RGB')
-                        img.save(os.path.join(folder_path, "Cover.jpg"), 'JPEG')
+                        try:
+                            img = Image.open(io.BytesIO(image.image_data))
+                            if img.mode == 'RGBA':
+                                img = img.convert('RGB')
+                            cover_path = os.path.join(folder_path, "Cover.jpg")
+                            img.save(cover_path, 'JPEG')
+                            os.chmod(cover_path, stat.S_IWRITE)  # Cambiar los permisos del archivo
+                            break
+                        except PIL.UnidentifiedImageError:
+                            print(f"Cannot identify image in file: {audio_path}")
+                        except PermissionError:
+                            print(f"Permission denied: '{cover_path}'. The file might be open, read-only or the script might not have the necessary permissions.")
+                        except FileNotFoundError:
+                            print(f"File not found: '{cover_path}'. The file might not have been created.")
+                        else:
+                            continue
                         break
-                    else:
-                        continue
-                    break
 
         # Juntar los audios
         combined = sum(audios, AudioSegment.empty())

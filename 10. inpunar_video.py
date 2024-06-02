@@ -24,13 +24,13 @@ mensaje = "Hola! Lastimosamente no pude conseguir los permisos correspondientes 
 firma = "Daniel Alejandro Barrientos Anariba"
 
 
-num = int(input("Cuantas canciones deseas inpugnar? "))
+#num = int(input("Cuantas canciones deseas inpugnar? "))
 
-for i in range(num):
+for i in range(1):
     if keyboard.is_pressed('p'):
         break
-    pyautogui.click(seleccionar_cancion)  
-    time.sleep(1)
+    # pyautogui.click(seleccionar_cancion)  
+    # time.sleep(1)
     pyautogui.click(impugnar)
     pyautogui.click(impugnar2)
     pyautogui.click(continuar1)
@@ -42,7 +42,7 @@ for i in range(num):
     pyautogui.click(continuar2)
     pyautogui.click(informacion_de_tu_licencia)
     pyautogui.write(mensaje)
-    time.sleep(2)
+    time.sleep(1)
     pyautogui.click(check1)
     pyautogui.click(check2)
     pyautogui.click(check3)
@@ -50,6 +50,6 @@ for i in range(num):
     pyautogui.write(firma)
     time.sleep(1)
     pyautogui.click(continuar2)
-    time.sleep(4)
-    pyautogui.click(cerrar)
-    time.sleep(4)
+    # time.sleep(4)
+    # pyautogui.click(cerrar)
+    # time.sleep(4)

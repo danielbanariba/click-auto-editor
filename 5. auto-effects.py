@@ -15,8 +15,17 @@ main_dir_path = "E:\\01_edicion_automatizada\\audio_scripts"
 # Definir la ruta del directorio de destino
 destination_dir_path = "E:\\01_edicion_automatizada\\after_effects_terminado"
 
-# Recorre todos los directorios en la ruta principal
-for folder_name in os.listdir(main_dir_path):
+# Recoge todos los directorios en la ruta principal en una lista
+folders = [folder_name for folder_name in os.listdir(main_dir_path) if os.path.isdir(os.path.join(main_dir_path, folder_name))]
+
+# Mezcla la lista de carpetas
+random.shuffle(folders)
+
+# Limita la lista al n de numeros
+folders = folders[:250]
+
+# Recorre todos los directorios en la lista mezclada
+for folder_name in folders:
     folder_path = os.path.join(main_dir_path, folder_name)
 
     if os.path.isdir(folder_path):
@@ -60,7 +69,12 @@ for folder_name in os.listdir(main_dir_path):
                     r = g = b = data.mean()
                 else:
                     raise ValueError(f'Unexpected number of dimensions: {len(data.shape)}')
-                
+
+                # Invierte los colores
+                r = 255 - r
+                g = 255 - g
+                b = 255 - b
+
                 # Convierte el color promedio a hexadecimal
                 inside_color = '#{:02x}{:02x}{:02x}'.format(int(r), int(g), int(b))
     
@@ -71,7 +85,7 @@ for folder_name in os.listdir(main_dir_path):
         pyautogui.write('Adobe After Effects')  # escribe el nombre del programa
         time.sleep(1)
         pyautogui.press('enter')  # abre el programa
-        time.sleep(20)  # espera a que el programa se abra
+        time.sleep(14)  # espera a que el programa se abra
     
     # ---------------------------------------------------------------------------------------------------------
         # Segunda parte: Crear un nuevo proyecto
@@ -126,7 +140,7 @@ for folder_name in os.listdir(main_dir_path):
         pyautogui.write("C:\\Users\\banar\\Desktop\\click-auto-editor\\Affter Effects\\audio_to_keyframes.jsx")
         time.sleep(1)
         pyautogui.press('enter')
-        time.sleep(60)
+        time.sleep(30)
     
     #---------------------------------------------------------------------------------------------------------
         # Septima parte: Darle movimiento a la imagen
@@ -187,7 +201,7 @@ for folder_name in os.listdir(main_dir_path):
         #Ultima parte: Cerrar Adobe After Effects
         pyautogui.click(3809, 8)
         #pyautogui.hotkey('alt', 'f4')
-        time.sleep(8)
+        time.sleep(4)
         
     #---------------------------------------------------------------------------------------------------------
         # Mueve la carpeta al directorio de destino después de terminar de editar
@@ -195,5 +209,5 @@ for folder_name in os.listdir(main_dir_path):
             shutil.move(folder_path, os.path.join(destination_dir_path, os.path.basename(folder_path)))
         except PermissionError:
             print(f"PermissionError: No se puede mover la carpeta: {folder_path} Porque un archivo dentro de esta esta siendo utilizado por otro proceso.")
-        time.sleep(3)
+        time.sleep(2)
         #Se repite el proceso para cada carpeta en la ruta principal

@@ -41,15 +41,15 @@ Departamento = "Francisco Morazan"
 codigo_postal_coordenadas = 3206, 658
 codigo_postal = "12101"
 
-num = int(input("Cuantas canciones deseas apelar? "))
+#num = int(input("Cuantas canciones deseas apelar? "))
 
 #time.sleep(10)
 
-for i in range(num):
+for i in range(1):
     if keyboard.is_pressed('p'):
         break
-    pyautogui.click(seleccionar_cancion)  
-    time.sleep(1)
+    # pyautogui.click(seleccionar_cancion)  
+    # time.sleep(1)
     pyautogui.click(apelar_arriba)
     pyautogui.click(apelar_abajo)
     pyautogui.click(continuar1)
@@ -88,6 +88,6 @@ for i in range(num):
     pyautogui.write(firma)
     time.sleep(1)
     pyautogui.click(continuar2)
-    time.sleep(7)
-    pyautogui.click(cerrar)
-    time.sleep(3)
+    # time.sleep(7)
+    # pyautogui.click(cerrar)
+    # time.sleep(3)

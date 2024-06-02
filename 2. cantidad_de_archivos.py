@@ -5,7 +5,7 @@ ruta_principal = 'E:\\01_edicion_automatizada\\02_juntar_audios'
 ruta_temporal = 'E:\\01_edicion_automatizada\\Ya'
 ruta_sin_portada = 'E:\\01_edicion_automatizada\\no_tienen_portada'
 ruta_raro = 'E:\\01_edicion_automatizada\\raro'
-ruta_volver_a_buscar = 'E:\\01_edicion_automatizada\\02_volver_a_buscar'
+ruta_volver_a_buscar = 'E:\\01_edicion_automatizada\\03_volver_a_buscar'
 
 def contar_archivos_en_subdirectorios(directorio, directorio_destino, directorio_sin_portada, directorio_raro, directorio_volver_a_buscar):
     for ruta, dirs, archivos in os.walk(directorio):
