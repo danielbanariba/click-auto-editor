@@ -22,6 +22,7 @@ for folder_name in folder_names:
     for file in files:
         if file.endswith('.txt'):
             search_query = get_first_paragraph(os.path.join(folder_path, file)).replace(' ', '+')
+            search_query = search_query.replace('\0', '')  # Remove null characters
             url = f"https://www.youtube.com/results?search_query={search_query}"
             webbrowser.open_new_tab(url)
 

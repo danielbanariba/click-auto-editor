@@ -22,7 +22,7 @@ folders = [folder_name for folder_name in os.listdir(main_dir_path) if os.path.i
 random.shuffle(folders)
 
 # Limita la lista al n de numeros
-folders = folders[:250]
+folders = folders[:220]
 
 # Recorre todos los directorios en la lista mezclada
 for folder_name in folders:
@@ -69,11 +69,6 @@ for folder_name in folders:
                     r = g = b = data.mean()
                 else:
                     raise ValueError(f'Unexpected number of dimensions: {len(data.shape)}')
-
-                # Invierte los colores
-                r = 255 - r
-                g = 255 - g
-                b = 255 - b
 
                 # Convierte el color promedio a hexadecimal
                 inside_color = '#{:02x}{:02x}{:02x}'.format(int(r), int(g), int(b))
@@ -140,7 +135,7 @@ for folder_name in folders:
         pyautogui.write("C:\\Users\\banar\\Desktop\\click-auto-editor\\Affter Effects\\audio_to_keyframes.jsx")
         time.sleep(1)
         pyautogui.press('enter')
-        time.sleep(30)
+        time.sleep(35)
     
     #---------------------------------------------------------------------------------------------------------
         # Septima parte: Darle movimiento a la imagen

@@ -29,7 +29,7 @@ for file_name in os.listdir(main_dir_path):
         pyautogui.write('Premier')  # escribe el nombre del programa
         time.sleep(1)
         pyautogui.press('enter')  # abre el programa
-        time.sleep(16)  # espera a que el programa se abra
+        time.sleep(15)  # espera a que el programa se abra
     
     #---------------------------------------------------------------------------------------------------------    
         # Segunda parte: Crear un nuevo proyecto
@@ -75,20 +75,22 @@ for file_name in os.listdir(main_dir_path):
         pyautogui.click(2947, 732)
         time.sleep(2)
         pyautogui.hotkey('ctrl', 'i') # importarmos el intro del video
-        time.sleep(40)
+        time.sleep(26)
         pyautogui.click(2333, 102)
         pyautogui.write(ruta_intro) # ruta del intro
         pyautogui.press('enter')
         time.sleep(2)
         pyautogui.click(2175, 543)
         pyautogui.write("Intro_Daniel_Banariba.aep")
-        time.sleep(10)
+        time.sleep(6)
         pyautogui.press('enter')
         time.sleep(2)
         # Esta parte se repite dos veces para evitar errores
         pyautogui.click(2735, 401)
         pyautogui.click(2955, 733)
         time.sleep(2)
+        pyautogui.click(3105, 717)
+        time.sleep(1)
         
         #jalamos los archivos a la linea de tiempo
         pyautogui.mouseDown(2239, 786)
@@ -130,13 +132,13 @@ for file_name in os.listdir(main_dir_path):
         pyautogui.write(name_proyect + ".mp4")
         time.sleep(2)
         pyautogui.click(2496, 240)# preset
-        time.sleep(3)
-        pyautogui.click(2408, 506) # 4k
-        time.sleep(3)
+        time.sleep(2)
+        pyautogui.click(2472, 486) # 4k
+        time.sleep(2)
         pyautogui.click(3632, 1030) # Send to media encoder
-        time.sleep(10)
+        time.sleep(2)
         pyautogui.click(3811, 2) # Cerramos premier pro
         pyautogui.press('enter')
-        time.sleep(3)
+        time.sleep(2)
         print("El proyecto " + name_proyect + " se ha exportado correctamente")
         # El ciclo se repite para el siguiente archivo

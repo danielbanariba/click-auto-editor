@@ -1,12 +1,3 @@
-import os
-import glob
-import shutil
-from PIL import Image
-from effects.sombra import add_shadow
-
-# Definir la ruta de la carpeta principal
-main_dir_path = "E:\\01_edicion_automatizada\\audio_scripts"
-
 # Recorrer todos los directorios en la ruta principal
 # for folder_name in os.listdir(main_dir_path):
 #     folder_path = os.path.join(main_dir_path, folder_name)
