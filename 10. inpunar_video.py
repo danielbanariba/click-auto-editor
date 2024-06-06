@@ -31,7 +31,7 @@ for i in range(1):
         break
     # pyautogui.click(seleccionar_cancion)  
     # time.sleep(1)
-    pyautogui.click(continuar1) #Comentar cuando cambie el inicio
+    #pyautogui.click(continuar1) #Comentar cuando cambie el inicio
     pyautogui.click(impugnar)
     pyautogui.click(impugnar2)
     pyautogui.click(continuar1)

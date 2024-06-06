@@ -26,7 +26,7 @@ def contar_archivos_en_subdirectorios(directorio, directorio_destino, directorio
         elif contador == 2:
             print(f"Encontrados {contador} archivos en {ruta}. Moviendo a {directorio_sin_portada}")
             rutas_sin_portada.append(ruta)
-        elif contador == 1 or contador == 4:
+        elif contador == 1 or contador >= 4:
             print(f'{contador} archivos (raro) en {ruta}')
             rutas_raro.append(ruta)
         elif contador == 0:

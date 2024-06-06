@@ -70,6 +70,11 @@ for folder_name in folders:
                 else:
                     raise ValueError(f'Unexpected number of dimensions: {len(data.shape)}')
 
+                # Invierte los colores
+                r = 255 - r
+                g = 255 - g
+                b = 255 - b
+
                 # Convierte el color promedio a hexadecimal
                 inside_color = '#{:02x}{:02x}{:02x}'.format(int(r), int(g), int(b))
     
