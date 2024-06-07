@@ -92,7 +92,7 @@ for dirpath in selected_dirs:
                     time.sleep(1)
                     pyautogui.click(2713, 527)
                     pyautogui.write(descripcion_video)
-                    time.sleep(5)
+                    time.sleep(7)
                     
                     #Quita parte: Publicar el video
                     pyautogui.click(3296, 1001) #Click en siguiente
@@ -136,7 +136,7 @@ for dirpath in selected_dirs:
                     pyautogui.click(3296, 1001) #Click en siguiente
                     time.sleep(1)
                     pyautogui.click(3296, 1001) #Click en siguiente
-                    time.sleep(2)
+                    time.sleep(8)
                     pyautogui.click(2942, 818) #Programar
                     pyautogui.click(2633, 705) #Fecha
                     pyautogui.hotkey('ctrl', 'a')

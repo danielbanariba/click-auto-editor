@@ -29,9 +29,9 @@ firma = "Daniel Alejandro Barrientos Anariba"
 for i in range(1):
     if keyboard.is_pressed('p'):
         break
-    # pyautogui.click(seleccionar_cancion)  
-    # time.sleep(1)
-    #pyautogui.click(continuar1) #Comentar cuando cambie el inicio
+    pyautogui.click(seleccionar_cancion)  
+    time.sleep(1)
+    pyautogui.click(continuar1) #Comentar cuando cambie el inicio
     pyautogui.click(impugnar)
     pyautogui.click(impugnar2)
     pyautogui.click(continuar1)
