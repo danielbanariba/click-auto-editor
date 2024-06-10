@@ -136,8 +136,9 @@ for dirpath in selected_dirs:
                     pyautogui.click(3296, 1001) #Click en siguiente
                     time.sleep(1)
                     pyautogui.click(3296, 1001) #Click en siguiente
-                    time.sleep(8)
-                    pyautogui.click(2942, 818) #Programar
+                    #time.sleep(15)
+                    pyautogui.click(2943, 820) #Programar
+                    time.sleep(1)
                     pyautogui.click(2633, 705) #Fecha
                     pyautogui.hotkey('ctrl', 'a')
                     time.sleep(1)

@@ -3,9 +3,11 @@ import random
 import os
 import pyautogui
 
+pyautogui.FAILSAFE = False
+
 # Definir la ruta de la carpeta que contiene los archivos de After Effects
 main_dir_path = "C:\\Users\\banar\\Desktop\\save_after_effects"
-ruta_intro = "C:\\Users\\banar\\OneDrive\\Documents\\Intro Daniel Banariba"
+ruta_intro = "C:\\Users\\banar\\Documents\\Intro Daniel Banariba"
 path_render = "E:\\01_edicion_automatizada\\audio_scripts"
 
 # Obtener todos los archivos .aep en la ruta principal
@@ -81,16 +83,16 @@ for file_name in os.listdir(main_dir_path):
         pyautogui.press('enter')
         time.sleep(2)
         pyautogui.click(2175, 543)
-        pyautogui.write("Intro_Daniel_Banariba.aep")
-        time.sleep(6)
-        pyautogui.press('enter')
-        time.sleep(2)
-        # Esta parte se repite dos veces para evitar errores
-        pyautogui.click(2735, 401)
-        pyautogui.click(2955, 733)
-        time.sleep(2)
-        pyautogui.click(3105, 717)
+        pyautogui.write("0000000000000000.mp4") # Intro del video
         time.sleep(1)
+        pyautogui.press('enter')
+        time.sleep(1)
+        # # Esta parte se repite dos veces para evitar errores
+        # pyautogui.click(2735, 401)
+        # pyautogui.click(2955, 733)
+        # time.sleep(2)
+        # pyautogui.click(3105, 717)
+        # time.sleep(1)
         
         #jalamos los archivos a la linea de tiempo
         pyautogui.mouseDown(2239, 786)

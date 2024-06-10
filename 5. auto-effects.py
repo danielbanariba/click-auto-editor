@@ -6,6 +6,7 @@ from PIL import Image
 import numpy as np
 import random
 
+pyautogui.FAILSAFE = False
 # Definir el color del espectro de audio
 inside_color = '#000000'
 
@@ -129,13 +130,13 @@ for folder_name in folders:
         time.sleep(1)
         pyautogui.mouseDown(2013, 282)  
         pyautogui.moveTo(2127, 864, duration=1)  
-        pyautogui.mouseUp()  
-    
+        pyautogui.mouseUp()
+        time.sleep(1)
     #---------------------------------------------------------------------------------------------------------
         # Sexta parte: Ejecutar el script de generacion de keyframes por audio
         pyautogui.click(1945, 38)
-        pyautogui.click(1984, 541)
-        pyautogui.click(2317, 539)
+        pyautogui.click(1958, 576)
+        pyautogui.click(2339, 572)
         time.sleep(1)
         pyautogui.write("C:\\Users\\banar\\Desktop\\click-auto-editor\\Affter Effects\\audio_to_keyframes.jsx")
         time.sleep(1)
@@ -145,8 +146,8 @@ for folder_name in folders:
     #---------------------------------------------------------------------------------------------------------
         # Septima parte: Darle movimiento a la imagen
         pyautogui.click(1945, 38)
-        pyautogui.click(1984, 541)
-        pyautogui.click(2317, 539)
+        pyautogui.click(1958, 576)
+        pyautogui.click(2339, 572)
         time.sleep(2)
         pyautogui.write("C:\\Users\\banar\\Desktop\\click-auto-editor\\Affter Effects\\imagen_movimiento.jsx")
         time.sleep(1)
@@ -156,8 +157,8 @@ for folder_name in folders:
     #---------------------------------------------------------------------------------------------------------
         # Octava parte: Crear el espectro de audio
         pyautogui.click(1945, 38)
-        pyautogui.click(1984, 541)
-        pyautogui.click(2317, 539)
+        pyautogui.click(1958, 576)
+        pyautogui.click(2339, 572)
         time.sleep(1)
         pyautogui.write("C:\\Users\\banar\\Desktop\\click-auto-editor\\Affter Effects\\espectro_de_audio.jsx")
         time.sleep(1)
