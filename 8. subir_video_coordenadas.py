@@ -51,12 +51,10 @@ for dirpath in selected_dirs:
                     # Set the locale to Spanish
                     locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")
                     # Establece una fecha base en el año 2025
-                    base_date = datetime(2026, 1, 1)
-                    random_days = random.randint(1, 30)  # Genera un número aleatorio entre 1 y 30
-                    publish_date = base_date + timedelta(days=random_days)
-                    day = publish_date.strftime("%d")
-                    month = publish_date.strftime("%b").replace('.', '')  # Remove the period
-                    year = publish_date.strftime("%Y")
+                    base_date = datetime(2026, 6, 29)  # Fecha específica: 29 de Junio de 2026
+                    day = base_date.strftime("%d")
+                    month = base_date.strftime("%b").replace('.', '')  # Remove the period
+                    year = base_date.strftime("%Y")
                     publish_date_string = f"{day} {month} {year}"  # Convertir a formato "16 abr 2025"
                     # Genera una hora aleatoria en intervalos de 15 minutos
                     random_hour = random.randint(0, 23)  # Genera un número aleatorio entre 0 y 23

@@ -19,11 +19,14 @@ destination_dir_path = "E:\\01_edicion_automatizada\\after_effects_terminado"
 # Recoge todos los directorios en la ruta principal en una lista
 folders = [folder_name for folder_name in os.listdir(main_dir_path) if os.path.isdir(os.path.join(main_dir_path, folder_name))]
 
+# Convierte la lista en un conjunto para eliminar duplicados, luego conviértela de nuevo en una lista
+folders = list(set(folders))
+
 # Mezcla la lista de carpetas
 random.shuffle(folders)
 
 # Limita la lista al n de numeros
-folders = folders[:220]
+folders = folders[:100]
 
 # Recorre todos los directorios en la lista mezclada
 for folder_name in folders:
