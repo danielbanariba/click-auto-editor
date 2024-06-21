@@ -21,14 +21,15 @@ mensaje = "Hola! Lastimosamente no pude conseguir los permisos correspondientes 
 #mensaje = "Hola, creo y reafirmo firmemente que se trata de un error, ya que solo es un ritmo normal de bateria, no es una pista de audio protegida por derechos de autor, por favor, revisenlo y eliminen la reclamación de derechos de autor. Gracias."
 #mensaje = "Hola miembros de arsenal! solo queria pedirles permiso para publicar su album, ya me conocen, soy Daniel Banariba :) el que anda con ustedes a todos lados y que les anda grabando los conciertos."
 
+#Mensaje si se trata de un error evidente de la reclamacion
+#mensaje = "Hola, creo y reafirmo firmemente que se trata de un error, ya que no se trata de ninguna cancion, y si se escuchan bien todo es parte de la cancion y solo capta esa parte que no tiene nada que ver con la cancion con la que se esta reclamando, no es una pista de audio protegida por derechos de autor, por favor, revisenlo y eliminen la reclamación de derechos de autor. Gracias."
+
 firma = "Daniel Alejandro Barrientos Anariba"
 
 
 #num = int(input("Cuantas canciones deseas inpugnar? "))
 
 for i in range(1):
-    if keyboard.is_pressed('p'):
-        break
     pyautogui.click(seleccionar_cancion)  
     time.sleep(1)
     #pyautogui.click(continuar1) #Comentar cuando cambie el inicio
@@ -51,6 +52,6 @@ for i in range(1):
     pyautogui.write(firma)
     time.sleep(1)
     pyautogui.click(continuar2)
-    # time.sleep(4)
-    # pyautogui.click(cerrar)
+    time.sleep(4)
+    pyautogui.click(cerrar)
     # time.sleep(4)

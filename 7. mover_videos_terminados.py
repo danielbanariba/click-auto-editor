@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 
 # Define las rutas de las carpetas
 folder_path = "E:\\01_edicion_automatizada\\audio_scripts"
@@ -25,11 +26,14 @@ for root, dirs, files in os.walk(folder_path):
                     if save_folder == save_premier_pro_path:
                         if save_file.split('.')[0][:-4] == shortened_name:
                             # Mueve el archivo a la carpeta correspondiente
-                            shutil.move(os.path.join(save_folder, save_file), os.path.join(root, save_file))
+                            destination_path = os.path.join(root, save_file)
+                            if os.path.exists(destination_path):
+                                destination_path = f"{destination_path}_{int(time.time())}"
+                            shutil.move(os.path.join(save_folder, save_file), destination_path)
                     elif save_folder == save_after_effects_path:
                         if save_file.split('.')[0][:-2] == shortened_name:
                             # Mueve el archivo a la carpeta correspondiente
-                            shutil.move(os.path.join(save_folder, save_file), os.path.join(root, save_file))
-
-            # Mueve la carpeta que contiene el video a la carpeta de carga de video
-            shutil.move(root, upload_video_path)
+                            destination_path = os.path.join(root, save_file)
+                            if os.path.exists(destination_path):
+                                destination_path = f"{destination_path}_{int(time.time())}"
+                            shutil.move(os.path.join(save_folder, save_file), destination_path)

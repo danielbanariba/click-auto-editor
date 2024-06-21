@@ -88,6 +88,6 @@ for i in range(1):
     pyautogui.write(firma)
     time.sleep(1)
     pyautogui.click(continuar2)
-    # time.sleep(7)
-    # pyautogui.click(cerrar)
+    time.sleep(3)
+    pyautogui.click(cerrar)
     # time.sleep(3)
