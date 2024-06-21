@@ -32,13 +32,14 @@ firma = "Daniel Alejandro Barrientos Anariba"
 for i in range(1):
     pyautogui.click(seleccionar_cancion)  
     time.sleep(1)
-    #pyautogui.click(continuar1) #Comentar cuando cambie el inicio
+    pyautogui.click(continuar1) #Comentar cuando cambie el inicio
     pyautogui.click(impugnar)
     pyautogui.click(impugnar2)
     pyautogui.click(continuar1)
     pyautogui.click(continuar2)
     pyautogui.click(licencia)
     time.sleep(1)
+    pyautogui.click(continuar2)
     pyautogui.click(continuar2)
     pyautogui.click(accepto_los_terminos)
     pyautogui.click(continuar2)
