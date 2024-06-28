@@ -6,9 +6,10 @@ from PIL import Image
 import numpy as np
 import random
 
-pyautogui.FAILSAFE = False;
+#pyautogui.FAILSAFE = False;
+
 # Definir el color del espectro de audio
-inside_color = '#000000'
+# inside_color = '#000000'
 
 # Definir la ruta de la carpeta que contiene los audios
 main_dir_path = "E:\\01_edicion_automatizada\\audio_scripts"
@@ -16,22 +17,23 @@ main_dir_path = "E:\\01_edicion_automatizada\\audio_scripts"
 # Definir la ruta del directorio de destino
 #destination_dir_path = "E:\\01_edicion_automatizada\\after_effects_terminado"
 
-# Recoge todos los directorios en la ruta principal en una lista
-folders = [folder_name for folder_name in os.listdir(main_dir_path) if os.path.isdir(os.path.join(main_dir_path, folder_name))]
+# Recoge todos los directorios en la ruta principal, eliminando duplicados directamente
+folders = {folder_name for folder_name in os.listdir(main_dir_path) if os.path.isdir(os.path.join(main_dir_path, folder_name))}
 
-# Convierte la lista en un conjunto para eliminar duplicados, luego conviértela de nuevo en una lista
-folders = list(set(folders))
+# Convertir el conjunto de nuevo en una lista si es necesario
+folders = list(folders)
 
 # Mezcla la lista de carpetas
 random.shuffle(folders)
 
 # Limita la lista al n de numeros
-folders = folders[:80]
+folders = folders[:100]
 
 def auto_effects():
     # Recorre todos los directorios en la lista mezclada
     for folder_name in folders:
         folder_path = os.path.join(main_dir_path, folder_name)
+        inside_color = '#000000'
 
         if os.path.isdir(folder_path):
             new_folder_path = folder_path.replace('–', '-')
