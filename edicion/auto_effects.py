@@ -8,14 +8,8 @@ import random
 
 #pyautogui.FAILSAFE = False;
 
-# Definir el color del espectro de audio
-# inside_color = '#000000'
-
 # Definir la ruta de la carpeta que contiene los audios
 main_dir_path = "E:\\01_edicion_automatizada\\audio_scripts"
-
-# Definir la ruta del directorio de destino
-#destination_dir_path = "E:\\01_edicion_automatizada\\after_effects_terminado"
 
 # Recoge todos los directorios en la ruta principal, eliminando duplicados directamente
 folders = {folder_name for folder_name in os.listdir(main_dir_path) if os.path.isdir(os.path.join(main_dir_path, folder_name))}
@@ -27,17 +21,60 @@ folders = list(folders)
 random.shuffle(folders)
 
 # Limita la lista al n de numeros
-folders = folders[:100]
+folders = folders[:120]
+
+def get_complementary_color(r, g, b):
+    # Convertir RGB a HSV
+    r, g, b = r/255.0, g/255.0, b/255.0
+    mx = max(r, g, b)
+    mn = min(r, g, b)
+    diff = mx - mn
+    
+    if mx == mn:
+        h = 0
+    elif mx == r:
+        h = (60 * ((g-b)/diff) + 360) % 360
+    elif mx == g:
+        h = (60 * ((b-r)/diff) + 120) % 360
+    else:
+        h = (60 * ((r-g)/diff) + 240) % 360
+    
+    s = 0 if mx == 0 else (diff/mx)
+    v = mx
+
+    # Calcular el color complementario
+    h = (h + 180) % 360
+    
+    # Convertir HSV de vuelta a RGB
+    c = v * s
+    x = c * (1 - abs((h / 60) % 2 - 1))
+    m = v - c
+
+    if 0 <= h < 60:
+        r, g, b = c, x, 0
+    elif 60 <= h < 120:
+        r, g, b = x, c, 0
+    elif 120 <= h < 180:
+        r, g, b = 0, c, x
+    elif 180 <= h < 240:
+        r, g, b = 0, x, c
+    elif 240 <= h < 300:
+        r, g, b = x, 0, c
+    else:
+        r, g, b = c, 0, x
+
+    r = int((r + m) * 255)
+    g = int((g + m) * 255)
+    b = int((b + m) * 255)
+
+    return r, g, b
 
 def auto_effects():
-    # Recorre todos los directorios en la lista mezclada
     for folder_name in folders:
         folder_path = os.path.join(main_dir_path, folder_name)
-        inside_color = '#000000'
-
+        
         if os.path.isdir(folder_path):
             new_folder_path = folder_path.replace('–', '-')
-            # Mueve el directorio si el nombre ha cambiado
             if folder_path != new_folder_path:
                 try:
                     shutil.move(folder_path, new_folder_path)
@@ -45,45 +82,42 @@ def auto_effects():
                 except PermissionError:
                     print(f"PermissionError: The folder {folder_path} is currently in use by another process.")
                     continue
-
-            # Use the folder_path as the ruta in your script
+            
             ruta = folder_path
-
-            # Busca la imagen .jpg en el directorio
+            
+            # Busca la primera imagen .jpg en el directorio
             for file_name in os.listdir(ruta):
                 if file_name.endswith('.jpg'):
                     img_path = os.path.join(ruta, file_name)
-
-                    # Abre la imagen
+                    
+                    # Procesa la imagen
                     img = Image.open(img_path)
-
-                    # Convierte la imagen a un array de numpy
                     data = np.array(img)
-
-                    # Verifica el número de dimensiones de la matriz
-                    if len(data.shape) == 3:
-                        # Verifica el número de canales de color
-                        if data.shape[2] == 3:
-                            # Calcula el promedio de los colores
-                            r, g, b = data.mean(axis=(0, 1))
-                        elif data.shape[2] == 4:
-                            # Calcula el promedio de los colores y el canal alfa
-                            r, g, b, a = data.mean(axis=(0, 1))
-                        else:
-                            raise ValueError(f'Unexpected number of channels: {data.shape[2]}')
+                    
+                    # Calcula el color promedio
+                    if len(data.shape) == 3 and data.shape[2] in [3, 4]:
+                        avg_color = data.mean(axis=(0,1))[:3]
                     elif len(data.shape) == 2:
-                        # Calcula un solo promedio para una imagen en escala de grises
-                        r = g = b = data.mean()
+                        avg_color = [data.mean()] * 3
                     else:
-                        raise ValueError(f'Unexpected number of dimensions: {len(data.shape)}')
-
-                    # Invierte los colores
-                    r = 255 - r
-                    g = 255 - g
-                    b = 255 - b
-
-                    # Convierte el color promedio a hexadecimal
-                    inside_color = '#{:02x}{:02x}{:02x}'.format(int(r), int(g), int(b))
+                        print(f"Unexpected image format for {file_name}")
+                        continue
+                    
+                    # Calcula el color complementario
+                    r, g, b = get_complementary_color(*avg_color)
+                    
+                    # Convierte el color complementario a hexadecimal
+                    inside_color = '#{:02x}{:02x}{:02x}'.format(r, g, b)
+                    
+                    print(f"Color complementario para {file_name}: {inside_color}")
+                    
+                    # Usa el color complementario
+                    pyautogui.write(inside_color)
+                    
+                    # Solo procesa la primera imagen
+                    break
+            else:
+                print(f"No se encontraron imágenes .jpg en {ruta}")
         
         #---------------------------------------------------------------------------------------------------------
             # Primera parte: Abrir Adobe After Effects
