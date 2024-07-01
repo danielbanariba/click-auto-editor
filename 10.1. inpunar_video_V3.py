@@ -38,6 +38,8 @@ for coord in coordenadas:
     pyautogui.click(impugnar2)
     pyautogui.click(continuar1)
     pyautogui.click(continuar2)
+    time.sleep(1)
+    pyautogui.click(continuar2)
     pyautogui.click(licencia)
     time.sleep(1)
     pyautogui.click(continuar2)

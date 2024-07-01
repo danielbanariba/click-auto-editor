@@ -36,10 +36,12 @@ for coord in coordenadas:
     time.sleep(1)
     pyautogui.click(coord)
     time.sleep(2)
-    #pyautogui.click(continuar1) #Comentar cuando cambie el inicio
+    pyautogui.click(continuar1) #Comentar cuando cambie el inicio
     pyautogui.click(impugnar)
     pyautogui.click(impugnar2)
     pyautogui.click(continuar1)
+    pyautogui.click(continuar2)
+    time.sleep(1)
     pyautogui.click(continuar2)
     pyautogui.click(licencia)
     time.sleep(1)
