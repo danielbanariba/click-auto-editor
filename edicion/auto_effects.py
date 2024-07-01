@@ -87,7 +87,7 @@ def auto_effects():
             
             # Busca la primera imagen .jpg en el directorio
             for file_name in os.listdir(ruta):
-                if file_name.endswith('.jpg'):
+                if file_name.endswith('.png'):
                     img_path = os.path.join(ruta, file_name)
                     
                     # Procesa la imagen
@@ -109,7 +109,7 @@ def auto_effects():
                     # Convierte el color complementario a hexadecimal
                     inside_color = '#{:02x}{:02x}{:02x}'.format(r, g, b)
                     
-                    print(f"Color complementario para {file_name}: {inside_color}")
+                    #print(f"Color complementario para {file_name}: {inside_color}")
                     
                     # Usa el color complementario
                     pyautogui.write(inside_color)
@@ -117,7 +117,7 @@ def auto_effects():
                     # Solo procesa la primera imagen
                     break
             else:
-                print(f"No se encontraron imágenes .jpg en {ruta}")
+                print(f"No se encontraron imágenes .png en {ruta}")
         
         #---------------------------------------------------------------------------------------------------------
             # Primera parte: Abrir Adobe After Effects
