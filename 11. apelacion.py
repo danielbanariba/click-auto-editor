@@ -24,7 +24,7 @@ firma = "Daniel Alejandro Barrientos Anariba"
 #------------------------------------------
 apelar_abajo = 2542, 760
 apelar_arriba = 2596, 415
-entiendo_los_riesgos = 2432, 864
+entiendo_los_riesgos = 2444, 845
 nombre_y_apellido_coordenadas = 2540, 501
 nombre_y_apellido = "Daniel Alejandro Barrientos Anariba"
 dirreccion_postal_coordenadas = 3045, 498
@@ -59,6 +59,7 @@ for i in range(1):
     time.sleep(1)
     pyautogui.click(entiendo_los_riesgos)
     pyautogui.click(continuar2)
+    time.sleep(1)
     pyautogui.click(nombre_y_apellido_coordenadas)
     pyautogui.write(nombre_y_apellido)
     pyautogui.click(dirreccion_postal_coordenadas)

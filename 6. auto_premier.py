@@ -35,7 +35,7 @@ def auto_premier():
             pyautogui.write('Premier')  # escribe el nombre del programa
             time.sleep(1)
             pyautogui.press('enter')  # abre el programa
-            time.sleep(15)  # espera a que el programa se abra
+            time.sleep(17)  # espera a que el programa se abra
         
         #---------------------------------------------------------------------------------------------------------    
             # Segunda parte: Crear un nuevo proyecto
@@ -144,6 +144,7 @@ def auto_premier():
             pyautogui.click(3632, 1030) # Send to media encoder
             time.sleep(2)
             pyautogui.click(3811, 2) # Cerramos premier pro
+            time.sleep(20)
             pyautogui.press('enter')
             print("El proyecto " + name_proyect + " se ha exportado correctamente")
             # El ciclo se repite para el siguiente archivo

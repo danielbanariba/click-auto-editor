@@ -32,7 +32,7 @@ coordenadas = [(3214, 884), (3216, 784), (3216, 677), (3222, 573), (3215, 463), 
 
 for coord in coordenadas:
     pyautogui.click(2539, 598)
-    pyautogui.scroll(-1000)
+    pyautogui.scroll(-10000)
     time.sleep(1)
     pyautogui.click(coord)
     time.sleep(2)
