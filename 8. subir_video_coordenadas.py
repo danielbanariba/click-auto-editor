@@ -51,7 +51,7 @@ for dirpath in selected_dirs:
                     # Set the locale to Spanish
                     locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")
                     # Establece una fecha base en el año 2025
-                    base_date = datetime(2026, 6, 23)  # Fecha específica: 29 de Junio de 2026
+                    base_date = datetime(2026, 7, 29)  # Fecha específica: 29 de Junio de 2026
                     day = base_date.strftime("%d")
                     month = base_date.strftime("%b").replace('.', '')  # Remove the period
                     year = base_date.strftime("%Y")
@@ -97,9 +97,11 @@ for dirpath in selected_dirs:
                     time.sleep(1)
                     # COMENTAR ABAJO SI ME QUITAN LA MONETIZACION
                     #Activamos la monetizacion
-                    pyautogui.click(2689, 461)
-                    pyautogui.click(2689, 461)
-                    pyautogui.click(2801, 543) #Hecho
+                    pyautogui.click(2821, 445)
+                    time.sleep(1)
+                    pyautogui.click(2483, 443)
+                    pyautogui.click(2794, 548) #Hecho
+                    time.sleep(1)
                     pyautogui.click(2555, 642) #Revisar Colocacion de anuncios
                     time.sleep(1)
                     pyautogui.click(2754, 279) #Colocar anuncios automaticamente
@@ -118,9 +120,9 @@ for dirpath in selected_dirs:
                     time.sleep(1)
                     pyautogui.scroll(-1000)
                     time.sleep(1)
-                    pyautogui.click(2467, 940) #Nada de lo anterior
+                    pyautogui.click(2464, 918) #Nada de lo anterior
                     time.sleep(1)
-                    pyautogui.click(3126, 408) #Enviar calificacion
+                    pyautogui.click(3107, 404) #Enviar calificacion
                     time.sleep(7)
                     pyautogui.click(3311, 998) #Siguiente
                     time.sleep(1)

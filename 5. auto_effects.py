@@ -21,7 +21,7 @@ folders = list(folders)
 random.shuffle(folders)
 
 # Limita la lista al n de numeros
-folders = folders[:120]
+folders = folders[:200]
 
 def get_complementary_color(r, g, b):
     # Convertir RGB a HSV
