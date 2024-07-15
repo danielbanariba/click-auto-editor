@@ -148,7 +148,7 @@ def auto_premier():
             pyautogui.press('enter')
             print("El proyecto " + name_proyect + " se ha exportado correctamente")
             # El ciclo se repite para el siguiente archivo
-            time.sleep(90)
+            time.sleep(40)
 
 if __name__ == "__main__":
     auto_premier()

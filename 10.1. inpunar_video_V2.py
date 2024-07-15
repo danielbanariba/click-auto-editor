@@ -58,6 +58,6 @@ for coord in coordenadas:
     pyautogui.write(firma)
     time.sleep(1)
     pyautogui.click(continuar2)
-    time.sleep(4)
+    time.sleep(6)
     pyautogui.click(cerrar)
     # time.sleep(4)

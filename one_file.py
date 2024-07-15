@@ -20,7 +20,7 @@ for folder_name, subfolders, files in os.walk(directory):
 		print(folder_name)  # Mover esta línea aquí imprime solo las carpetas con un archivo
 
 # Descomentar para eliminar las carpetas con un solo archivo
-# # Function to safely remove a folder, catching PermissionError
+# Function to safely remove a folder, catching PermissionError
 # def safe_remove_folder(folder_path):
 # 	try:
 # 		shutil.rmtree(folder_path)

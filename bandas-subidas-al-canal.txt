@@ -15,6 +15,7 @@ After Oblivion - Stamina
 Agonize - Chaos Reborn
 Alchemist - Austral Alien
 Aletheian - Apolutrosis
+Aletheian - Dying Vine
 Alexander Oden - The Culmination
 Alice Through The Windshield Glass - Brutalis Australis
 All Is At An End - Brutal Nature (320)
@@ -23,6 +24,7 @@ Allegiance - Hymn Till Hangagud
 Allegiance - Vrede
 Anam - Genesis
 Ancient Hymns - From Chaos (320)
+Ancress - Victoria/Jeiunium (320)
 Angel Of Disease - Hypercube
 Angerot - The Divine Apostate (Inverted Edition)
 Anime Torment - Afterlife
@@ -46,6 +48,7 @@ Autopsy - Acts Of The Unspeakable (RM 2003)
 Azure Emote - Chronicles Of An Aginig Mammal
 Bear Mace - Charred Field of Slaughter (320)
 Beastplague - A Different Animal
+Beheaded Zombie - Счастье Для Всех
 Behold the Slitted Carcass - Divine Hypothetical Self-Contained Plane of Existence
 Belphegor - The Last Supper (Remastered 2021)
 Big Sleeping Lavaman - The Adversary
@@ -146,6 +149,7 @@ Desecrated Dreams - Die!mensions
 Desecrated Dreams - Feelings Of Guilt
 Desecration - Gore and Perversion 2
 Deserted Fear - Drowned By Humanity
+Despondent - Tales of Insanity
 Destinity - In Excelsis Dementia
 Destinity - Synthetic Existence
 Destinity - The Inside
@@ -187,6 +191,7 @@ Embodied - Perception Perverse
 Eminenz - Nemesis Noctura
 Endless Affliction - Savage Retribution
 Endless Curse - Drink, Smoke and Don't Give a Fuck
+Endless Distrust - Collateral Damage
 Endless Fear - The Witch
 Engorgerectomy - 725
 Enterprise Earth - Luciferous
@@ -196,6 +201,7 @@ Epicedium - Intoxicated Intercourse
 Epicenter - Subversion
 Eradication of the Unworthy Infants - Change is Good
 Erectus - Decimation
+ErrorGod - Ballad of Torture (320)
 Errorgeist - Agendas Elite
 Evil Warriors - Expressions Of Endless Dreams
 Evoked - Ravenous Compulsion
@@ -238,6 +244,7 @@ God Defamer - Relics
 Godless - Ecce Homo: Post Lux Tenebras, Pulsio XIII Ultima Ratio
 Godslut - Procreation of God
 Godtoth - Satanic Holocaust
+Gonoba - Chains Of Ignorance
 Gore Of War - Foibe
 Gore Penetration - Fetish Concept
 Goreskin Coffin  - Corpse Filled Caskets
@@ -273,6 +280,7 @@ Hot Graves - Magnificent Death
 Hukutus - Oksitosiini
 Human Infection - Infest To Ingest
 Hunting the Beast - When Night Falls...
+Hypaethral - Hypaethral
 Icethrone - Winter Tales
 Ichor - Hadal Ascending
 Ignominious - The Throne and the Altar
@@ -375,6 +383,7 @@ Necrophobic - Dawn of the Damned (320)
 Necrovile - Engorging The Devourmental Void
 Nekroza - Procesija Ucrvanih
 Nemoris - Esoteric Visions of the Old Ritual
+Neverborn - 1000 Miles of Hell
 Nihilo - Concordia Perpetua
 Nistikko - Kehä
 No Zodiac - Population Control
@@ -382,10 +391,12 @@ Noctem - Credo Certe Ne Cras
 Nocturnal Bleed - Lake of Fire
 North - Czekajac Na Sztorm
 Norther - Mirror Of Madness
+Not Beneath - Memento Mori
 Nothing Lies Above - Liber Teth
 Nyogthaeblisz - Abrahamic Godhead Besieged by Adversarial Usurpation
 Obastra - Mosaic
 Obituary - Cause of Death (1998 remastered)
+Obnoxious - Lab#01
 Obscene Eulogy - Defining Hate - The Truth Undead
 Occult - Rage To Revenge
 Occult Burial - Burning Eerie Lore
@@ -429,6 +440,7 @@ Qishash - Unseen Truth
 Queiron - Templars Beholding Failures
 Radement - The Swarm
 Rainwill - Canvas
+Rape Festival - Rape Festival
 Rapture - Perpetual Transgression
 RazorRape - Fucked Beyond Recognition
 Re-Armed - Rottendam
@@ -443,6 +455,7 @@ Rotten Penetration - Horrorous State Of Anatomical Decomposition
 Rotten Poodle - Animal Supremacy
 Round Up Ultra - The Seeds
 Rudra - The Aryan Crusade
+SHACKLΣS - HATREDS RESERVOIR
 Sacrificium - Escaping the Stupor (VBR)
 Sad - Abandoned And Forgotten
 Sadism - Summon
@@ -463,6 +476,7 @@ Shrine of Insanabilis - Vast Vortex Litanies
 Siaskel - Haruwen Airen
 Siaskel - Jatenentopen Thejin
 Sicarius - God of Dead Roots
+Silent On Fifth Street - Embodied Cognition
 Sinsaenum - Repulsion for Humanity
 Sisters Of Suffocation - Eradication
 Skinned - Spawn Of Insanity
@@ -472,6 +486,7 @@ Snakepit - Eternal Conlfagration
 Sorrow - Hatred and Disgust
 Sothoros - Flood The Stone
 Soulphureus - Rest in Hell
+Sparganum Proliferum - Parasitic Mutated Infecting Of Human Beings
 Spazmosity - Welcome Death
 Spearhead - Pacifism Is Cowardice
 Spectral Souls - Towards Extinction
@@ -519,8 +534,10 @@ Throne ov Shiva - Enchanter ov Serpents (320)
 Throne ov Shiva - The Last Anthem (320)
 To Descend - Exorcism Of Hope
 To The Grave - Global Warning
+Tombthroat - Eden Apocalypse
 Torn the Fuck Apart - Kill.Bury.Repeat.
 Torture Squad - Esquadrão de Tortura
+Torturor - Torturor
 Totenmond - Lichtbringer
 Toxaemia - Where Paths Divide (320)
 Trench Warfare - Hatred Prayer
@@ -568,6 +585,7 @@ Woe of Tyrants - Behold the Lion
 Wretched Fate - Fleshletting
 Xeno - Atlas Construct
 Xenoblight - Procreation
+Xenosis - Haunted Skies
 Yautja - Songs Of Descent
 Zmey Gorynich - Mother Russia
 Zombie Cookbook - Horroris Causa
@@ -575,23 +593,73 @@ Zombie Cookbook - Horroris Causa
 Батюшка - Панихида
 Неживой - Пять Башен
 兀突骨 - 黄泉ガヘリ
-Aletheian - Dying Vine
-Ancress - Victoria/Jeiunium (320)
-Beheaded Zombie - Счастье Для Всех
-Despondent - Tales of Insanity
-Endless Distrust - Collateral Damage
-ErrorGod - Ballad of Torture (320)
-Gonoba - Chains Of Ignorance
-Hypaethral - Hypaethral
-Neverborn - 1000 Miles of Hell
-Not Beneath - Memento Mori
-Obnoxious - Lab#01
-Rape Festival - Rape Festival
-SHACKLΣS - HATREDS RESERVOIR
-Silent On Fifth Street - Embodied Cognition
-Sparganum Proliferum - Parasitic Mutated Infecting Of Human Beings
-Splatta Fish - Celestial Plague
-The Exit Wound - Lonely Path
-Tombthroat - Eden Apocalypse
+13th Column - As Death Takes All
+Synperium - Elemental Disharmony
+A Vulgar Picture - The World I Found
+Bästard - Dementia and Filth (320)
+Beyond Grace - Seekers
+Cadaveric Crematorium - Serial Grinder
+Cerebral Engorgement - Cerebral Chronicles
+Erimha - Thesis Ov Warfare
+Gluttony - Drogulus
+Gorguts - The Erosion of Sanity (RM 2006)
+Hutt - Monstruario
+Indecent Excision - Deification Of The Grotesque
+Infester - To The Depths, In Degradation + Darkness Unveiled [Reissue]
+Moral Collapse - Divine Prosthetics
+Sedlec Ossuary - Machine Born
+TerroRaze - Frozen Hell
+The Biscuit Merchant - Ongaku
+The Mask Of Blood - Atrocidad
+Venereal Messiah - Bleeding the Humans
+Wrathrone - Eve of Infliction (320)
+Os Capial - Emboscada Caipira de Plasma
+Adam Abou-Gad - Roots of Perdition, Volume 1: Declension
+Ammonium - Erased Existence
+Bestial Sight - When You Need Metal...Go to Hell (320)
+Cretin - Freakery
+Dead Alone - Ad Infinitum
+Decomposition Of Entrails - Pestilential Synthesis
+Déhà - How To Despise Humanity In 7 Lessons And A Half
+Encircle - Lost Chronicles
+Exhausted Prayer - Ruined
+Festival Of Mutilation - Gods Of Infernal Desolation
+Immortal Suffering - Preyed Upon
+Malevolent - Gripping The Grinding Of Reality
+Psychopathic Rage - Fight! Kill! Win!
+Psycroptic - As the Kingdom Drowns
+Pungent Stench - "Club Mondo Bizarre" - For Members Only
+Septory - World War Chaos
+Suffersystem - The Mutilated One
+Terrorist - Mata O Muere
 Torturor - Torturor
-Xenosis - Haunted Skies
+Antigama - Meteor
+Ancient Hymns - From Chaos (320)
+Annihilator - For The Demented
+Aspatra - Aspatra
+Barbaric Penetration - Graveyard Hunt for Carnal Pleasure EIT - 002 ( Sold Out )
+Beyond Belief - Towards the Diabolical Experiment (RM 2016)
+Buffalo Grillz - Martin Burger King
+Caress - Return To The Hospital
+Crurifragium - Beasts of the Temple of Satan
+Detest - Sacred Revelation (320)
+FamishGod - Devourers of Light (320)
+Funeral Inception - H.A.T.E.
+INFINITE DENSITY - Recollapse of the Universe
+In Vain - The Latter Rain
+Insanity - Death After Death
+Mass Massacre - Repentance In Gangrene
+Mindwork - Eterea
+Moribund Sun - Mental Torture
+Necrowar - All Trajectory
+Protest - Abuse of Power
+Queiron - The Shepherd of Tophet
+Renascent - Praise of the Lord God Almighty
+Synapse Defect - Conspiracy to Overthrow...
+The Heritance - Focus In Reliquum
+The Monolith Deathcult - V2 - Vergelding: Dawn of the Planet of the Ashes
+The Parallax - Obliquity of the Ecliptic
+Twisted Ending - Hank Fenner
+Vale of Miscreation - Emergence Within the Corridor of Unholy Lacerations
+Vyrion - Vyrion
+Warfield - Seven Skins
