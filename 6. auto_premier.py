@@ -63,8 +63,12 @@ def auto_premier():
         #---------------------------------------------------------------------------------------------------------
             #Tercera parte: Importar los archivos de after effects
             pyautogui.click(2627, 283)
-            pyautogui.hotkey('ctrl', 'i') # importarmos los archivos
-            time.sleep(2)
+            time.sleep(1)
+            pyautogui.click(1934, 32)
+            time.sleep(1)
+            pyautogui.click(2040, 531)
+            #pyautogui.hotkey('ctrl', 'i') # importarmos los archivos
+            time.sleep(1)
             pyautogui.click(2333, 102)
             pyautogui.write(main_dir_path) # ruta de los archivos
             pyautogui.press('enter')
@@ -148,7 +152,7 @@ def auto_premier():
             pyautogui.press('enter')
             print("El proyecto " + name_proyect + " se ha exportado correctamente")
             # El ciclo se repite para el siguiente archivo
-            time.sleep(40)
+            time.sleep(70)
 
 if __name__ == "__main__":
     auto_premier()

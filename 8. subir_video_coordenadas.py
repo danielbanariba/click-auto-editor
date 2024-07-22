@@ -51,7 +51,7 @@ for dirpath in selected_dirs:
                     # Set the locale to Spanish
                     locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")
                     # Establece una fecha base en el año 2025
-                    base_date = datetime(2026, 7, 25)  # Fecha específica: 26 de Junio de 2026
+                    base_date = datetime(2026, 7, 31)  # Fecha específica: 26 de Junio de 2026
                     day = base_date.strftime("%d")
                     month = base_date.strftime("%b").replace('.', '')  # Remove the period
                     year = base_date.strftime("%Y")
