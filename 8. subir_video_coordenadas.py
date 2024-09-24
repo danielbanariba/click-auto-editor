@@ -51,7 +51,7 @@ for dirpath in selected_dirs:
                     # Set the locale to Spanish
                     locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")
                     # Establece una fecha base en el año 2025
-                    base_date = datetime(2026, 7, 31)  # Fecha específica: 26 de Junio de 2026
+                    base_date = datetime(2026, 8, 30)  # Fecha específica: 26 de Junio de 2026
                     day = base_date.strftime("%d")
                     month = base_date.strftime("%b").replace('.', '')  # Remove the period
                     year = base_date.strftime("%Y")
@@ -68,7 +68,7 @@ for dirpath in selected_dirs:
                     with open("bandas-subidas-al-canal.txt", "a", encoding='utf-8') as f:
                         f.write((titulo_video)[:-13] + "\n")
                     # Segunda parte: Abrir Una nueva pestanna
-                    pyautogui.click(3594, 18)
+                    pyautogui.click(3618, 19)
                     time.sleep(7)
                     pyautogui.click(3231, 64)
                     pyautogui.write(url_upload)
@@ -137,16 +137,16 @@ for dirpath in selected_dirs:
                     time.sleep(1)
                     pyautogui.click(3296, 1001) #Click en siguiente
                     #time.sleep(15)
-                    pyautogui.click(2943, 820) #Programar
+                    pyautogui.click(2941, 733) #Programar
                     time.sleep(1)
-                    pyautogui.click(2633, 705) #Fecha
+                    pyautogui.click(2615, 674) #Fecha
                     pyautogui.hotkey('ctrl', 'a')
                     time.sleep(1)
                     pyautogui.write(publish_date_string)#Ponemos cualquier fecha aleatoria en el intervalo de 30 dias
                     time.sleep(1)
                     pyautogui.press('enter')
                     time.sleep(1)
-                    pyautogui.click(2761, 711)
+                    pyautogui.click(2708, 674)
                     pyautogui.hotkey('ctrl', 'a')
                     pyautogui.write(publish_time_string)#Ponemos cualquier hora aleatoria con intervalo de 15 minutos
                     pyautogui.press('enter')
