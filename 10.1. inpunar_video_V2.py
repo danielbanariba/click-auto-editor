@@ -26,9 +26,8 @@ mensaje = "Hola! Lastimosamente no pude conseguir los permisos correspondientes 
 
 firma = "Daniel Alejandro Barrientos Anariba"
 
+# Coordenadas de las canciones a impugnar
 coordenadas = [(3214, 884), (3216, 784), (3216, 677), (3222, 573), (3215, 463), (3214, 359)]
-
-#num = int(input("Cuantas canciones deseas inpugnar? "))
 
 for coord in coordenadas:
     pyautogui.click(2539, 598)

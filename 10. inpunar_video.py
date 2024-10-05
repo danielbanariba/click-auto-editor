@@ -27,9 +27,9 @@ mensaje = "Hola! Lastimosamente no pude conseguir los permisos correspondientes 
 firma = "Daniel Alejandro Barrientos Anariba"
 
 
-#num = int(input("Cuantas canciones deseas inpugnar? "))
+num = int(input("Cuantas canciones deseas inpugnar? "))
 
-for i in range(1):
+for i in range(num):
     pyautogui.click(seleccionar_cancion)  
     time.sleep(1)
     pyautogui.click(continuar1) #Comentar cuando cambie el inicio

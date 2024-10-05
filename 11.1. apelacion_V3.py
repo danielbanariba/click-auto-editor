@@ -6,7 +6,7 @@ import threading
 continuar1 = 3287, 882
 continuar2 = 3287, 930
 licencia = 2463, 564
-seleccionar_cancion = 3208, 714
+seleccionar_cancion = 3221, 694
 accepto_los_terminos = 2433, 772
 impugnar = 2763, 428
 informacion_de_tu_licencia = 2640, 467
@@ -40,16 +40,14 @@ Departamento_coordenadas = 2983, 659
 Departamento = "Francisco Morazan"
 codigo_postal_coordenadas = 3206, 658
 codigo_postal = "12101"
+#------------------------------------------
+#------------------------------------------
 
-num = int(input("Cuantas canciones deseas apelar? "))
+coordenadas = [(3226, 945), (3220, 873), (3234, 788), (3218, 700)]
 
-#time.sleep(10)
-
-for i in range(num):
-    if keyboard.is_pressed('p'):
-        break
-    pyautogui.click(seleccionar_cancion)  
-    time.sleep(1)
+for coord in coordenadas:
+    pyautogui.click(coord)
+    time.sleep(2)
     pyautogui.click(apelar_arriba)
     pyautogui.click(apelar_abajo)
     pyautogui.click(continuar1)
@@ -89,6 +87,6 @@ for i in range(num):
     pyautogui.write(firma)
     time.sleep(1)
     pyautogui.click(continuar2)
-    time.sleep(4)
+    time.sleep(6)
     pyautogui.click(cerrar)
-    # time.sleep(3)
+    time.sleep(1)

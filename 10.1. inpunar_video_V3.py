@@ -28,8 +28,6 @@ firma = "Daniel Alejandro Barrientos Anariba"
 
 coordenadas = [(3222, 937), (3212, 850), (3213, 769), (3207, 681)]
 
-#num = int(input("Cuantas canciones deseas inpugnar? "))
-
 for coord in coordenadas:
     pyautogui.click(coord)
     time.sleep(2)
