@@ -43,9 +43,10 @@ codigo_postal = "12101"
 #------------------------------------------
 #------------------------------------------
 
-coordenadas = [(3226, 945), (3220, 873), (3234, 788), (3218, 700)]
+coordenadas = [(3234, 788), (3218, 700)]
 
 for coord in coordenadas:
+    time.sleep(4)
     pyautogui.click(coord)
     time.sleep(2)
     pyautogui.click(apelar_arriba)

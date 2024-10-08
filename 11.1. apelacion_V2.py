@@ -46,6 +46,7 @@ coordenadas = [(3220, 887), (3230, 778), (3228, 684), (3212, 554),(3212, 454), (
 #num = int(input("Cuantas canciones deseas inpugnar? "))
 
 for coord in coordenadas:
+    time.sleep(4)
     pyautogui.click(2539, 598)
     pyautogui.scroll(-10000)
     time.sleep(1)
