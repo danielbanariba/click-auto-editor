@@ -8,6 +8,12 @@ import json
 from subir_video import authenticate
 from subir_video import consulta_disponibilidad_API
 
+# TODO se me ocurre mejor hacer que el programa consiga el titulo de todos los videos que tengo subidos, y se cree una lista de reproducción con los titulos de las bandas,
+# Osea solo los que terminen el nombre con - Banda, para poder indentificar mas facilmente el nombre y si existen dos bandas con el mismo nombre, por ejemplo Totenmond, que hay dos videos diferentes, pero
+# Son de la misma banda, entonces solo se le agregue a la lista de reproducción una vez, y se le agregue el video a esa lista de reproducción, y si no existe la lista de reproducción, se cree una nueva
+
+
+
 def initialize_upload(youtube, file):
     request = youtube.videos().insert(
         part="snippet,status",

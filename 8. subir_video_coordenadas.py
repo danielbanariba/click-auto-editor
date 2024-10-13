@@ -10,15 +10,22 @@ import shutil  # Import the shutil module
 root_dir = "E:\\01_edicion_automatizada\\upload_video"
 uploading_dir = "E:\\01_edicion_automatizada\\upload_video\\00. videos_que_se_estan_subiendo"  # Define the uploading directory
 url_upload = 'https://www.youtube.com/upload'
+already_uploaded_dir = "E:\\01_edicion_automatizada\\bandas_que_supuestamente_ya_se_subieron"
+
+# Función para verificar si un video ya ha sido subido
+def check_if_already_uploaded(title):
+    with open("bandas-subidas-al-canal.txt", "r", encoding='utf-8') as f:
+        uploaded_titles = f.read().splitlines()
+    return title in uploaded_titles
 
 # Create a list of directories that contain at least one .mp4 file
 dirs_with_videos = [dirpath for dirpath, dirnames, filenames in os.walk(root_dir) 
                     if any(filename.endswith('.mp4') for filename in filenames) 
                     and "00. videos_que_se_estan_subiendo" not in dirpath]  # Exclude the uploading directory
 
-num = int(input("Cuantas videos desea subir hoy? "))
+num = int(input("¿Cuántos videos desea subir hoy? "))
 
-# Randomly select 7 directories
+# Randomly select directories
 selected_dirs = random.sample(dirs_with_videos, num)
 
 # Move the selected directories to the uploading directory and update selected_dirs
@@ -31,11 +38,6 @@ selected_dirs.sort()
 
 # Now, change the root directory to the uploading directory
 root_dir = uploading_dir
-
-# Primera parte: Abrir 7 ventanas en blanco en el navegador
-# for _ in range(7):
-#     webbrowser.open_new_tab(url_upload)
-# time.sleep(30)
 
 # Process all videos
 # Select a random directory
@@ -64,10 +66,16 @@ for dirpath in selected_dirs:
                     titulo_video = paragraphs[0]
                     descripcion_video = '\n\n'.join(paragraphs[1:])
                     
+                    # Verificar si el video ya ha sido subido
+                    if check_if_already_uploaded(titulo_video[:-13]):
+                        print(f"El video '{titulo_video[:-13]}' ya ha sido subido. Moviendo a la carpeta de videos ya subidos.")
+                        shutil.move(dirpath, already_uploaded_dir)
+                        continue
+                    
                     # Agrega el título del video a la lista
                     with open("bandas-subidas-al-canal.txt", "a", encoding='utf-8') as f:
                         f.write((titulo_video)[:-13] + "\n")
-                    # Segunda parte: Abrir Una nueva pestanna
+                    # Segunda parte: Abrir Una nueva pestaña
                     pyautogui.click(3618, 19)
                     time.sleep(7)
                     pyautogui.click(3231, 64)
@@ -92,7 +100,7 @@ for dirpath in selected_dirs:
                     pyautogui.write(descripcion_video)
                     time.sleep(7)
                     
-                    #Quita parte: Publicar el video
+                    #Quinta parte: Publicar el video
                     pyautogui.click(3296, 1001) #Click en siguiente
                     time.sleep(1)
                     # COMENTAR ABAJO SI ME QUITAN LA MONETIZACION
