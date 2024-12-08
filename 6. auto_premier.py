@@ -2,6 +2,7 @@ import time
 import random
 import os
 import pyautogui
+import psutil # pip install psutil
 
 #pyautogui.FAILSAFE = False
 
@@ -14,6 +15,27 @@ premier_dir = "C:\\Users\\banar\\Desktop\\save_premier_pro"
 # Obtener todos los archivos .aep en la ruta principal
 aep_files = [file for file in os.listdir(main_dir_path) if file.endswith('.aep')]
 processed_files = set()  # Conjunto para almacenar archivos ya procesados
+
+def is_premier_running():
+    """Verifica si Adobe Premier Pro está ejecutándose"""
+    for proc in psutil.process_iter(['name']):
+        try:
+            if 'Adobe Premiere Pro.exe' in proc.info['name']:
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+    return False
+
+def wait_for_premier_close(timeout=300):  # timeout de 5 minutos por defecto
+    """Espera hasta que Premier Pro se cierre o se alcance el timeout"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if not is_premier_running():
+            # Esperamos 5 segundos adicionales para asegurarnos que todos los procesos relacionados se cierren
+            time.sleep(5)
+            return True
+        time.sleep(2)  # Chequeamos cada 2 segundos
+    return False
 
 # Recorre todos los archivos en la ruta principal
 def auto_premier():
@@ -29,7 +51,7 @@ def auto_premier():
             name_proyect = os.path.splitext(file_name)[0]
 
             save_premier_pro = premier_dir
-            #---------------------------------------------------------------------------------------------------------
+        #---------------------------------------------------------------------------------------------------------
             # Primera parte: Abrir Premier Pro
             pyautogui.press('winleft')  # abre el menú de inicio
             time.sleep(1)
@@ -151,9 +173,13 @@ def auto_premier():
             pyautogui.click(3811, 2) # Cerramos premier pro
             time.sleep(2)
             pyautogui.press('enter')
-            print("El proyecto " + name_proyect + " se ha exportado correctamente")
-            # El ciclo se repite para el siguiente archivo
-            time.sleep(200)
+            
+            if wait_for_premier_close():
+                print("El proyecto " + name_proyect + " se ha exportado correctamente")
+            else:
+                print("WARNING: Timeout esperando que Premier Pro se cierre para" + {name_proyect})
+            
+            # El ciclo continuará automáticamente cuando Premier Pro se cierre
 
 if __name__ == "__main__":
     auto_premier()
