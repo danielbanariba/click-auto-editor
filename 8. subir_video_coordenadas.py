@@ -2,8 +2,7 @@ import os
 import pyautogui
 import time
 import random
-import webbrowser
-from datetime import datetime, timedelta
+from datetime import datetime
 import locale
 import shutil  # Import the shutil module
 
@@ -53,7 +52,7 @@ for dirpath in selected_dirs:
                     # Set the locale to Spanish
                     locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")
                     # Establece una fecha base en el año 2025
-                    base_date = datetime(2026, 8, 26)  # Fecha específica: 29 de Junio de 2026
+                    base_date = datetime(2026, 8, 29)  # Fecha específica: 29 de Junio de 2026
                     day = base_date.strftime("%d")
                     month = base_date.strftime("%b").replace('.', '')  # Remove the period
                     year = base_date.strftime("%Y")
@@ -81,11 +80,11 @@ for dirpath in selected_dirs:
                     pyautogui.click(3231, 64)
                     pyautogui.write(url_upload)
                     pyautogui.press('enter')
-                    time.sleep(5)
+                    time.sleep(8)
                     
                     #Tercera parte: Subir el video
                     pyautogui.click(2881, 505)
-                    time.sleep(5)
+                    time.sleep(8)
                     # Update the path to the new location of the video file
                     pyautogui.write(os.path.join(dirpath, filename))
                     pyautogui.press('enter')

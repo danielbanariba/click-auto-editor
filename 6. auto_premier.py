@@ -9,6 +9,7 @@ import pyautogui
 main_dir_path = "C:\\Users\\banar\\Desktop\\save_after_effects"
 ruta_intro = "C:\\Users\\banar\\Documents\\Intro Daniel Banariba"
 path_render = "E:\\01_edicion_automatizada\\audio_scripts"
+premier_dir = "C:\\Users\\banar\\Desktop\\save_premier_pro"
 
 # Obtener todos los archivos .aep en la ruta principal
 aep_files = [file for file in os.listdir(main_dir_path) if file.endswith('.aep')]
@@ -27,7 +28,7 @@ def auto_premier():
             # Extraer el nombre del proyecto del archivo
             name_proyect = os.path.splitext(file_name)[0]
 
-            save_premier_pro = "C:\\Users\\banar\\Desktop\\save_premier_pro"
+            save_premier_pro = premier_dir
             #---------------------------------------------------------------------------------------------------------
             # Primera parte: Abrir Premier Pro
             pyautogui.press('winleft')  # abre el menú de inicio
@@ -39,7 +40,7 @@ def auto_premier():
         
         #---------------------------------------------------------------------------------------------------------    
             # Segunda parte: Crear un nuevo proyecto
-            pyautogui.click(1992, 190) # hace clic en "New Project"
+            pyautogui.click(1985, 196) # hace clic en "New Project"
             time.sleep(2)
             random_numbers = str(random.randint(0, 9)) + str(random.randint(0, 9))
             pyautogui.write(name_proyect + random_numbers)
@@ -104,11 +105,11 @@ def auto_premier():
             
             #jalamos los archivos a la linea de tiempo
             pyautogui.mouseDown(2239, 786)
-            pyautogui.moveTo(2650, 859, duration=1)
+            pyautogui.moveTo(2650, 859, duration=3)
             pyautogui.mouseUp()
             time.sleep(2)
             pyautogui.mouseDown(2035, 789)  
-            pyautogui.moveTo(3210, 880, duration=1)  
+            pyautogui.moveTo(3210, 880, duration=3)  
             pyautogui.mouseUp()
             time.sleep(1)
             
@@ -119,7 +120,7 @@ def auto_premier():
             pyautogui.write('vhs')
             #Arreglamos la transicion vhs
             pyautogui.mouseDown(2049, 894)
-            pyautogui.moveTo(3199, 871, duration=1)
+            pyautogui.moveTo(3199, 871, duration=2)
             pyautogui.mouseUp()
             time.sleep(1)
             pyautogui.click(3019, 574)
@@ -152,7 +153,7 @@ def auto_premier():
             pyautogui.press('enter')
             print("El proyecto " + name_proyect + " se ha exportado correctamente")
             # El ciclo se repite para el siguiente archivo
-            time.sleep(70)
+            time.sleep(200)
 
 if __name__ == "__main__":
     auto_premier()

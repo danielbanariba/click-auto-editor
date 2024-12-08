@@ -1,7 +1,6 @@
 import pyautogui
 import time
 import keyboard
-import threading
 #------------------------------------------
 continuar1 = 3287, 882
 continuar2 = 3287, 930
