@@ -2,9 +2,10 @@ import time
 import random
 import os
 import pyautogui
-import psutil # pip install psutil
+import psutil 
+from PIL import ImageGrab 
 
-#pyautogui.FAILSAFE = False
+# pyautogui.FAILSAFE = False
 
 # Definir la ruta de la carpeta que contiene los archivos de After Effects
 main_dir_path = "C:\\Users\\banar\\Desktop\\save_after_effects"
@@ -15,6 +16,42 @@ premier_dir = "C:\\Users\\banar\\Desktop\\save_premier_pro"
 # Obtener todos los archivos .aep en la ruta principal
 aep_files = [file for file in os.listdir(main_dir_path) if file.endswith('.aep')]
 processed_files = set()  # Conjunto para almacenar archivos ya procesados
+
+def wait_for_progress_bar(x=3671, y=1070, timeout=5):
+    """
+    Espera hasta que la barra de progreso azul desaparezca
+    x, y: coordenadas donde buscar la barra de progreso
+    timeout: tiempo máximo de espera en segundos
+    """
+    start_time = time.time()
+    blue_color = (28, 108, 198)  # Color aproximado de la barra de progreso
+    tolerance = 30  # Tolerancia para la detección del color
+
+    def is_blue_present():
+        # Captura un pixel en las coordenadas especificadas
+        pixel = ImageGrab.grab(bbox=(x, y, x+1, y+1))
+        pixel_color = pixel.getpixel((0, 0))
+        
+        # Compara si el color está dentro del rango de tolerancia
+        return all(abs(a - b) <= tolerance for a, b in zip(pixel_color, blue_color))
+
+    # Espera a que aparezca la barra azul primero
+    while time.time() - start_time < timeout:
+        if is_blue_present():
+            print("Barra de progreso detectada, esperando que termine...")
+            break
+        time.sleep(0.5)
+
+    # Una vez detectada, espera a que desaparezca
+    while time.time() - start_time < timeout:
+        if not is_blue_present():
+            time.sleep(1)  # Espera adicional para asegurarse
+            return True
+        time.sleep(0.5)
+
+    print("WARNING: Timeout esperando la barra de progreso")
+    return False
+
 
 def is_premier_running():
     """Verifica si Adobe Premier Pro está ejecutándose"""
@@ -44,7 +81,6 @@ def auto_premier():
         file_name = random.choice(aep_files)
         
         if file_name not in processed_files:
-            file_path = os.path.join(main_dir_path, file_name)
             processed_files.add(file_name)  # Marcar el archivo como procesado
 
             # Extraer el nombre del proyecto del archivo
@@ -75,7 +111,7 @@ def auto_premier():
             # pyautogui.click(2385, 272)
             # pyautogui.click(2568, 99)
             # time.sleep(1)
-            #pyautogui.write(save_premier_pro)
+            # pyautogui.write(save_premier_pro)
             pyautogui.press('enter')
             time.sleep(1)
             pyautogui.click(2700, 554)
@@ -84,13 +120,13 @@ def auto_premier():
             time.sleep(2)
         
         #---------------------------------------------------------------------------------------------------------
-            #Tercera parte: Importar los archivos de after effects
+            # Tercera parte: Importar los archivos de after effects
             pyautogui.click(2627, 283)
             time.sleep(1)
             pyautogui.click(1934, 32)
             time.sleep(1)
             pyautogui.click(2040, 531)
-            #pyautogui.hotkey('ctrl', 'i') # importarmos los archivos
+            # pyautogui.hotkey('ctrl', 'i') # importarmos los archivos
             time.sleep(1)
             pyautogui.click(2333, 102)
             pyautogui.write(main_dir_path) # ruta de los archivos
@@ -108,7 +144,10 @@ def auto_premier():
             pyautogui.click(2947, 732)
             time.sleep(2)
             pyautogui.hotkey('ctrl', 'i') # importarmos el intro del video
-            time.sleep(19)
+            # time.sleep(19)
+            # Esperar a que se complete la importación
+            if not wait_for_progress_bar():
+                print(f"Error: La importación de {name_proyect} puede no haberse completado correctamente")
             pyautogui.click(2333, 102)
             pyautogui.write(ruta_intro) # ruta del intro
             pyautogui.press('enter')
@@ -118,14 +157,14 @@ def auto_premier():
             time.sleep(1)
             pyautogui.press('enter')
             time.sleep(1)
-            # # Esta parte se repite dos veces para evitar errores
+            # Esta parte se repite dos veces para evitar errores
             # pyautogui.click(2735, 401)
             # pyautogui.click(2955, 733)
             # time.sleep(2)
             # pyautogui.click(3105, 717)
             # time.sleep(1)
             
-            #jalamos los archivos a la linea de tiempo
+            # jalamos los archivos a la linea de tiempo
             pyautogui.mouseDown(2239, 786)
             pyautogui.moveTo(2650, 859, duration=3)
             pyautogui.mouseUp()
@@ -135,12 +174,12 @@ def auto_premier():
             pyautogui.mouseUp()
             time.sleep(1)
             
-            #ponemos la transicion vhs
+            # ponemos la transicion vhs
             pyautogui.click(2473, 664)
             pyautogui.click(2492, 776)
             pyautogui.click(1980, 691)
             pyautogui.write('vhs')
-            #Arreglamos la transicion vhs
+            # Arreglamos la transicion vhs
             pyautogui.mouseDown(2049, 894)
             pyautogui.moveTo(3199, 871, duration=2)
             pyautogui.mouseUp()
@@ -149,7 +188,7 @@ def auto_premier():
             time.sleep(1)
             pyautogui.click(3072, 778)
             
-            #Exportarlo a media encoder
+            # Exportarlo a media encoder
             pyautogui.hotkey('ctrl', 'm')
             time.sleep(2)
             pyautogui.click(2424, 203) # Selecionar la ruta de guardado

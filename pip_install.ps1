@@ -24,3 +24,4 @@ pip install pynput
 pip install pillow 
 pip install scipy 
 pip install colormath
+pip install psutil

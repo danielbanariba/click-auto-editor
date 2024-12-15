@@ -3,7 +3,7 @@ import PIL
 import eyed3
 from pydub import AudioSegment
 import shutil
-from PIL import Image #pip install pillow
+from PIL import Image
 import io
 import stat
 
@@ -66,9 +66,9 @@ for folder_name in os.listdir(main_dir_path):
                     audio_years.append(year)
                     genre = audio_file.tag.genre if audio_file.tag.genre else "Unknown"
                     audio_genres.append(genre)
-                    band = audio_file.tag.artist if audio_file.tag.artist else "Unknown"  # Extract band name
+                    band = audio_file.tag.artist if audio_file.tag.artist else "Unknown"
                     band_names.append(band)
-                    album = audio_file.tag.album if audio_file.tag.album else "Unknown"  # Extract album name
+                    album = audio_file.tag.album if audio_file.tag.album else "Unknown"
                     album_names.append(album)
 
         # Verificar si existe alguna imagen en el directorio
@@ -123,6 +123,10 @@ for folder_name in os.listdir(main_dir_path):
         text = f"{band_names[0]} - {album_names[0]} (Full Album)\n\nGenre: {audio_genres[0]}\nYear: {audio_years[0]}\n\nTracklist:\n\n"
     else:
         text = "Unknown - Unknown\nGenre: Unknown\nYear: Unknown\n\n"
+    
+    # Agregar "Intro (00:00)" al inicio del tracklist
+    text += "0. Intro (00:00)\n"
+    
     total_duration = 0
 
     # Agrega el nombre de cada audio y su duración al archivo de texto

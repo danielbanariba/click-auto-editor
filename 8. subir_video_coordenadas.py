@@ -4,7 +4,8 @@ import time
 import random
 from datetime import datetime
 import locale
-import shutil  # Import the shutil module
+import shutil  
+import pyperclip
 
 root_dir = "E:\\01_edicion_automatizada\\upload_video"
 uploading_dir = "E:\\01_edicion_automatizada\\upload_video\\00. videos_que_se_estan_subiendo"  # Define the uploading directory
@@ -74,6 +75,7 @@ for dirpath in selected_dirs:
                     # Agrega el título del video a la lista
                     with open("bandas-subidas-al-canal.txt", "a", encoding='utf-8') as f:
                         f.write((titulo_video)[:-13] + "\n")
+                    
                     # Segunda parte: Abrir Una nueva pestaña
                     pyautogui.click(3618, 19)
                     time.sleep(7)
@@ -82,43 +84,46 @@ for dirpath in selected_dirs:
                     pyautogui.press('enter')
                     time.sleep(8)
                     
-                    #Tercera parte: Subir el video
+                    # Tercera parte: Subir el video
                     pyautogui.click(2881, 505)
                     time.sleep(8)
-                    # Update the path to the new location of the video file
-                    pyautogui.write(os.path.join(dirpath, filename))
+                    video_path = os.path.join(dirpath, filename)
+                    pyperclip.copy(video_path)  # Copiamos la ruta al portapapeles
+                    pyautogui.hotkey('ctrl', 'v')  # Pegamos usando ctrl+v
                     pyautogui.press('enter')
                     time.sleep(5)
                     
                     # Cuarta parte: Poner el titulo al video
                     pyautogui.click(2959, 369)
                     pyautogui.hotkey('ctrl', 'a')
-                    pyautogui.write(titulo_video)
+                    pyperclip.copy(titulo_video)
+                    pyautogui.hotkey('ctrl', 'v')
                     time.sleep(1)
                     pyautogui.click(2713, 527)
-                    pyautogui.write(descripcion_video)
-                    time.sleep(7)
+                    pyperclip.copy(descripcion_video)
+                    pyautogui.hotkey('ctrl', 'v')
                     
-                    #Quinta parte: Publicar el video
-                    pyautogui.click(3296, 1001) #Click en siguiente
+                    # Quinta parte: Publicar el video
+                    pyautogui.click(3296, 1001) # Click en siguiente
                     time.sleep(1)
+                    
                     # COMENTAR ABAJO SI ME QUITAN LA MONETIZACION
-                    #Activamos la monetizacion
+                    # Activamos la monetizacion
                     pyautogui.click(2821, 445)
                     time.sleep(1)
                     pyautogui.click(2483, 443)
-                    pyautogui.click(2794, 548) #Hecho
+                    pyautogui.click(2794, 548) # Hecho
                     time.sleep(1)
-                    pyautogui.click(2555, 642) #Revisar Colocacion de anuncios
+                    pyautogui.click(2555, 642) # Revisar Colocacion de anuncios
                     time.sleep(1)
-                    pyautogui.click(2754, 279) #Colocar anuncios automaticamente
+                    pyautogui.click(2754, 279) # Colocar anuncios automaticamente
                     time.sleep(1)
-                    pyautogui.click(3170, 668) #Aceptar
+                    pyautogui.click(3170, 668) # Aceptar
                     time.sleep(1)
-                    pyautogui.click(3276, 233) #Continuar
+                    pyautogui.click(3276, 233) # Continuar
                     time.sleep(1)
-                    pyautogui.click(3320, 994) #Click en siguiente
-                    pyautogui.click(3131, 497) #Click de la nada
+                    pyautogui.click(3320, 994) # Click en siguiente
+                    pyautogui.click(3131, 497) # Click de la nada
                     pyautogui.scroll(-1000)
                     time.sleep(1)
                     pyautogui.scroll(-1000)
@@ -127,36 +132,36 @@ for dirpath in selected_dirs:
                     time.sleep(1)
                     pyautogui.scroll(-1000)
                     time.sleep(1)
-                    pyautogui.click(2464, 918) #Nada de lo anterior
+                    pyautogui.click(2464, 918) # Nada de lo anterior
                     time.sleep(1)
-                    pyautogui.click(3107, 404) #Enviar calificacion
+                    pyautogui.click(3107, 404) # Enviar calificacion
                     time.sleep(7)
-                    pyautogui.click(3311, 998) #Siguiente
+                    pyautogui.click(3311, 998) # Siguiente
                     time.sleep(1)
                     # COMENTAR ARRIBA SI ME QUITAN LA MONETIZACION
-                    pyautogui.click(3262, 520) #Añadir pantalla Final
+                    pyautogui.click(3262, 520) # Añadir pantalla Final
                     time.sleep(3)
-                    pyautogui.click(2546, 382) #Añadir elemento
+                    pyautogui.click(2546, 382) # Añadir elemento
                     time.sleep(1)
-                    pyautogui.click(3285, 226) #Guardar
+                    pyautogui.click(3285, 226) # Guardar
                     time.sleep(5)
-                    pyautogui.click(3296, 1001) #Click en siguiente
+                    pyautogui.click(3296, 1001) # Click en siguiente
                     time.sleep(1)
-                    pyautogui.click(3296, 1001) #Click en siguiente
-                    #time.sleep(15)
-                    pyautogui.click(2941, 733) #Programar
+                    pyautogui.click(3296, 1001) # Click en siguiente
+                    # time.sleep(15)
+                    pyautogui.click(2941, 733) # Programar
                     time.sleep(1)
-                    pyautogui.click(2615, 674) #Fecha
+                    pyautogui.click(2615, 674) # Fecha
                     pyautogui.hotkey('ctrl', 'a')
                     time.sleep(1)
-                    pyautogui.write(publish_date_string)#Ponemos cualquier fecha aleatoria en el intervalo de 30 dias
+                    pyautogui.write(publish_date_string) # Ponemos cualquier fecha aleatoria en el intervalo de 30 dias
                     time.sleep(1)
                     pyautogui.press('enter')
                     time.sleep(1)
                     pyautogui.click(2708, 674)
                     pyautogui.hotkey('ctrl', 'a')
-                    pyautogui.write(publish_time_string)#Ponemos cualquier hora aleatoria con intervalo de 15 minutos
+                    pyautogui.write(publish_time_string) # Ponemos cualquier hora aleatoria con intervalo de 15 minutos
                     pyautogui.press('enter')
-                    pyautogui.click(3294, 1005) #Programar
+                    pyautogui.click(3294, 1005) # Programar
                     time.sleep(1)
                     pyautogui.click(3041, 660)
