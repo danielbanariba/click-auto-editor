@@ -13,7 +13,8 @@ from subir_video import consulta_disponibilidad_API
 # Son de la misma banda, entonces solo se le agregue a la lista de reproducción una vez, y se le agregue el video a esa lista de reproducción, y si no existe la lista de reproducción, se cree una nueva
 
 
-
+# TODO antes que se me olvide, lo que quiero hacer usando la api de youtube es que haga exactamente o mismo que el primer programa, osea el juntar audios, poder buscar los links de las bandas 
+# basicamente solo seria actualizar la descripcion del video, y poner los links que faltan 
 def initialize_upload(youtube, file):
     request = youtube.videos().insert(
         part="snippet,status",
