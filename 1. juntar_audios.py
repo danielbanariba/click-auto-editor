@@ -11,6 +11,23 @@ import time
 from bs4 import BeautifulSoup
 from urllib.parse import quote
 
+def clean_url(url):
+    """
+    Limpia la URL eliminando parámetros innecesarios y localizaciones
+    """
+    if not url or url.startswith('/search'):
+        return None
+        
+    # Lista de parámetros a eliminar
+    params_to_remove = ['hl', 'lang', 'locale', 'ref', 'utm_source', 'utm_medium', 'utm_campaign']
+    
+    # Eliminar parámetros de lenguaje y tracking
+    if '?' in url:
+        base_url = url.split('?')[0]
+        return base_url
+    
+    return url
+
 def search_music_links(band_name, album_name):
     links = {
         'bandcamp': None,
@@ -21,54 +38,121 @@ def search_music_links(band_name, album_name):
         'youtube_music': None,
         'facebook': None,
         'instagram': None,
-        'metal_archives': None
+        'metal_archives': None,
+        'youtube': None,
+        'tiktok': None,
+        'twitter': None,
+        'spirit_of_metal': None
     }
     
-    # Crear queries de búsqueda
-    queries = [
-        f"{band_name} {album_name}",
-        f"{band_name} {album_name} youtube music deezer",
-        f"{band_name} metal band facebook instagram",
-        f"{band_name} metal-archives"
+    # Queries específicas para cada plataforma
+    music_queries = [
+        f"{band_name} {album_name} bandcamp",
+        f"{band_name} {album_name} spotify",
+        f"{band_name} {album_name} apple music",
+        f"{band_name} {album_name} deezer",
+        f"{band_name} {album_name} amazon music",
+        f"{band_name} {album_name} youtube music"
+    ]
+    
+    social_queries = [
+        f"{band_name} official facebook",
+        f"{band_name} official instagram",
+        f"{band_name} official youtube channel",
+        f"{band_name} official tiktok",
+        f"{band_name} official twitter",
+    ]
+    
+    metal_database_queries = [
+        f"site:metal-archives.com/bands {band_name}",
+        f"site:spirit-of-metal.com/en/band {band_name}"
     ]
     
     try:
-        for query in queries:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        # Búsqueda de servicios de música
+        for query in music_queries:
             encoded_query = quote(query)
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
             url = f"https://www.google.com/search?q={encoded_query}"
             response = requests.get(url, headers=headers)
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Encontrar todos los enlaces
             for link in soup.find_all('a'):
                 href = link.get('href', '')
-                
-                # Servicios de música
-                if 'bandcamp.com' in href and not links['bandcamp']:
-                    links['bandcamp'] = href
-                elif 'spotify.com' in href and not links['spotify']:
-                    links['spotify'] = href
-                elif 'music.apple.com' in href and not links['apple_music']:
-                    links['apple_music'] = href
-                elif 'deezer.com' in href and not links['deezer']:
-                    links['deezer'] = href
-                elif 'amazon.com' in href and not links['amazon']:
-                    links['amazon'] = href
-                elif ('music.youtube.com' in href or 'youtube.com/music' in href) and not links['youtube_music']:
-                    links['youtube_music'] = href
-                # Redes sociales
-                elif 'facebook.com' in href and not links['facebook']:
-                    links['facebook'] = href
-                elif 'instagram.com' in href and not links['instagram']:
-                    links['instagram'] = href
-                elif 'metal-archives.com' in href and not links['metal_archives']:
-                    links['metal_archives'] = href
+                if not href.startswith('/search'):
+                    if 'bandcamp.com' in href and not links['bandcamp']:
+                        links['bandcamp'] = clean_url(href)
+                    elif 'spotify.com' in href and not links['spotify']:
+                        links['spotify'] = clean_url(href)
+                    elif 'music.apple.com' in href and not links['apple_music']:
+                        links['apple_music'] = clean_url(href)
+                    elif 'deezer.com' in href and not links['deezer']:
+                        links['deezer'] = clean_url(href)
+                    elif 'amazon.com' in href and not links['amazon']:
+                        links['amazon'] = clean_url(href)
+                    elif ('music.youtube.com' in href or 'youtube.com/music' in href) and not links['youtube_music']:
+                        links['youtube_music'] = clean_url(href)
             
-            # Esperar para evitar bloqueos
             time.sleep(2)
+        
+        # Búsqueda de redes sociales
+        for query in social_queries:
+            encoded_query = quote(query)
+            url = f"https://www.google.com/search?q={encoded_query}"
+            response = requests.get(url, headers=headers)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            for link in soup.find_all('a'):
+                href = link.get('href', '')
+                if not href.startswith('/search'):
+                    # Facebook
+                    if 'facebook.com' in href and not links['facebook']:
+                        if '/pages/' in href or '/groups/' not in href:
+                            links['facebook'] = clean_url(href)
+                    # Instagram
+                    elif 'instagram.com' in href and not links['instagram']:
+                        if '/p/' not in href:
+                            links['instagram'] = clean_url(href)
+                    # YouTube
+                    elif 'youtube.com' in href and not links['youtube']:
+                        if '/channel/' in href or '/c/' in href or '/user/' in href:
+                            links['youtube'] = clean_url(href)
+                    # TikTok
+                    elif 'tiktok.com' in href and not links['tiktok']:
+                        if '@' in href:
+                            links['tiktok'] = clean_url(href)
+                    # Twitter/X
+                    elif ('twitter.com' in href or 'x.com' in href) and not links['twitter']:
+                        if '/status/' not in href and not href.startswith('/search'):
+                            links['twitter'] = clean_url(href)
+            
+            time.sleep(2)
+        
+        # Búsqueda de bases de datos de metal
+        for query in metal_database_queries:
+            encoded_query = quote(query)
+            url = f"https://www.google.com/search?q={encoded_query}"
+            response = requests.get(url, headers=headers)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            for link in soup.find_all('a'):
+                href = link.get('href', '')
+                # Metal Archives
+                if 'metal-archives.com/bands/' in href and band_name.lower() in href.lower() and not links['metal_archives']:
+                    links['metal_archives'] = clean_url(href)
+                # Spirit of Metal
+                elif 'spirit-of-metal.com' in href and '/band/' in href and not links['spirit_of_metal']:
+                    links['spirit_of_metal'] = clean_url(href)
+            
+            time.sleep(2)
+        
+        # Eliminar cualquier link que sea None o comience con /search
+        for key in links:
+            if not links[key] or links[key].startswith('/search'):
+                links[key] = None
         
         return links
     except Exception as e:
@@ -215,8 +299,16 @@ for folder_name in os.listdir(main_dir_path):
             text += f"Facebook: {links['facebook']}\n"
         if links['instagram']:
             text += f"Instagram: {links['instagram']}\n"
+        if links['youtube']:
+            text += f"YouTube: {links['youtube']}\n"
+        if links['tiktok']:
+            text += f"TikTok: {links['tiktok']}\n"
+        if links['twitter']:
+            text += f"X/Twitter: {links['twitter']}\n"
         if links['metal_archives']:
             text += f"Metal Archives: {links['metal_archives']}\n"
+        if links['spirit_of_metal']:
+            text += f"Spirit of Metal: {links['spirit_of_metal']}\n"
         
         text += "\nTracklist:\n\n"
     else:
