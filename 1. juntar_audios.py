@@ -6,6 +6,74 @@ import shutil
 from PIL import Image
 import io
 import stat
+import requests
+import time
+from bs4 import BeautifulSoup
+from urllib.parse import quote
+
+def search_music_links(band_name, album_name):
+    links = {
+        'bandcamp': None,
+        'spotify': None,
+        'apple_music': None,
+        'deezer': None,
+        'amazon': None,
+        'youtube_music': None,
+        'facebook': None,
+        'instagram': None,
+        'metal_archives': None
+    }
+    
+    # Crear queries de búsqueda
+    queries = [
+        f"{band_name} {album_name}",
+        f"{band_name} {album_name} youtube music deezer",
+        f"{band_name} metal band facebook instagram",
+        f"{band_name} metal-archives"
+    ]
+    
+    try:
+        for query in queries:
+            encoded_query = quote(query)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            url = f"https://www.google.com/search?q={encoded_query}"
+            response = requests.get(url, headers=headers)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Encontrar todos los enlaces
+            for link in soup.find_all('a'):
+                href = link.get('href', '')
+                
+                # Servicios de música
+                if 'bandcamp.com' in href and not links['bandcamp']:
+                    links['bandcamp'] = href
+                elif 'spotify.com' in href and not links['spotify']:
+                    links['spotify'] = href
+                elif 'music.apple.com' in href and not links['apple_music']:
+                    links['apple_music'] = href
+                elif 'deezer.com' in href and not links['deezer']:
+                    links['deezer'] = href
+                elif 'amazon.com' in href and not links['amazon']:
+                    links['amazon'] = href
+                elif ('music.youtube.com' in href or 'youtube.com/music' in href) and not links['youtube_music']:
+                    links['youtube_music'] = href
+                # Redes sociales
+                elif 'facebook.com' in href and not links['facebook']:
+                    links['facebook'] = href
+                elif 'instagram.com' in href and not links['instagram']:
+                    links['instagram'] = href
+                elif 'metal-archives.com' in href and not links['metal_archives']:
+                    links['metal_archives'] = href
+            
+            # Esperar para evitar bloqueos
+            time.sleep(2)
+        
+        return links
+    except Exception as e:
+        print(f"Error buscando links: {e}")
+        return links
 
 # Exportamos el directorio de FFmpeg para poder exportar el archivo final
 AudioSegment.converter = "C:\\Program Files\\FFmpeg\\bin\\ffmpeg.exe"
@@ -58,7 +126,7 @@ for folder_name in os.listdir(main_dir_path):
                     audio_durations.append(duration)
                 else:
                     audio_names.append("Unknown")
-                    audio_durations.append(0)  # Add a default duration if audio_file is None
+                    audio_durations.append(0)
                 
                 # Extraer el año y el género solo de la primera canción
                 if not audio_years and not audio_genres and not band_names and not album_names and audio_file is not None and audio_file.tag is not None:
@@ -89,7 +157,7 @@ for folder_name in os.listdir(main_dir_path):
                                 img = img.convert('RGB')
                             cover_path = os.path.join(folder_path, "Cover.jpg")
                             img.save(cover_path, 'JPEG')
-                            os.chmod(cover_path, stat.S_IWRITE)  # Cambiar los permisos del archivo
+                            os.chmod(cover_path, stat.S_IWRITE)
                             break
                         except PIL.UnidentifiedImageError:
                             print(f"Cannot identify image in file: {audio_path}")
@@ -104,7 +172,7 @@ for folder_name in os.listdir(main_dir_path):
         # Juntar los audios
         combined = sum(audios, AudioSegment.empty())
 
-        # Guardar el audio resultante con calidad 320 kbps y el nombre de la carpeta en la misma carpeta
+        # Guardar el audio resultante
         combined.export(os.path.join(folder_path, f"{folder_name}.mp3"), format="mp3", bitrate="320k")
 
         # Eliminar los archivos de audio originales
@@ -120,12 +188,42 @@ for folder_name in os.listdir(main_dir_path):
             
     #TODO Cambiar el (Full album) por el ep, compilacion o cualquiera segun sea la epoca
     if audio_genres and audio_years and band_names and album_names: 
-        text = f"{band_names[0]} - {album_names[0]} (Full Album)\n\nGenre: {audio_genres[0]}\nYear: {audio_years[0]}\n\nTracklist:\n\n"
+        # Buscar enlaces
+        links = search_music_links(band_names[0], album_names[0])
+            
+        text = f"{band_names[0]} - {album_names[0]} (Full Album)\n\n"
+        text += f"Genre: {audio_genres[0]}\nYear: {audio_years[0]}\n\n"
+        
+        # Agregar enlaces de streaming
+        text += "Stream/Download:\n"
+        if links['bandcamp']:
+            text += f"Bandcamp: {links['bandcamp']}\n"
+        if links['spotify']:
+            text += f"Spotify: {links['spotify']}\n"
+        if links['youtube_music']:
+            text += f"YouTube Music: {links['youtube_music']}\n"
+        if links['apple_music']:
+            text += f"Apple Music: {links['apple_music']}\n"
+        if links['deezer']:
+            text += f"Deezer: {links['deezer']}\n"
+        if links['amazon']:
+            text += f"Amazon Music: {links['amazon']}\n"
+
+        # Agregar redes sociales
+        text += "\nFollow:\n"
+        if links['facebook']:
+            text += f"Facebook: {links['facebook']}\n"
+        if links['instagram']:
+            text += f"Instagram: {links['instagram']}\n"
+        if links['metal_archives']:
+            text += f"Metal Archives: {links['metal_archives']}\n"
+        
+        text += "\nTracklist:\n\n"
     else:
         text = "Unknown - Unknown\nGenre: Unknown\nYear: Unknown\n\n"
     
     # Agregar "Intro (00:00)" al inicio del tracklist
-    text += "0. Intro (00:00)\n"
+    text += "0 - Intro (00:00)\n"
     
     total_duration = 0
 

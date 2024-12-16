@@ -25,3 +25,6 @@ pip install pillow
 pip install scipy 
 pip install colormath
 pip install psutil
+pip install beautifulsoup4
+pip install requests
+pip install selenium
