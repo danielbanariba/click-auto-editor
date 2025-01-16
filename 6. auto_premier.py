@@ -17,42 +17,6 @@ premier_dir = "C:\\Users\\banar\\Desktop\\save_premier_pro"
 aep_files = [file for file in os.listdir(main_dir_path) if file.endswith('.aep')]
 processed_files = set()  # Conjunto para almacenar archivos ya procesados
 
-def wait_for_progress_bar(x=3671, y=1070, timeout=5):
-    """
-    Espera hasta que la barra de progreso azul desaparezca
-    x, y: coordenadas donde buscar la barra de progreso
-    timeout: tiempo máximo de espera en segundos
-    """
-    start_time = time.time()
-    blue_color = (28, 108, 198)  # Color aproximado de la barra de progreso
-    tolerance = 30  # Tolerancia para la detección del color
-
-    def is_blue_present():
-        # Captura un pixel en las coordenadas especificadas
-        pixel = ImageGrab.grab(bbox=(x, y, x+1, y+1))
-        pixel_color = pixel.getpixel((0, 0))
-        
-        # Compara si el color está dentro del rango de tolerancia
-        return all(abs(a - b) <= tolerance for a, b in zip(pixel_color, blue_color))
-
-    # Espera a que aparezca la barra azul primero
-    while time.time() - start_time < timeout:
-        if is_blue_present():
-            print("Barra de progreso detectada, esperando que termine...")
-            break
-        time.sleep(0.5)
-
-    # Una vez detectada, espera a que desaparezca
-    while time.time() - start_time < timeout:
-        if not is_blue_present():
-            time.sleep(1)  # Espera adicional para asegurarse
-            return True
-        time.sleep(0.5)
-
-    print("WARNING: Timeout esperando la barra de progreso")
-    return False
-
-
 def is_premier_running():
     """Verifica si Adobe Premier Pro está ejecutándose"""
     for proc in psutil.process_iter(['name']):
@@ -144,10 +108,7 @@ def auto_premier():
             pyautogui.click(2947, 732)
             time.sleep(2)
             pyautogui.hotkey('ctrl', 'i') # importarmos el intro del video
-            # time.sleep(19)
-            # Esperar a que se complete la importación
-            if not wait_for_progress_bar():
-                print(f"Error: La importación de {name_proyect} puede no haberse completado correctamente")
+            time.sleep(19)
             pyautogui.click(2333, 102)
             pyautogui.write(ruta_intro) # ruta del intro
             pyautogui.press('enter')

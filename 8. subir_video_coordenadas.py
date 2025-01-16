@@ -53,14 +53,17 @@ for dirpath in selected_dirs:
                     # Set the locale to Spanish
                     locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")
                     # Establece una fecha base en el año 2025
-                    base_date = datetime(2026, 8, 29)  # Fecha específica: 29 de Junio de 2026
+                    base_date = datetime(2027, 1, 1)  # Fecha específica: 12 de Diciembre del 2026
                     day = base_date.strftime("%d")
                     month = base_date.strftime("%b").replace('.', '')  # Remove the period
                     year = base_date.strftime("%Y")
                     publish_date_string = f"{day} {month} {year}"  # Convertir a formato "16 abr 2025"
                     # Genera una hora aleatoria en intervalos de 15 minutos
-                    random_hour = random.randint(0, 23)  # Genera un número aleatorio entre 0 y 23
-                    random_minute = random.choice([0, 15, 30, 45])  # Elige un número aleatorio de la lista [0, 15, 30, 45]
+                    while True:
+                        random_hour = random.randint(0, 23)  # Genera un número aleatorio entre 0 y 23
+                        random_minute = random.choice([0, 15, 30, 45])  # Elige un número aleatorio de la lista [0, 15, 30, 45]
+                        if not (random_hour == 0 and random_minute == 0):
+                            break
                     publish_time_string = f"{random_hour:02d}:{random_minute:02d}"  # Convertir a formato "14:30"
                     paragraphs = content.split('\n\n')
                     titulo_video = paragraphs[0]
