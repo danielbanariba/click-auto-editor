@@ -22,20 +22,20 @@
 #             # Open the image file
 #             with Image.open(nuevo_nombre) as img:
 #                 # Resize the image and save it
-#                 img_resized = img.resize((2050, 2050))
-#                 img_resized.save(f"{nuevo_nombre}_2050x2050.{extension}")
+#                 img_resized = img.resize((1025, 1025))
+#                 img_resized.save(f"{nuevo_nombre}_1025x1025.{extension}")
             
-#                 # Add shadow to the 2050x2050 image
-#                 add_shadow(f"{nuevo_nombre}_2050x2050.{extension}", f"{nuevo_nombre}_2050x2050_shadow.png", 255, 135, 53, 37)
+#                 # Add shadow to the 1025x1025 image
+#                 add_shadow(f"{nuevo_nombre}_1025x1025.{extension}", f"{nuevo_nombre}_1025x1025_shadow.png", 255, 135, 53, 37)
             
-#                 img_resized = img.resize((4050, 4050))
-#                 img_resized.save(f"{nuevo_nombre}_4050x4050.{extension}")
+#                 img_resized = img.resize((2025, 2025))
+#                 img_resized.save(f"{nuevo_nombre}_2025x2025.{extension}")
             
 #             # Remove the original resized file
 #             os.remove(nuevo_nombre)
             
-#             # Remove the first created image (2050x2050)
-#             os.remove(f"{nuevo_nombre}_2050x2050.{extension}")
+#             # Remove the first created image (1025x1025)
+#             os.remove(f"{nuevo_nombre}_1025x1025.{extension}")
 
 #! IMPORTANTE!         
 # #Esto es bien raro, a mi siempre me ha funcionado el de arriba pero ahora ya no quiero funcionar la maldita esta, asi que si falla, descomentar el de abaajo
@@ -75,23 +75,23 @@ for folder_name in os.listdir(main_dir_path):
                     
                     # Abrir el archivo de imagen
                     with Image.open(nuevo_nombre) as img:
-                        # Cambiar el tamaño de la imagen a 2050x2050 y guardar
-                        img_resized = img.resize((2050, 2050))
+                        # Cambiar el tamaño de la imagen a 1025x1025 y guardar
+                        img_resized = img.resize((1025, 1025))
                         if img_resized.mode in ['RGBA', 'CMYK']:
                             img_resized = img_resized.convert('RGB')
-                        img_resized.save(f"{nuevo_nombre}_2050x2050.png")
+                        img_resized.save(f"{nuevo_nombre}_1025x1025.png")
                         
                         # Intentar añadir una sombra a la imagen
                         try:
-                            add_shadow(f"{nuevo_nombre}_2050x2050.png", f"{nuevo_nombre}_2050x2050_shadow.png", 255, 135, 53, 37)
+                            add_shadow(f"{nuevo_nombre}_1025x1025.png", f"{nuevo_nombre}_1025x1025_shadow.png", 255, 68, 27, 19)
                         except Exception as e:
-                            print(f"Error adding shadow to {nuevo_nombre}_2050x2050.png: {e}")
+                            print(f"Error adding shadow to {nuevo_nombre}_1025x1025.png: {e}")
                         
-                        # Cambiar el tamaño de la imagen a 4050x4050 y guardar
-                        img_resized = img.resize((4050, 4050))
+                        # Cambiar el tamaño de la imagen a 2025x2025 y guardar
+                        img_resized = img.resize((2025, 2025))
                         if img_resized.mode in ['RGBA', 'CMYK']:
                             img_resized = img_resized.convert('RGB')
-                        img_resized.save(f"{nuevo_nombre}_4050x4050.png")
+                        img_resized.save(f"{nuevo_nombre}_2025x2025.png")
 
                     # Obtener los permisos actuales del archivo
                     file_stat = os.stat(nuevo_nombre)
@@ -102,8 +102,8 @@ for folder_name in os.listdir(main_dir_path):
                     # Ahora se puede eliminar el archivo original
                     os.remove(nuevo_nombre)
                     
-                    # Eliminar la imagen redimensionada creada primero (2050x2050)
-                    os.remove(f"{nuevo_nombre}_2050x2050.png")
+                    # Eliminar la imagen redimensionada creada primero (1025x1025)
+                    os.remove(f"{nuevo_nombre}_1025x1025.png")
                 else:
                     print(f"File not found: {archivo}")
 
