@@ -6,29 +6,38 @@ import shutil
 from PIL import Image
 import io
 import stat
-import requests
 import time
-from bs4 import BeautifulSoup
-from urllib.parse import quote
+from playwright.sync_api import sync_playwright
+from urllib.parse import quote, unquote
+import random
 
 def clean_url(url):
     """
     Limpia la URL eliminando parámetros innecesarios y localizaciones
     """
-    if not url or url.startswith('/search'):
+    if not url:
         return None
         
-    # Lista de parámetros a eliminar
-    params_to_remove = ['hl', 'lang', 'locale', 'ref', 'utm_source', 'utm_medium', 'utm_campaign']
+    # Decodificar la URL si está codificada
+    url = unquote(url)
     
-    # Eliminar parámetros de lenguaje y tracking
-    if '?' in url:
-        base_url = url.split('?')[0]
-        return base_url
-    
-    return url
+    # Limpiar por plataforma
+    if 'spotify.com' in url:
+        if '/album/' in url or '/artist/' in url:
+            return url.split('?')[0].split('#')[0]
+    elif 'youtube.com' in url:
+        if 'watch?v=' in url:
+            video_id = url.split('watch?v=')[1].split('&')[0]
+            return f"https://www.youtube.com/watch?v={video_id}"
+        elif '/channel/' in url or '/c/' in url or '/user/' in url:
+            return url.split('?')[0].split('#')[0]
+            
+    return url.split('?')[0].split('#')[0]
 
 def search_music_links(band_name, album_name):
+    """
+    Busca enlaces de música y redes sociales usando Playwright
+    """
     links = {
         'bandcamp': None,
         'spotify': None,
@@ -45,119 +54,123 @@ def search_music_links(band_name, album_name):
         'spirit_of_metal': None
     }
     
-    # Queries específicas para cada plataforma
-    music_queries = [
-        f"{band_name} {album_name} bandcamp",
-        f"{band_name} {album_name} spotify",
-        f"{band_name} {album_name} apple music",
-        f"{band_name} {album_name} deezer",
-        f"{band_name} {album_name} amazon music",
-        f"{band_name} {album_name} youtube music"
-    ]
-    
-    social_queries = [
-        f"{band_name} official facebook",
-        f"{band_name} official instagram",
-        f"{band_name} official youtube channel",
-        f"{band_name} official tiktok",
-        f"{band_name} official twitter",
-    ]
-    
-    metal_database_queries = [
-        f"site:metal-archives.com/bands {band_name}",
-        f"site:spirit-of-metal.com/en/band {band_name}"
-    ]
-    
+    queries = {
+        'music': [
+            (f"{band_name} official bandcamp", ['bandcamp.com']),
+            (f"{band_name} {album_name} spotify", ['spotify.com']),
+            (f"{band_name} {album_name} apple music", ['music.apple.com']),
+            (f"{band_name} {album_name} deezer", ['deezer.com']),
+            (f"{band_name} {album_name} amazon music", ['amazon.com/music']),
+            (f"{band_name} {album_name} youtube music", ['music.youtube.com'])
+        ],
+        'social': [
+            (f"{band_name} official profile facebook", ['facebook.com']),
+            (f"{band_name} official profile instagram", ['instagram.com']),
+            (f"{band_name} official youtube channel", ['youtube.com/channel', 'youtube.com/c']),
+            (f"{band_name} official tiktok account", ['tiktok.com/@']),
+            (f"{band_name} official twitter account", ['twitter.com', 'x.com'])
+        ],
+        'metal': [
+            (f"site:metal-archives.com/bands {band_name}", ['metal-archives.com/bands']),
+            (f"site:spirit-of-metal.com/en/band {band_name}", ['spirit-of-metal.com/en/band'])
+        ]
+    }
+
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+        with sync_playwright() as p:
+            browser = p.firefox.launch(
+                headless=True,
+                firefox_user_prefs={
+                    "media.autoplay.default": 2,
+                    "media.autoplay.blocking_policy": 2
+                }
+            )
+            
+            context = browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            )
+            
+            page = context.new_page()
+            page.set_default_timeout(30000)
+            page.set_default_navigation_timeout(30000)
+            
+            try:
+                for category, category_queries in queries.items():
+                    for query, domains in category_queries:
+                        try:
+                            encoded_query = quote(query)
+                            url = f"https://duckduckgo.com/html/?q={encoded_query}&kl=wt-wt&kp=-2"
+                            
+                            page.goto(url, wait_until="networkidle")
+                            page.wait_for_selector('.result__body', state="attached")
+                            
+                            page.evaluate("window.scrollTo(0, document.body.scrollHeight/2)")
+                            time.sleep(0.5)
+                            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                            time.sleep(0.5)
+                            
+                            links_elements = page.query_selector_all('.result__url')
+                            additional_links = page.query_selector_all('.result__extras__url')
+                            all_links = links_elements + additional_links
+                            
+                            for element in all_links:
+                                href = element.get_attribute('href')
+                                if not href:
+                                    text_content = element.text_content()
+                                    if text_content:
+                                        href = text_content
+                                
+                                if href:
+                                    href = clean_url(href)
+                                    
+                                    if 'bandcamp.com' in href and not links['bandcamp']:
+                                        if f"{band_name.lower().replace(' ', '')}.bandcamp.com" in href.lower():
+                                            links['bandcamp'] = href
+                                    elif 'spotify.com' in href and not links['spotify']:
+                                        links['spotify'] = href
+                                    elif 'music.apple.com' in href and not links['apple_music']:
+                                        links['apple_music'] = href
+                                    elif 'deezer.com' in href and not links['deezer']:
+                                        links['deezer'] = href
+                                    elif 'amazon.com/music' in href and not links['amazon']:
+                                        links['amazon'] = href
+                                    elif 'music.youtube.com' in href and not links['youtube_music']:
+                                        links['youtube_music'] = href
+                                    elif 'facebook.com' in href and not links['facebook']:
+                                        links['facebook'] = href
+                                    elif 'instagram.com' in href and not links['instagram']:
+                                        if '/p/' not in href and '/reel/' not in href:
+                                            links['instagram'] = href
+                                    elif 'youtube.com' in href and not links['youtube']:
+                                        if '/channel/' in href or '/c/' in href:
+                                            links['youtube'] = href
+                                    elif 'tiktok.com' in href and not links['tiktok']:
+                                        if '@' in href:
+                                            links['tiktok'] = href
+                                    elif ('twitter.com' in href or 'x.com' in href) and not links['twitter']:
+                                        links['twitter'] = href
+                                    elif 'metal-archives.com/bands' in href and not links['metal_archives']:
+                                        links['metal_archives'] = href
+                                    elif 'spirit-of-metal.com' in href and not links['spirit_of_metal']:
+                                        links['spirit_of_metal'] = href
+                            
+                            time.sleep(random.uniform(2, 4))
+                            
+                        except Exception as e:
+                            print(f"Error en búsqueda {query}: {str(e)}")
+                            continue
+                
+            except Exception as e:
+                print(f"Error general: {str(e)}")
+            
+            finally:
+                browser.close()
         
-        # Búsqueda de servicios de música
-        for query in music_queries:
-            encoded_query = quote(query)
-            url = f"https://www.google.com/search?q={encoded_query}"
-            response = requests.get(url, headers=headers)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            for link in soup.find_all('a'):
-                href = link.get('href', '')
-                if not href.startswith('/search'):
-                    if 'bandcamp.com' in href and not links['bandcamp']:
-                        links['bandcamp'] = clean_url(href)
-                    elif 'spotify.com' in href and not links['spotify']:
-                        links['spotify'] = clean_url(href)
-                    elif 'music.apple.com' in href and not links['apple_music']:
-                        links['apple_music'] = clean_url(href)
-                    elif 'deezer.com' in href and not links['deezer']:
-                        links['deezer'] = clean_url(href)
-                    elif 'amazon.com' in href and not links['amazon']:
-                        links['amazon'] = clean_url(href)
-                    elif ('music.youtube.com' in href or 'youtube.com/music' in href) and not links['youtube_music']:
-                        links['youtube_music'] = clean_url(href)
-            
-            time.sleep(2)
-        
-        # Búsqueda de redes sociales
-        for query in social_queries:
-            encoded_query = quote(query)
-            url = f"https://www.google.com/search?q={encoded_query}"
-            response = requests.get(url, headers=headers)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            for link in soup.find_all('a'):
-                href = link.get('href', '')
-                if not href.startswith('/search'):
-                    # Facebook
-                    if 'facebook.com' in href and not links['facebook']:
-                        if '/pages/' in href or '/groups/' not in href:
-                            links['facebook'] = clean_url(href)
-                    # Instagram
-                    elif 'instagram.com' in href and not links['instagram']:
-                        if '/p/' not in href:
-                            links['instagram'] = clean_url(href)
-                    # YouTube
-                    elif 'youtube.com' in href and not links['youtube']:
-                        if '/channel/' in href or '/c/' in href or '/user/' in href:
-                            links['youtube'] = clean_url(href)
-                    # TikTok
-                    elif 'tiktok.com' in href and not links['tiktok']:
-                        if '@' in href:
-                            links['tiktok'] = clean_url(href)
-                    # Twitter/X
-                    elif ('twitter.com' in href or 'x.com' in href) and not links['twitter']:
-                        if '/status/' not in href and not href.startswith('/search'):
-                            links['twitter'] = clean_url(href)
-            
-            time.sleep(2)
-        
-        # Búsqueda de bases de datos de metal
-        for query in metal_database_queries:
-            encoded_query = quote(query)
-            url = f"https://www.google.com/search?q={encoded_query}"
-            response = requests.get(url, headers=headers)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            for link in soup.find_all('a'):
-                href = link.get('href', '')
-                # Metal Archives
-                if 'metal-archives.com/bands/' in href and band_name.lower() in href.lower() and not links['metal_archives']:
-                    links['metal_archives'] = clean_url(href)
-                # Spirit of Metal
-                elif 'spirit-of-metal.com' in href and '/band/' in href and not links['spirit_of_metal']:
-                    links['spirit_of_metal'] = clean_url(href)
-            
-            time.sleep(2)
-        
-        # Eliminar cualquier link que sea None o comience con /search
-        for key in links:
-            if not links[key] or links[key].startswith('/search'):
-                links[key] = None
-        
-        return links
     except Exception as e:
-        print(f"Error buscando links: {e}")
-        return links
+        print(f"Error al iniciar Playwright: {e}")
+    
+    return links
 
 # Exportamos el directorio de FFmpeg para poder exportar el archivo final
 AudioSegment.converter = "C:\\Program Files\\FFmpeg\\bin\\ffmpeg.exe"
@@ -192,7 +205,7 @@ for folder_name in os.listdir(main_dir_path):
         audio_files = [file_name for file_name in os.listdir(folder_path) if file_name.endswith((".MP3",".Mp3", ".mp3", ".flac", ".wav", ".wma", ".m4a"))]
         if len(audio_files) <= 1:
             continue  
-        
+
         for file_name in audio_files:
             # Verificar si el archivo es un audio
             if file_name.endswith((".MP3",".Mp3", ".mp3", ".flac", ".wav", ".wma", ".m4a")):
@@ -272,7 +285,8 @@ for folder_name in os.listdir(main_dir_path):
             
     #TODO Cambiar el (Full album) por el ep, compilacion o cualquiera segun sea la epoca
     if audio_genres and audio_years and band_names and album_names: 
-        # Buscar enlaces
+        print(f"\nBuscando enlaces para: {band_names[0]} - {album_names[0]}")
+        # Buscar enlaces usando la nueva función con Playwright
         links = search_music_links(band_names[0], album_names[0])
             
         text = f"{band_names[0]} - {album_names[0]} (Full Album)\n\n"
@@ -329,7 +343,7 @@ for folder_name in os.listdir(main_dir_path):
             total_duration += audio_durations[i]
             text += f"{i+1} - {audio_names[i]} ({int(minutes):02d}:{int(seconds):02d})\n"
 
-    # Guardar la información recolectada y crea en un archivo de texto
+    # Guardar la información recolectada y crear el archivo de texto
     with open(os.path.join(folder_path, f"{folder_name}.txt"), "w", encoding='utf-8') as f:
         f.write(text)
 
