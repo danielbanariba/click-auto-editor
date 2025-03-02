@@ -208,13 +208,13 @@ def auto_effects():
         #---------------------------------------------------------------------------------------------------------
             # Novena parte: Cambiar de color en el espectro del audio
             pyautogui.click(2107, 82)
-            pyautogui.click(2106, 363) # Abrimos el menu del Inside Color
+            pyautogui.click(2126, 364) # Abrimos el menu del Inside Color
             time.sleep(1)
             pyautogui.write(inside_color) # Escribimos el color en hexadecimal 
             pyautogui.press('enter')
             
             pyautogui.click(2107, 82)
-            pyautogui.click(2112, 382) # Abrimos el menu del Outside Color
+            pyautogui.click(2129, 380) # Abrimos el menu del Outside Color
             time.sleep(1)
             pyautogui.write(inside_color) # Escribimos el color en hexadecimal 
             pyautogui.press('enter')

@@ -289,7 +289,7 @@ for folder_name in os.listdir(main_dir_path):
         # Buscar enlaces usando la nueva función con Playwright
         links = search_music_links(band_names[0], album_names[0])
             
-        text = f"{band_names[0]} - {album_names[0]} (Full Album)\n\n"
+        text = f"{band_names[0]} - {album_names[0]} (Full EP)\n\n"
         text += f"Genre: {audio_genres[0]}\nYear: {audio_years[0]}\n\n"
         
         # Agregar enlaces de streaming

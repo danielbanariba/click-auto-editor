@@ -54,16 +54,16 @@ def auto_premier():
         #---------------------------------------------------------------------------------------------------------
             # Primera parte: Abrir Premier Pro
             pyautogui.press('winleft')  # abre el menú de inicio
-            time.sleep(1)
+            time.sleep(2)
             pyautogui.write('Premier')  # escribe el nombre del programa
-            time.sleep(1)
+            time.sleep(2)
             pyautogui.press('enter')  # abre el programa
-            time.sleep(17)  # espera a que el programa se abra
+            time.sleep(20)  # espera a que el programa se abra
         
         #---------------------------------------------------------------------------------------------------------    
             # Segunda parte: Crear un nuevo proyecto
             pyautogui.click(1985, 196) # hace clic en "New Project"
-            time.sleep(2)
+            time.sleep(3)
             random_numbers = str(random.randint(0, 9)) + str(random.randint(0, 9))
             pyautogui.write(name_proyect + random_numbers)
             # pyautogui.click(2500, 108)
@@ -77,38 +77,38 @@ def auto_premier():
             # time.sleep(1)
             # pyautogui.write(save_premier_pro)
             pyautogui.press('enter')
-            time.sleep(1)
-            pyautogui.click(2700, 554)
-            time.sleep(1)
-            pyautogui.click(3782, 990)
             time.sleep(2)
+            pyautogui.click(2700, 554)
+            time.sleep(2)
+            pyautogui.click(3782, 990)
+            time.sleep(4)
         
         #---------------------------------------------------------------------------------------------------------
             # Tercera parte: Importar los archivos de after effects
             pyautogui.click(2627, 283)
-            time.sleep(1)
+            time.sleep(2)
             pyautogui.click(1934, 32)
-            time.sleep(1)
+            time.sleep(2)
             pyautogui.click(2040, 531)
             # pyautogui.hotkey('ctrl', 'i') # importarmos los archivos
-            time.sleep(1)
+            time.sleep(2)
             pyautogui.click(2333, 102)
             pyautogui.write(main_dir_path) # ruta de los archivos
             pyautogui.press('enter')
-            time.sleep(2)
+            time.sleep(4)
             pyautogui.click(2175, 543)
             pyautogui.write(name_proyect + ".aep") # nombre del archivo
-            time.sleep(2)
+            time.sleep(4)
             pyautogui.press('enter')
-            time.sleep(10)
+            time.sleep(15)
             # Esta parte se repite dos veces para evitar errores
             pyautogui.click(2730, 419)
             pyautogui.click(2947, 732)
             pyautogui.click(2743, 403)
             pyautogui.click(2947, 732)
-            time.sleep(2)
+            time.sleep(4)
             pyautogui.hotkey('ctrl', 'i') # importarmos el intro del video
-            time.sleep(19)
+            time.sleep(10)
             pyautogui.click(2333, 102)
             pyautogui.write(ruta_intro) # ruta del intro
             pyautogui.press('enter')
