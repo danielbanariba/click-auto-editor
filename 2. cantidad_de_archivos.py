@@ -1,11 +1,17 @@
 import os
 import shutil
+from pathlib import Path
+import sys
 
-ruta_principal = 'E:\\01_edicion_automatizada\\02_juntar_audios'
-ruta_temporal = 'E:\\01_edicion_automatizada\\Ya'
-ruta_sin_portada = 'E:\\01_edicion_automatizada\\no_tienen_portada'
-ruta_raro = 'E:\\01_edicion_automatizada\\raro'
-ruta_volver_a_buscar = 'E:\\01_edicion_automatizada\\03_volver_a_buscar'
+# Importar configuración
+sys.path.append(str(Path(__file__).parent))
+from config import DIR_JUNTAR_AUDIOS, DIR_YA, DIR_NO_TIENEN_PORTADA, DIR_RARO, DIR_VOLVER_A_BUSCAR
+
+ruta_principal = str(DIR_JUNTAR_AUDIOS)
+ruta_temporal = str(DIR_YA)
+ruta_sin_portada = str(DIR_NO_TIENEN_PORTADA)
+ruta_raro = str(DIR_RARO)
+ruta_volver_a_buscar = str(DIR_VOLVER_A_BUSCAR)
 
 def contar_archivos_en_subdirectorios(directorio, directorio_destino, directorio_sin_portada, directorio_raro, directorio_volver_a_buscar):
     rutas_destino = []

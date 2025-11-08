@@ -1,0 +1,138 @@
+"""
+Configuración centralizada para el proyecto de edición automatizada
+"""
+
+from pathlib import Path
+
+# ============================================================================
+# RUTAS PRINCIPALES DEL PROYECTO
+# ============================================================================
+
+# Directorio raíz donde está montado el disco externo
+BASE_DIR = Path("/run/media/banar/Entretenimiento/01_edicion_automatizada")
+
+# Pipeline de procesamiento
+DIR_LIMPIEZA = BASE_DIR / "01_limpieza_de_impurezas"
+DIR_JUNTAR_AUDIOS = BASE_DIR / "02_juntar_audios"
+DIR_AUDIO_SCRIPTS = BASE_DIR / "audio_scripts"
+DIR_UPLOAD = BASE_DIR / "upload_video"
+DIR_VERIFICACION = BASE_DIR / "verificacion"
+
+# Directorios auxiliares
+DIR_VOLVER_A_BUSCAR = BASE_DIR / "03_volver_a_buscar"
+DIR_REGRESAR_AUDIO = BASE_DIR / "04_regresar_audio_scripts"
+DIR_NO_TIENEN_CARPETAS = BASE_DIR / "no_tienen_carpetas"
+DIR_NO_TIENEN_PORTADA = BASE_DIR / "no_tienen_portada"
+DIR_NO_TIENEN_DESCRIPCION = BASE_DIR / "no_tienen_descripcion"
+DIR_YA = BASE_DIR / "Ya"
+DIR_RARO = BASE_DIR / "raro"
+DIR_NEED_CENSURED = BASE_DIR / "need_censured"
+DIR_CORREGIR_EDICION = BASE_DIR / "corregir_edicion"
+DIR_BANDAS_SUBIDAS = BASE_DIR / "bandas_que_supuestamente_ya_se_subieron"
+
+# ============================================================================
+# ARCHIVOS DEL PROYECTO
+# ============================================================================
+
+PROJECT_ROOT = Path(__file__).parent
+INTRO_VIDEO = PROJECT_ROOT / "content" / "0000000000000000.mp4"
+BANDAS_SUBIDAS_TXT = PROJECT_ROOT / "bandas-subidas-al-canal.txt"
+
+# ============================================================================
+# CONFIGURACIÓN DE RENDERIZADO
+# ============================================================================
+
+# FFmpeg render settings
+VIDEO_WIDTH = 1920
+VIDEO_HEIGHT = 1080
+FPS = 30
+INTRO_DURATION = 7.0  # Segundos del video de intro
+
+# Multiprocessing
+MAX_PARALLEL_RENDERS = 3  # Número de renders simultáneos
+MAX_FOLDERS_TO_PROCESS = 150  # Límite de carpetas por ejecución
+
+# Video quality
+VIDEO_PRESET = "fast"  # Opciones: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
+VIDEO_CRF = 20  # Calidad (0-51, menor = mejor calidad, 18-23 es visualmente sin pérdidas)
+AUDIO_BITRATE = "320k"
+
+# ============================================================================
+# CONFIGURACIÓN DE AUDIO
+# ============================================================================
+
+# Formatos de audio soportados
+AUDIO_FORMATS = (".mp3", ".flac", ".wav", ".wma", ".m4a", ".MP3", ".Mp3")
+
+# Formatos de imagen soportados
+IMAGE_FORMATS = (".png", ".jpg", ".jpeg", ".jfif", ".gif", ".tiff", ".raw")
+
+# ============================================================================
+# FUNCIONES AUXILIARES
+# ============================================================================
+
+def create_directories():
+    """
+    Crea todos los directorios necesarios si no existen
+    """
+    dirs = [
+        DIR_LIMPIEZA,
+        DIR_JUNTAR_AUDIOS,
+        DIR_AUDIO_SCRIPTS,
+        DIR_UPLOAD,
+        DIR_VERIFICACION,
+        DIR_VOLVER_A_BUSCAR,
+        DIR_REGRESAR_AUDIO,
+        DIR_NO_TIENEN_CARPETAS,
+        DIR_NO_TIENEN_PORTADA,
+        DIR_NO_TIENEN_DESCRIPCION,
+        DIR_YA,
+        DIR_RARO,
+        DIR_NEED_CENSURED,
+        DIR_CORREGIR_EDICION,
+        DIR_BANDAS_SUBIDAS,
+    ]
+
+    for directory in dirs:
+        directory.mkdir(parents=True, exist_ok=True)
+        print(f"✓ {directory}")
+
+def check_environment():
+    """
+    Verifica que el entorno esté correctamente configurado
+    """
+    errors = []
+
+    # Verificar que el disco externo esté montado
+    if not BASE_DIR.exists():
+        errors.append(f"El disco externo no está montado en {BASE_DIR}")
+
+    # Verificar que el video de intro exista
+    if not INTRO_VIDEO.exists():
+        errors.append(f"No se encuentra el video de intro en {INTRO_VIDEO}")
+
+    return errors
+
+if __name__ == "__main__":
+    print("\n" + "="*60)
+    print("VERIFICACIÓN DE ENTORNO")
+    print("="*60 + "\n")
+
+    # Verificar entorno
+    errors = check_environment()
+
+    if errors:
+        print("❌ ERRORES ENCONTRADOS:\n")
+        for error in errors:
+            print(f"  • {error}")
+        print("\nPor favor, corrige estos errores antes de continuar.")
+    else:
+        print("✓ Entorno verificado correctamente\n")
+
+        # Crear directorios
+        print("Creando directorios necesarios...\n")
+        create_directories()
+
+        print("\n" + "="*60)
+        print("CONFIGURACIÓN COMPLETA")
+        print("="*60 + "\n")

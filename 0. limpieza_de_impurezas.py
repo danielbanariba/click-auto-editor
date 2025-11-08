@@ -3,17 +3,22 @@ from limpieza.eliminar_archivos_txt import eliminar_archivos_txt
 from limpieza.eliminar_image import delete_images
 from limpieza.eliminar_subcarpetas import delete_subfolders
 from limpieza.mover_archivos import mover_archivos
-from limpieza.eliminar_image import delete_images
 from limpieza.eliminar_url import delete_specific_files
 from limpieza.normalizar_folder import normalize_folder_names
 from limpieza.crear_nuevas_carpetas import procesar_archivos_audio
 from limpieza.mover_carpetas import mover_carpetas
 import time
+from pathlib import Path
+import sys
+
+# Importar configuración
+sys.path.append(str(Path(__file__).parent))
+from config import DIR_LIMPIEZA, DIR_JUNTAR_AUDIOS, DIR_NO_TIENEN_CARPETAS
 
 # Directorio raíz desde donde comenzar la búsqueda
-root_dir = "E:\\01_edicion_automatizada\\01_limpieza_de_impurezas"
-root_destino = "E:\\01_edicion_automatizada\\02_juntar_audios"
-no_tienen_carpetas = "E:\\01_edicion_automatizada\\no_tienen_carpetas"
+root_dir = str(DIR_LIMPIEZA)
+root_destino = str(DIR_JUNTAR_AUDIOS)
+no_tienen_carpetas = str(DIR_NO_TIENEN_CARPETAS)
 
 # Paso 1 - Eliminar archivos RAR
 print("************************************************************************************************************************************************")

@@ -10,6 +10,8 @@ import time
 from playwright.sync_api import sync_playwright
 from urllib.parse import quote, unquote
 import random
+from pathlib import Path
+import sys
 
 def clean_url(url):
     """
@@ -172,12 +174,15 @@ def search_music_links(band_name, album_name):
     
     return links
 
-# Exportamos el directorio de FFmpeg para poder exportar el archivo final
-AudioSegment.converter = "C:\\Program Files\\FFmpeg\\bin\\ffmpeg.exe"
-AudioSegment.ffmpeg = "C:\\Program Files\\FFmpeg\\bin\\ffprobe.exe"
+# Importar configuración
+sys.path.append(str(Path(__file__).parent))
+from config import DIR_JUNTAR_AUDIOS, AUDIO_FORMATS
+
+# FFmpeg está en PATH en Linux, no necesitamos especificar rutas
+# AudioSegment.converter y AudioSegment.ffmpeg se detectan automáticamente
 
 # Definir la ruta de la carpeta que contiene los audios
-main_dir_path = "E:\\01_edicion_automatizada\\02_juntar_audios"
+main_dir_path = str(DIR_JUNTAR_AUDIOS)
 
 # Recorre todos los directorios en la ruta principal
 for folder_name in os.listdir(main_dir_path):
@@ -202,13 +207,13 @@ for folder_name in os.listdir(main_dir_path):
         album_names = []  
 
         # Si existe un archivo de audio en la carpeta, ignora la carpeta
-        audio_files = [file_name for file_name in os.listdir(folder_path) if file_name.endswith((".MP3",".Mp3", ".mp3", ".flac", ".wav", ".wma", ".m4a"))]
+        audio_files = [file_name for file_name in os.listdir(folder_path) if file_name.endswith(AUDIO_FORMATS)]
         if len(audio_files) <= 1:
-            continue  
+            continue
 
         for file_name in audio_files:
             # Verificar si el archivo es un audio
-            if file_name.endswith((".MP3",".Mp3", ".mp3", ".flac", ".wav", ".wma", ".m4a")):
+            if file_name.endswith(AUDIO_FORMATS):
                 # Abrir el audio y agregarlo a la lista
                 audio_path = os.path.join(folder_path, file_name)
                 audio = AudioSegment.from_file(audio_path)

@@ -44,11 +44,17 @@ import shutil
 from PIL import Image
 from effects.sombra import add_shadow
 import stat
+from pathlib import Path
+import sys
+
+# Importar configuración
+sys.path.append(str(Path(__file__).parent))
+from config import DIR_YA, DIR_VERIFICACION
 
 # Definir la ruta de la carpeta principal
-main_dir_path = "E:\\01_edicion_automatizada\\YA"
+main_dir_path = str(DIR_YA)
 # Definir la ruta del directorio destino
-destination_dir_path = "E:\\01_edicion_automatizada\\verificacion"
+destination_dir_path = str(DIR_VERIFICACION)
 
 # Recorrer todos los directorios en la ruta principal
 for folder_name in os.listdir(main_dir_path):
