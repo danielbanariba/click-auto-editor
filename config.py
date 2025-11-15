@@ -52,10 +52,21 @@ INTRO_DURATION = 7.0  # Segundos del video de intro
 MAX_PARALLEL_RENDERS = 3  # Número de renders simultáneos
 MAX_FOLDERS_TO_PROCESS = 150  # Límite de carpetas por ejecución
 
-# Video quality
-VIDEO_PRESET = "fast"  # Opciones: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
-VIDEO_CRF = 20  # Calidad (0-51, menor = mejor calidad, 18-23 es visualmente sin pérdidas)
+# Video quality settings
+# GPU (NVENC) settings - Requiere GPU Nvidia con soporte NVENC
+USE_GPU = False  # Cambiar a True si tienes GPU Nvidia
+VIDEO_PRESET_NVENC = "p4"  # Presets NVENC: p1 (más rápido) a p7 (mejor calidad)
+VIDEO_CQ = 20  # Constant Quality para NVENC (0-51, menor = mejor calidad)
+
+# CPU (libx264) settings - Fallback si no hay GPU
+VIDEO_PRESET_CPU = "fast"  # Opciones: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
+VIDEO_CRF = 20  # Calidad para libx264 (0-51, menor = mejor calidad, 18-23 es visualmente sin pérdidas)
+
+# Audio
 AUDIO_BITRATE = "320k"
+
+# LEGACY: Mantener compatibilidad con scripts antiguos
+VIDEO_PRESET = VIDEO_PRESET_CPU
 
 # ============================================================================
 # CONFIGURACIÓN DE AUDIO

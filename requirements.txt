@@ -1,0 +1,124 @@
+# ============================================================================
+# REQUIREMENTS.TXT - Click Auto Editor Project
+# ============================================================================
+# Este archivo reemplaza pip_install.ps1 y contiene todas las dependencias
+# del proyecto de automatización de edición de videos para YouTube.
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Procesamiento de Imágenes
+# ----------------------------------------------------------------------------
+Pillow>=10.0.0
+
+# ----------------------------------------------------------------------------
+# Procesamiento y Análisis de Audio
+# ----------------------------------------------------------------------------
+pydub>=0.25.1
+eyed3>=0.9.7
+mutagen>=1.47.0
+
+# ----------------------------------------------------------------------------
+# Web Scraping y Automatización Web
+# ----------------------------------------------------------------------------
+# Playwright es el sistema actual (migrado desde Selenium)
+playwright>=1.40.0
+
+# ----------------------------------------------------------------------------
+# Computación Numérica
+# ----------------------------------------------------------------------------
+numpy>=1.24.0
+
+# ----------------------------------------------------------------------------
+# Automatización de Interfaz Gráfica (GUI)
+# ----------------------------------------------------------------------------
+pyautogui>=0.9.54
+pyperclip>=1.8.2
+keyboard>=0.13.5
+
+# ----------------------------------------------------------------------------
+# API de Google/YouTube
+# ----------------------------------------------------------------------------
+google-api-python-client>=2.100.0
+google-auth-oauthlib>=1.1.0
+google-auth>=2.23.0
+
+# ----------------------------------------------------------------------------
+# Peticiones HTTP y Web
+# ----------------------------------------------------------------------------
+requests>=2.31.0
+
+# ----------------------------------------------------------------------------
+# Utilidades de Sistema y Texto
+# ----------------------------------------------------------------------------
+psutil>=5.9.0
+unidecode>=1.3.0
+
+# ============================================================================
+# DEPENDENCIAS OPCIONALES/HEREDADAS
+# ============================================================================
+# Las siguientes dependencias estaban en pip_install.ps1 pero no se
+# encontraron en el código actual. Descomenta si las necesitas:
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Web Scraping Antiguo (Deprecado - Reemplazado por Playwright)
+# ----------------------------------------------------------------------------
+# selenium>=4.15.0
+# webdriver-manager>=4.0.1
+
+# ----------------------------------------------------------------------------
+# Automatización GUI Adicional
+# ----------------------------------------------------------------------------
+# pynput>=1.7.6
+
+# ----------------------------------------------------------------------------
+# Análisis Científico y Matemático
+# ----------------------------------------------------------------------------
+# scipy>=1.11.0
+# colormath>=3.0.0
+
+# ----------------------------------------------------------------------------
+# Análisis de Audio Avanzado
+# ----------------------------------------------------------------------------
+# librosa>=0.10.0
+# soundfile>=0.12.0
+
+# ----------------------------------------------------------------------------
+# Web Scraping HTML
+# ----------------------------------------------------------------------------
+# beautifulsoup4>=4.12.0
+
+# ============================================================================
+# DEPENDENCIAS OPCIONALES PARA ACELERACIÓN GPU
+# ============================================================================
+# Descomenta estas líneas si quieres usar aceleración GPU con OpenCV CUDA:
+# ============================================================================
+
+# OpenCV estándar (CPU)
+# opencv-python>=4.8.0
+
+# OpenCV con soporte CUDA (GPU) - requiere compilación especial
+# opencv-contrib-python>=4.8.0
+
+# ============================================================================
+# NOTAS DE INSTALACIÓN
+# ============================================================================
+#
+# Para instalar todas las dependencias requeridas:
+#   pip install -r requirements.txt
+#
+# Para instalar incluyendo dependencias opcionales:
+#   pip install -r requirements.txt
+#   # Luego descomenta y ejecuta individualmente las que necesites
+#
+# Para Playwright (requiere instalación adicional de navegadores):
+#   pip install playwright
+#   playwright install chromium
+#
+# Para crear un entorno virtual (recomendado):
+#   python -m venv env
+#   source env/bin/activate  # Linux/Mac
+#   env\Scripts\activate.ps1  # Windows PowerShell
+#   pip install -r requirements.txt
+#
+# ============================================================================
