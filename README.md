@@ -34,20 +34,17 @@ Comprobamos que los albumes que tengamos no esten subidos ya a Youtube, de forma
 
 Abre Adobe After Effects y de manera automatica va a empezar a editar, va a ejecutar varios scripts en formato .jsx que son:
 
- 1) **imagen_movimiento.jsx** = le da el movimiento a la imagen de fondo, que tenga rotacion de manera aleatoria y la imagen va a reaccionar al ritmo de la musica,
- 2) **espectro_de_audio.jsx** = Agarra la imagen, va a examinar la imagen y obtendra el promedio en hexadecimal de los colores para aplicar dicho valor en el espectrum audio.
->
-> [!CAUTION]
-> Si algo se mueve ya minusculo pixel que sea, hay que generar ese cambio porque sino todo se va al carajo
->
+1.  **imagen_movimiento.jsx** = le da el movimiento a la imagen de fondo, que tenga rotacion de manera aleatoria y la imagen va a reaccionar al ritmo de la musica,
+2.  **espectro_de_audio.jsx** = Agarra la imagen, va a examinar la imagen y obtendra el promedio en hexadecimal de los colores para aplicar dicho valor en el espectrum audio.
+    > [!CAUTION]
+    > Si algo se mueve ya minusculo pixel que sea, hay que generar ese cambio porque sino todo se va al carajo
 
 #### 6. auto_premier.py
 
 El programa va abrir premier pro, arrastra el trabajo que ya se hizo con el algoritmo anterior **(4. auto_effects.py)** lo junta con el intro que tengo guardado, le aplica una transicion sencilla y lo manda a renderizar al programa Adobe Media Encoder y el ciclo se repite.
->
+
 > [!IMPORTANT]
 > Se tiene que abrir Adobe Media Encoder antes de ejecutar el script.
->
 
 #### 7. mover_videos_terminados
 
@@ -56,3 +53,7 @@ Una vez terminado de renderizas los videos, este algoritmo va a mover los archiv
 #### 8. subir_video_coordenadas
 
 Todos los videos que se renderizaron y se movieron correctamente se va a subir al canal de youtube, va a poner una fecha y una hora random (24 horas con intervalo de 15 minutos).
+
+python "5. ffmpeg_render.py" # Secuencial (1 video + barra de progreso)
+python "5. ffmpeg_render.py" --test # Prueba con 1 solo video
+python "5. ffmpeg_render.py" --parallel # Paralelo (3 videos sin barra)

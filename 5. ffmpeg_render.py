@@ -7,6 +7,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from PIL import Image
 import time
 import sys
+import re
+import select
 
 # Importar configuración
 sys.path.append(str(Path(__file__).parent))
@@ -148,12 +150,74 @@ def generate_wiggle_expression(seed):
     return np.random.uniform(-3, 3)
 
 
-def render_video(folder_path, folder_name):
+def get_audio_duration(audio_path):
     """
-    Renderiza un video completo usando FFmpeg
+    Obtiene la duración del audio en segundos usando ffprobe
     """
     try:
-        print(f"[INICIO] Procesando: {folder_name}")
+        cmd = [
+            'ffprobe',
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            str(audio_path)
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return float(result.stdout.strip())
+    except Exception:
+        return 0
+
+
+def format_time(seconds):
+    """
+    Formatea segundos en formato HH:MM:SS
+    """
+    if seconds < 0:
+        return "00:00:00"
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def print_progress_bar(current_time, total_duration, elapsed_time, folder_name, bar_width=40):
+    """
+    Imprime una barra de progreso con porcentaje y tiempo estimado
+    """
+    if total_duration <= 0:
+        return
+
+    percentage = min(100, (current_time / total_duration) * 100)
+    filled = int(bar_width * percentage / 100)
+    bar = '█' * filled + '░' * (bar_width - filled)
+
+    # Calcular tiempo restante estimado
+    if current_time > 0 and elapsed_time > 0:
+        speed = current_time / elapsed_time  # segundos de video por segundo real
+        remaining_video_time = total_duration - current_time
+        if speed > 0:
+            eta_seconds = remaining_video_time / speed
+        else:
+            eta_seconds = 0
+    else:
+        eta_seconds = 0
+
+    eta_str = format_time(eta_seconds)
+    elapsed_str = format_time(elapsed_time)
+
+    # Limpiar línea y escribir progreso
+    sys.stdout.write(f'\r[{folder_name[:30]:30s}] |{bar}| {percentage:5.1f}% | Tiempo: {elapsed_str} | ETA: {eta_str}')
+    sys.stdout.flush()
+
+
+def render_video(folder_path, folder_name, show_progress=False):
+    """
+    Renderiza un video completo usando FFmpeg
+    show_progress: Si True, muestra barra de progreso en tiempo real (solo para modo single)
+    """
+    try:
+        if not show_progress:
+            print(f"[INICIO] Procesando: {folder_name}")
         start_time = time.time()
 
         # Buscar archivos necesarios
@@ -181,6 +245,15 @@ def render_video(folder_path, folder_name):
         avg_color = extract_average_color(cover_bg)
         comp_r, comp_g, comp_b = get_complementary_color(*avg_color)
         spectrum_color = f"0x{comp_r:02x}{comp_g:02x}{comp_b:02x}"
+
+        # Obtener duración total del audio (para la barra de progreso)
+        audio_duration = get_audio_duration(audio_file)
+        total_duration = INTRO_DURATION + audio_duration  # Duración total del video
+
+        if show_progress:
+            print(f"\n[RENDERIZANDO] {folder_name}")
+            print(f"Duración estimada: {format_time(total_duration)}")
+            print("")
 
         # Ruta de salida
         output_file = folder_path / f"{folder_name}.mp4"
@@ -256,21 +329,68 @@ def render_video(folder_path, folder_name):
             ]
 
         # Ejecutar FFmpeg
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
+        if show_progress:
+            # Modo con barra de progreso (capturar stderr en tiempo real)
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
 
-        if result.returncode == 0:
-            elapsed = time.time() - start_time
-            print(f"[ÉXITO] {folder_name} renderizado en {elapsed:.1f}s")
-            return True
+            # Leer stderr en tiempo real para obtener progreso
+            stderr_output = ""
+            time_pattern = re.compile(r'time=(\d+):(\d+):(\d+\.?\d*)')
+
+            while True:
+                # Leer una línea del stderr
+                line = process.stderr.readline()
+                if not line and process.poll() is not None:
+                    break
+
+                stderr_output += line
+
+                # Buscar el tiempo actual en la salida
+                match = time_pattern.search(line)
+                if match:
+                    hours = int(match.group(1))
+                    minutes = int(match.group(2))
+                    seconds = float(match.group(3))
+                    current_time = hours * 3600 + minutes * 60 + seconds
+
+                    elapsed = time.time() - start_time
+                    print_progress_bar(current_time, total_duration, elapsed, folder_name)
+
+            process.wait()
+            print()  # Nueva línea después de la barra de progreso
+
+            if process.returncode == 0:
+                elapsed = time.time() - start_time
+                print(f"\n[ÉXITO] {folder_name} renderizado en {format_time(elapsed)}")
+                return True
+            else:
+                print(f"\n[ERROR] FFmpeg falló en {folder_name}")
+                print(f"STDERR: {stderr_output[-500:]}")
+                return False
         else:
-            print(f"[ERROR] FFmpeg falló en {folder_name}")
-            print(f"STDERR: {result.stderr[-500:]}")  # Últimas 500 chars del error
-            return False
+            # Modo sin progreso (para renderizado paralelo)
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            if result.returncode == 0:
+                elapsed = time.time() - start_time
+                print(f"[ÉXITO] {folder_name} renderizado en {elapsed:.1f}s")
+                return True
+            else:
+                print(f"[ERROR] FFmpeg falló en {folder_name}")
+                print(f"STDERR: {result.stderr[-500:]}")
+                return False
 
     except Exception as e:
         print(f"[EXCEPCIÓN] Error procesando {folder_name}: {e}")
@@ -331,6 +451,97 @@ def process_folders_parallel():
     print(f"{'='*60}\n")
 
 
+def process_folders_sequential():
+    """
+    Procesa carpetas secuencialmente (1 a la vez) con barra de progreso
+    """
+    # Recoger todas las carpetas
+    folders = [
+        (MAIN_DIR / folder_name, folder_name)
+        for folder_name in os.listdir(MAIN_DIR)
+        if (MAIN_DIR / folder_name).is_dir()
+    ]
+
+    # Mezclar aleatoriamente
+    random.shuffle(folders)
+
+    # Limitar cantidad
+    folders = folders[:MAX_FOLDERS_TO_PROCESS]
+
+    print(f"\n{'='*60}")
+    print(f"INICIANDO RENDERIZADO SECUENCIAL")
+    print(f"Carpetas a procesar: {len(folders)}")
+    print(f"{'='*60}")
+
+    # Procesar secuencialmente
+    successful = 0
+    failed = 0
+    total_start_time = time.time()
+
+    for i, (folder_path, folder_name) in enumerate(folders, 1):
+        print(f"\n[{i}/{len(folders)}] ", end="")
+        success = render_video(folder_path, folder_name, show_progress=True)
+
+        if success:
+            successful += 1
+        else:
+            failed += 1
+
+        # Mostrar estadísticas parciales
+        total_elapsed = time.time() - total_start_time
+        avg_time = total_elapsed / i
+        remaining = len(folders) - i
+        eta_total = remaining * avg_time
+
+        print(f"\nProgreso total: {i}/{len(folders)} videos")
+        print(f"Exitosos: {successful} | Fallidos: {failed}")
+        print(f"Tiempo promedio por video: {format_time(avg_time)}")
+        print(f"ETA para completar todos: {format_time(eta_total)}")
+        print(f"{'='*60}")
+
+    total_elapsed = time.time() - total_start_time
+    print(f"\n{'='*60}")
+    print(f"RENDERIZADO COMPLETADO")
+    print(f"Tiempo total: {format_time(total_elapsed)}")
+    print(f"Exitosos: {successful}")
+    print(f"Fallidos: {failed}")
+    print(f"{'='*60}\n")
+
+
+def render_single_video():
+    """
+    Renderiza un solo video aleatorio con barra de progreso (modo prueba)
+    """
+    # Recoger todas las carpetas
+    folders = [
+        (MAIN_DIR / folder_name, folder_name)
+        for folder_name in os.listdir(MAIN_DIR)
+        if (MAIN_DIR / folder_name).is_dir()
+    ]
+
+    if not folders:
+        print("ERROR: No hay carpetas para procesar")
+        return
+
+    # Seleccionar una carpeta aleatoria
+    folder_path, folder_name = random.choice(folders)
+
+    print(f"\n{'='*60}")
+    print(f"MODO PRUEBA - RENDERIZADO ÚNICO")
+    print(f"{'='*60}")
+
+    # Renderizar con barra de progreso
+    success = render_video(folder_path, folder_name, show_progress=True)
+
+    print(f"\n{'='*60}")
+    if success:
+        print(f"PRUEBA COMPLETADA EXITOSAMENTE")
+        print(f"Video: {folder_path / f'{folder_name}.mp4'}")
+    else:
+        print(f"PRUEBA FALLIDA")
+    print(f"{'='*60}\n")
+
+
 # ============================================================================
 # MAIN
 # ============================================================================
@@ -346,5 +557,25 @@ if __name__ == "__main__":
         print(f"ERROR: No se encuentra el directorio {MAIN_DIR}")
         exit(1)
 
-    # Procesar
-    process_folders_parallel()
+    # Verificar argumentos
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--test" or sys.argv[1] == "-t":
+            # Modo prueba: renderizar un solo video con barra de progreso
+            render_single_video()
+        elif sys.argv[1] == "--parallel" or sys.argv[1] == "-p":
+            # Modo paralelo: renderizar múltiples videos simultáneamente (sin barra de progreso)
+            process_folders_parallel()
+        elif sys.argv[1] == "--help" or sys.argv[1] == "-h":
+            print("\nUso:")
+            print(f"  python '{Path(__file__).name}'              # Renderizado secuencial (1 video a la vez con barra de progreso)")
+            print(f"  python '{Path(__file__).name}' --test       # Prueba con 1 video + barra de progreso")
+            print(f"  python '{Path(__file__).name}' -t           # Igual que --test")
+            print(f"  python '{Path(__file__).name}' --parallel   # Renderizado paralelo (3 videos simultáneos, sin barra)")
+            print(f"  python '{Path(__file__).name}' -p           # Igual que --parallel")
+            print("")
+        else:
+            print(f"Argumento desconocido: {sys.argv[1]}")
+            print("Usa --help para ver opciones")
+    else:
+        # Modo normal: renderizado secuencial con barra de progreso
+        process_folders_sequential()
