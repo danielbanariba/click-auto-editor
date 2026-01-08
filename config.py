@@ -14,9 +14,14 @@ BASE_DIR = Path("/run/media/banar/Entretenimiento/01_edicion_automatizada")
 # Pipeline de procesamiento
 DIR_LIMPIEZA = BASE_DIR / "01_limpieza_de_impurezas"
 DIR_JUNTAR_AUDIOS = BASE_DIR / "02_juntar_audios"
-DIR_AUDIO_SCRIPTS = BASE_DIR / "audio_scripts"
+DIR_AUDIO_SCRIPTS = BASE_DIR / "01_limpieza_de_impurezas"  # Carpeta fuente para renderizado
 DIR_UPLOAD = BASE_DIR / "upload_video"
 DIR_VERIFICACION = BASE_DIR / "verificacion"
+
+# Directorio temporal en SSD para renderizado rápido
+# Los archivos se copian aquí antes de renderizar para evitar I/O bottleneck
+SSD_TEMP_DIR = Path("/home/banar/temp_render")
+USE_SSD_TEMP = True  # Copiar a SSD antes de renderizar
 
 # Directorios auxiliares
 DIR_VOLVER_A_BUSCAR = BASE_DIR / "03_volver_a_buscar"
@@ -43,20 +48,31 @@ BANDAS_SUBIDAS_TXT = PROJECT_ROOT / "bandas-subidas-al-canal.txt"
 # ============================================================================
 
 # FFmpeg render settings
-VIDEO_WIDTH = 1920
-VIDEO_HEIGHT = 1080
+VIDEO_WIDTH = 3840
+VIDEO_HEIGHT = 2160
 FPS = 30
 INTRO_DURATION = 7.0  # Segundos del video de intro
 
 # Multiprocessing
-MAX_PARALLEL_RENDERS = 3  # Número de renders simultáneos
+# i9-9900K tiene 16 threads - los filtros VHS son CPU-bound
+# RTX 3090 Ti puede manejar 3-5 streams NVENC simultáneos
+# Configuración óptima: 4 renders paralelos (4 threads por render ≈ 16 total)
+MAX_PARALLEL_RENDERS = 3  # 4K es pesado; ajusta si tu VRAM lo permite
 MAX_FOLDERS_TO_PROCESS = 150  # Límite de carpetas por ejecución
 
 # Video quality settings
 # GPU (NVENC) settings - Requiere GPU Nvidia con soporte NVENC
-USE_GPU = False  # Cambiar a True si tienes GPU Nvidia
-VIDEO_PRESET_NVENC = "p4"  # Presets NVENC: p1 (más rápido) a p7 (mejor calidad)
-VIDEO_CQ = 20  # Constant Quality para NVENC (0-51, menor = mejor calidad)
+USE_GPU = True  # RTX 3090 Ti detectada - NVENC activado
+VIDEO_PRESET_NVENC = "p1"  # p1 = máxima velocidad (ideal para RTX 3090 Ti)
+VIDEO_CQ = 20  # Constant Quality (20 es excelente para YouTube, más rápido que 18)
+
+# Opciones NVENC adicionales para máxima velocidad
+NVENC_EXTRA_OPTS = [
+    "-rc", "vbr",           # Variable bitrate
+    "-b_ref_mode", "0",     # Desactivar B-frames de referencia (más rápido)
+    "-spatial_aq", "1",     # Adaptive quantization espacial
+    "-temporal_aq", "1",    # Adaptive quantization temporal
+]
 
 # CPU (libx264) settings - Fallback si no hay GPU
 VIDEO_PRESET_CPU = "fast"  # Opciones: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
@@ -64,6 +80,16 @@ VIDEO_CRF = 20  # Calidad para libx264 (0-51, menor = mejor calidad, 18-23 es vi
 
 # Audio
 AUDIO_BITRATE = "320k"
+
+# ============================================================================
+# CONFIGURACIÓN VHS GPU (C++/CUDA)
+# ============================================================================
+
+# Usar el pipeline GPU en C++ para los efectos VHS (recomendado con 3090)
+USE_CPP_VHS = True
+VHS_CPP_BIN = PROJECT_ROOT / "cpp" / "build" / "vhs_render"
+VHS_CPP_INTENSITY = 0.85
+VHS_CPP_OVERLAY = PROJECT_ROOT / "content" / "vhs_noise.mp4"
 
 # LEGACY: Mantener compatibilidad con scripts antiguos
 VIDEO_PRESET = VIDEO_PRESET_CPU
