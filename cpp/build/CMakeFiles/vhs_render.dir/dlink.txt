@@ -1,0 +1,1 @@
+/opt/cuda/bin/nvcc -forward-unknown-to-host-compiler -O3 -DNDEBUG "--generate-code=arch=compute_86,code=[compute_86,sm_86]" -Xcompiler=-fPIC -Wno-deprecated-gpu-targets -shared -dlink --options-file CMakeFiles/vhs_render.dir/deviceObjects1.rsp -o CMakeFiles/vhs_render.dir/cmake_device_link.o --options-file CMakeFiles/vhs_render.dir/deviceLinkLibs.rsp

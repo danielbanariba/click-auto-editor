@@ -1,0 +1,7 @@
+/home/banar/Desktop/click-auto-editor/cpp/build/CMakeFiles/vhs_render.dir
+/home/banar/Desktop/click-auto-editor/cpp/build/CMakeFiles/edit_cache.dir
+/home/banar/Desktop/click-auto-editor/cpp/build/CMakeFiles/rebuild_cache.dir
+/home/banar/Desktop/click-auto-editor/cpp/build/CMakeFiles/list_install_components.dir
+/home/banar/Desktop/click-auto-editor/cpp/build/CMakeFiles/install.dir
+/home/banar/Desktop/click-auto-editor/cpp/build/CMakeFiles/install/local.dir
+/home/banar/Desktop/click-auto-editor/cpp/build/CMakeFiles/install/strip.dir

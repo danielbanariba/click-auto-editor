@@ -1,0 +1,4 @@
+# VHS Effect - Dependencies
+numpy>=1.20.0
+opencv-python>=4.5.0
+scipy>=1.7.0

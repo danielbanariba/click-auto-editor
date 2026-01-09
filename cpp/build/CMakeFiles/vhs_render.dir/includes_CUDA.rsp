@@ -1,0 +1,1 @@
+-I"/home/banar/Desktop/click-auto-editor/cpp/include" -I"/home/banar/Desktop/click-auto-editor/cpp/src" -isystem "/opt/cuda/targets/x86_64-linux/include" -isystem "/opt/cuda/targets/x86_64-linux/include/cccl"

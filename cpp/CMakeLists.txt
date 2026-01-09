@@ -44,6 +44,7 @@ set(CUDA_SOURCES
     src/effects/vhs_overlay_blend.cu
     src/effects/cover_overlay.cu
     src/effects/vhs_effect_chain.cu
+    src/effects/vhs_transition.cu
     src/utils/cuda_utils.cu
     src/utils/color_conversion.cu
     src/utils/yuv_conversion.cu
@@ -58,6 +59,7 @@ set(CPP_SOURCES
     src/pipeline/cover_pipeline.cpp
     src/utils/npp_wrappers.cpp
     src/utils/image_loader.cpp
+    src/utils/cancel_flag.cpp
     src/config/render_config.cpp
 )
 

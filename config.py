@@ -50,7 +50,7 @@ BANDAS_SUBIDAS_TXT = PROJECT_ROOT / "bandas-subidas-al-canal.txt"
 # FFmpeg render settings
 VIDEO_WIDTH = 3840
 VIDEO_HEIGHT = 2160
-FPS = 30
+FPS = 24
 INTRO_DURATION = 7.0  # Segundos del video de intro
 
 # Multiprocessing
@@ -65,13 +65,25 @@ MAX_FOLDERS_TO_PROCESS = 150  # Límite de carpetas por ejecución
 USE_GPU = True  # RTX 3090 Ti detectada - NVENC activado
 VIDEO_PRESET_NVENC = "p1"  # p1 = máxima velocidad (ideal para RTX 3090 Ti)
 VIDEO_CQ = 20  # Constant Quality (20 es excelente para YouTube, más rápido que 18)
+VIDEO_BITRATE = "45M"
+VIDEO_MAXRATE = "45M"
+VIDEO_BUFSIZE = "90M"
 
-# Opciones NVENC adicionales para máxima velocidad
+# Opciones NVENC recomendadas para YouTube 4K SDR
 NVENC_EXTRA_OPTS = [
-    "-rc", "vbr",           # Variable bitrate
-    "-b_ref_mode", "0",     # Desactivar B-frames de referencia (más rápido)
-    "-spatial_aq", "1",     # Adaptive quantization espacial
-    "-temporal_aq", "1",    # Adaptive quantization temporal
+    "-rc", "vbr",              # Variable bitrate
+    "-b:v", VIDEO_BITRATE,
+    "-maxrate", VIDEO_MAXRATE,
+    "-bufsize", VIDEO_BUFSIZE,
+    "-bf", "2",
+    "-g", str(FPS // 2),
+    "-profile:v", "high",
+    "-movflags", "+faststart",
+    "-color_primaries", "bt709",
+    "-color_trc", "bt709",
+    "-colorspace", "bt709",
+    "-spatial_aq", "1",        # Adaptive quantization espacial
+    "-temporal_aq", "1",       # Adaptive quantization temporal
 ]
 
 # CPU (libx264) settings - Fallback si no hay GPU
@@ -79,7 +91,8 @@ VIDEO_PRESET_CPU = "fast"  # Opciones: ultrafast, superfast, veryfast, faster, f
 VIDEO_CRF = 20  # Calidad para libx264 (0-51, menor = mejor calidad, 18-23 es visualmente sin pérdidas)
 
 # Audio
-AUDIO_BITRATE = "320k"
+AUDIO_BITRATE = "384k"
+AUDIO_SAMPLE_RATE = 48000
 
 # ============================================================================
 # CONFIGURACIÓN VHS GPU (C++/CUDA)
@@ -90,6 +103,12 @@ USE_CPP_VHS = True
 VHS_CPP_BIN = PROJECT_ROOT / "cpp" / "build" / "vhs_render"
 VHS_CPP_INTENSITY = 0.85
 VHS_CPP_OVERLAY = PROJECT_ROOT / "content" / "vhs_noise.mp4"
+# Si el render CUDA falla, usar FFmpeg como fallback para no perder el video
+ALLOW_FFMPEG_FALLBACK = True
+# Si ocurre un error CUDA, desactivar C++ para el resto del run
+DISABLE_CPP_ON_CUDA = False
+# Atajo para evitar múltiples reintentos CUDA (más rápido, menos ruido)
+CUDA_FAIL_FAST = False
 
 # LEGACY: Mantener compatibilidad con scripts antiguos
 VIDEO_PRESET = VIDEO_PRESET_CPU
