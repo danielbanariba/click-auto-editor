@@ -3,7 +3,10 @@ env
 __pycache__/
 
 client_secrets.json
+token.json
 
 PASS.py
 
 content/vhs_noise.mp4
+
+.env

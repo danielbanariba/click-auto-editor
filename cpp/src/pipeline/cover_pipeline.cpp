@@ -18,7 +18,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cctype>
+#include <fstream>
 #include <memory>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <filesystem>
 
 namespace vhs {
 namespace pipeline {
@@ -65,6 +71,8 @@ bool CoverPipeline::process(
     const std::string& intro_path,
     const std::string& cover_path,
     const std::string& cover_overlay_path,
+    const std::string& tracklist_path,
+    const std::string& track_overlays_path,
     double main_duration,
     const std::string& output_path,
     const ::vhs::VHSParams& params,
@@ -80,6 +88,129 @@ bool CoverPipeline::process(
         fprintf(stderr, "[CoverPipeline] Invalid main duration\n");
         return false;
     }
+
+    struct TrackEntry {
+        double start = 0.0;
+        double end = 0.0;
+    };
+
+    auto load_tracklist = [](const std::string& path, std::vector<TrackEntry>& tracks) -> bool {
+        tracks.clear();
+        if (path.empty()) {
+            return false;
+        }
+        std::ifstream file(path);
+        if (!file.is_open()) {
+            fprintf(stderr, "[CoverPipeline] Failed to open tracklist: %s\n", path.c_str());
+            return false;
+        }
+        std::string line;
+        while (std::getline(file, line)) {
+            if (line.empty()) {
+                continue;
+            }
+            std::stringstream ss(line);
+            std::string idx_str;
+            std::string start_str;
+            std::string end_str;
+            if (!std::getline(ss, idx_str, '\t')) {
+                continue;
+            }
+            if (!std::getline(ss, start_str, '\t')) {
+                continue;
+            }
+            if (!std::getline(ss, end_str, '\t')) {
+                continue;
+            }
+            try {
+                double start = std::stod(start_str);
+                double end = std::stod(end_str);
+                if (end <= start) {
+                    continue;
+                }
+                TrackEntry entry;
+                entry.start = start;
+                entry.end = end;
+                tracks.push_back(entry);
+            } catch (const std::exception&) {
+                continue;
+            }
+        }
+        return !tracks.empty();
+    };
+
+    auto load_overlay_images = [](const std::string& dir_path, int target_width, int target_height,
+                                  std::vector<unsigned char*>& d_overlays) -> bool {
+        d_overlays.clear();
+        if (dir_path.empty()) {
+            return false;
+        }
+        std::filesystem::path dir(dir_path);
+        if (!std::filesystem::exists(dir) || !std::filesystem::is_directory(dir)) {
+            fprintf(stderr, "[CoverPipeline] Overlay dir not found: %s\n", dir_path.c_str());
+            return false;
+        }
+
+        std::vector<std::filesystem::path> files;
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            if (!entry.is_regular_file()) {
+                continue;
+            }
+            auto ext = entry.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (ext == ".png") {
+                files.push_back(entry.path());
+            }
+        }
+        std::sort(files.begin(), files.end());
+        if (files.empty()) {
+            return false;
+        }
+
+        for (const auto& path : files) {
+            utils::ImageData overlay;
+            if (!utils::load_image_bgra(path.string(), overlay)) {
+                fprintf(stderr, "[CoverPipeline] Failed to load overlay: %s\n", path.string().c_str());
+                continue;
+            }
+            if (overlay.width != target_width || overlay.height != target_height) {
+                utils::ImageData resized;
+                if (!utils::resize_image_bgra(overlay, target_width, target_height, resized)) {
+                    fprintf(stderr, "[CoverPipeline] Failed to resize overlay: %s\n", path.string().c_str());
+                    continue;
+                }
+                overlay = std::move(resized);
+            }
+
+            unsigned char* d_overlay = nullptr;
+            size_t size = static_cast<size_t>(overlay.width) * overlay.height * 4;
+            cudaError_t err = cudaMalloc(&d_overlay, size);
+            if (err != cudaSuccess) {
+                fprintf(stderr, "[CoverPipeline] Failed to allocate overlay GPU buffer: %s\n",
+                        cudaGetErrorString(err));
+                break;
+            }
+            err = cudaMemcpy(d_overlay, overlay.pixels.data(), size, cudaMemcpyHostToDevice);
+            if (err != cudaSuccess) {
+                fprintf(stderr, "[CoverPipeline] Failed to upload overlay: %s\n",
+                        cudaGetErrorString(err));
+                cudaFree(d_overlay);
+                break;
+            }
+            d_overlays.push_back(d_overlay);
+        }
+
+        return !d_overlays.empty();
+    };
+
+    auto free_overlay_images = [](std::vector<unsigned char*>& d_overlays) {
+        for (auto* ptr : d_overlays) {
+            if (ptr) {
+                cudaFree(ptr);
+            }
+        }
+        d_overlays.clear();
+    };
 
     utils::ImageData cover;
     if (!utils::load_image_bgr(cover_path, cover)) {
@@ -143,6 +274,19 @@ bool CoverPipeline::process(
         fprintf(stderr, "[CoverPipeline] Failed to upload cover overlay\n");
         cudaFree(d_bg);
         return false;
+    }
+
+    std::vector<TrackEntry> tracklist;
+    std::vector<unsigned char*> track_overlays;
+    bool use_track_overlays = false;
+    if (!tracklist_path.empty() && !track_overlays_path.empty()) {
+        if (load_tracklist(tracklist_path, tracklist) &&
+            load_overlay_images(track_overlays_path, width, height, track_overlays)) {
+            use_track_overlays = true;
+        } else {
+            free_overlay_images(track_overlays);
+            tracklist.clear();
+        }
     }
 
     // Blur background on GPU
@@ -314,7 +458,39 @@ bool CoverPipeline::process(
         }
 
         effect_chain.process_frame(d_input, d_output, d_overlay, frame_time, stream);
-        effects::apply_cover_overlay(d_output, d_cover, width, height, cover_width, cover_height, stream);
+        if (use_track_overlays) {
+            int track_idx = 0;
+            double current_time = static_cast<double>(i) / fps;
+            if (current_time >= tracklist.back().end) {
+                track_idx = static_cast<int>(tracklist.size()) - 1;
+            } else {
+                for (size_t t = 0; t < tracklist.size(); t++) {
+                    if (current_time >= tracklist[t].start && current_time < tracklist[t].end) {
+                        track_idx = static_cast<int>(t);
+                        break;
+                    }
+                }
+            }
+            if (!track_overlays.empty()) {
+                if (track_idx < 0) {
+                    track_idx = 0;
+                }
+                if (track_idx >= static_cast<int>(track_overlays.size())) {
+                    track_idx = static_cast<int>(track_overlays.size()) - 1;
+                }
+                effects::apply_cover_overlay(
+                    d_output,
+                    track_overlays[track_idx],
+                    width,
+                    height,
+                    width,
+                    height,
+                    stream
+                );
+            }
+        } else {
+            effects::apply_cover_overlay(d_output, d_cover, width, height, cover_width, cover_height, stream);
+        }
 
         if (d_intro_last && i < transition_frames) {
             float progress = static_cast<float>(i + 1) / static_cast<float>(transition_frames);
@@ -352,6 +528,7 @@ bool CoverPipeline::process(
     cudaFree(d_bg);
     if (d_bg_blur) cudaFree(d_bg_blur);
     cudaFree(d_cover);
+    free_overlay_images(track_overlays);
     if (d_intro_last) cudaFree(d_intro_last);
     cudaStreamDestroy(stream);
 

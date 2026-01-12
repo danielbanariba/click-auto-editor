@@ -44,6 +44,8 @@ void print_usage(const char* prog_name) {
     std::cout << "  --intro         Intro video path (cover mode)\n";
     std::cout << "  --cover         Cover image path (enables cover mode)\n";
     std::cout << "  --cover-overlay Cover overlay path with alpha (optional)\n";
+    std::cout << "  --tracklist     Tracklist file (optional)\n";
+    std::cout << "  --track-overlays Directory with track overlay images (optional)\n";
     std::cout << "  --duration      Main segment duration in seconds (cover mode)\n";
     std::cout << "  --cq            Constant quality (0-51, default: 20)\n";
     std::cout << "  --preset        NVENC preset (p1-p7, default: p1)\n";
@@ -87,6 +89,8 @@ int main(int argc, char* argv[]) {
     std::string intro_path;
     std::string cover_path;
     std::string cover_overlay_path;
+    std::string tracklist_path;
+    std::string track_overlays_path;
     double main_duration = 0.0;
     float intensity = 0.5f;
     int cq = 20;
@@ -120,6 +124,12 @@ int main(int argc, char* argv[]) {
         }
         else if (arg == "--cover-overlay") {
             if (i + 1 < argc) cover_overlay_path = argv[++i];
+        }
+        else if (arg == "--tracklist") {
+            if (i + 1 < argc) tracklist_path = argv[++i];
+        }
+        else if (arg == "--track-overlays") {
+            if (i + 1 < argc) track_overlays_path = argv[++i];
         }
         else if (arg == "--duration") {
             if (i + 1 < argc) main_duration = std::atof(argv[++i]);
@@ -196,6 +206,8 @@ int main(int argc, char* argv[]) {
                 intro_path,
                 cover_path,
                 cover_overlay_path,
+                tracklist_path,
+                track_overlays_path,
                 main_duration,
                 output_path,
                 params,

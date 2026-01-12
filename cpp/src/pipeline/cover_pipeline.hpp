@@ -16,6 +16,8 @@ public:
         const std::string& intro_path,
         const std::string& cover_path,
         const std::string& cover_overlay_path,
+        const std::string& tracklist_path,
+        const std::string& track_overlays_path,
         double main_duration,
         const std::string& output_path,
         const ::vhs::VHSParams& params,

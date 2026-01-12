@@ -5,7 +5,7 @@ import numpy as np
 import io
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import time
 import sys
 import re
@@ -60,6 +60,18 @@ SHADOW_OPACITY = 255
 SHADOW_DIRECTION = 68
 SHADOW_DISTANCE = 27
 SHADOW_SOFTNESS = 19
+
+# Tracklist overlay
+TRACKLIST_MIN_FONT_SIZE = 28
+TRACKLIST_MAX_FONT_SIZE = 90
+TRACKLIST_TOP_MARGIN_RATIO = 0.06
+TRACKLIST_SIDE_MARGIN_RATIO = 0.06
+TRACKLIST_RIGHT_MARGIN_RATIO = 0.05
+TRACKLIST_GAP_RATIO = 0.03
+TRACKLIST_LINE_SPACING = 0.12
+TRACKLIST_MIN_LIST_WIDTH_RATIO = 0.25
+TRACKLIST_COVER_SCALES = (0.85, 0.8, 0.75, 0.7)
+TRACKLIST_MAX_LINES_PER_TRACK = 2
 
 CUDA_ERROR_FLAG = Path(__file__).parent / ".cuda_cpp_disabled"
 
@@ -160,6 +172,12 @@ def move_folder_to_upload(source_folder: Path, folder_name: str, show_progress: 
     Mueve la carpeta renderizada a la carpeta de subida.
     """
     DIR_UPLOAD.mkdir(parents=True, exist_ok=True)
+    overlays_dir = source_folder / "_track_overlays"
+    if overlays_dir.exists():
+        try:
+            shutil.rmtree(overlays_dir)
+        except Exception:
+            pass
     destination = get_unique_destination(DIR_UPLOAD, folder_name)
 
     if show_progress:
@@ -287,6 +305,323 @@ def ensure_shadow_cover(cover_path: Path, folder_path: Path, original_folder_pat
                 pass
 
     return shadow_path
+
+
+def normalize_track_title(title: str) -> str:
+    """
+    Normaliza titulos de pistas eliminando prefijos numericos.
+    """
+    cleaned = re.sub(r"^\s*\d+\s*[-._)\]]\s*", "", title)
+    cleaned = re.sub(r"^\s*\d+\s+", "", cleaned)
+    return cleaned.strip()
+
+
+def build_tracklist(audio_files):
+    """
+    Construye una lista de pistas con tiempos de inicio/fin.
+    """
+    tracks = []
+    current = 0.0
+    for idx, audio_file in enumerate(audio_files, start=1):
+        duration = get_audio_duration(audio_file)
+        if duration <= 0:
+            duration = 0.1
+        title = normalize_track_title(audio_file.stem)
+        if not title:
+            title = f"Track {idx:02d}"
+        start = current
+        end = current + duration
+        tracks.append({
+            "index": idx,
+            "title": title,
+            "start": start,
+            "end": end,
+        })
+        current = end
+    return tracks
+
+
+def find_font_path():
+    """
+    Encuentra una fuente TTF disponible en el sistema.
+    """
+    candidates = [
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def load_font(font_size: int) -> ImageFont.FreeTypeFont:
+    """
+    Carga una fuente con fallback al default de PIL.
+    """
+    font_path = find_font_path()
+    if font_path:
+        try:
+            return ImageFont.truetype(font_path, font_size)
+        except Exception:
+            pass
+    return ImageFont.load_default()
+
+
+def measure_text(draw: ImageDraw.ImageDraw, text: str, font) -> float:
+    """
+    Mide el ancho del texto con el font dado.
+    """
+    try:
+        return draw.textlength(text, font=font)
+    except Exception:
+        try:
+            return font.getlength(text)
+        except Exception:
+            return font.getsize(text)[0]
+
+
+def truncate_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str:
+    """
+    Recorta el texto para que entre en el ancho disponible.
+    """
+    if measure_text(draw, text, font) <= max_width:
+        return text
+    ellipsis = "..."
+    trimmed = text
+    while trimmed and measure_text(draw, trimmed + ellipsis, font) > max_width:
+        trimmed = trimmed[:-1]
+    return (trimmed + ellipsis) if trimmed else text
+
+
+def wrap_text_lines(draw: ImageDraw.ImageDraw, text: str, font, max_width: int, max_lines: int):
+    """
+    Divide un texto en varias lineas sin exceder el ancho.
+    """
+    words = text.split()
+    if not words:
+        return [""]
+
+    lines = []
+    current = ""
+    idx = 0
+    while idx < len(words):
+        word = words[idx]
+        if not current:
+            if measure_text(draw, word, font) > max_width:
+                return None
+            current = word
+            idx += 1
+            continue
+
+        candidate = f"{current} {word}"
+        if measure_text(draw, candidate, font) <= max_width:
+            current = candidate
+            idx += 1
+            continue
+
+        lines.append(current)
+        current = ""
+        if len(lines) >= max_lines:
+            return None
+
+    if current:
+        lines.append(current)
+
+    for line in lines:
+        if measure_text(draw, line, font) > max_width:
+            return None
+
+    return lines
+
+
+def invert_color(avg_color):
+    """
+    Invierte un color RGB promedio (contraparte directa).
+    """
+    if not avg_color:
+        return (255, 255, 255)
+    r, g, b = avg_color
+    return (255 - int(r), 255 - int(g), 255 - int(b))
+
+
+def generate_tracklist_overlays(
+    cover_overlay_path: Path,
+    text_color,
+    tracks,
+    output_dir: Path,
+    width: int,
+    height: int
+):
+    """
+    Genera overlays PNG con portada izquierda y lista de canciones.
+    """
+    if not cover_overlay_path or not cover_overlay_path.exists():
+        return None, None
+    if not tracks:
+        return None, None
+
+    cover_image = Image.open(cover_overlay_path).convert("RGBA")
+    aspect = cover_image.width / cover_image.height
+
+    left_margin = int(width * TRACKLIST_SIDE_MARGIN_RATIO)
+    right_margin = int(width * TRACKLIST_RIGHT_MARGIN_RATIO)
+    gap = int(width * TRACKLIST_GAP_RATIO)
+    top_margin = int(height * TRACKLIST_TOP_MARGIN_RATIO)
+    bottom_margin = top_margin
+
+    cover_height = None
+    cover_width = None
+    list_width = None
+    list_x = None
+
+    for scale in TRACKLIST_COVER_SCALES:
+        candidate_height = int(height * scale)
+        candidate_width = int(candidate_height * aspect)
+        candidate_list_x = left_margin + candidate_width + gap
+        candidate_list_width = width - candidate_list_x - right_margin
+        if candidate_list_width >= int(width * TRACKLIST_MIN_LIST_WIDTH_RATIO):
+            cover_height = candidate_height
+            cover_width = candidate_width
+            list_width = candidate_list_width
+            list_x = candidate_list_x
+            break
+
+    if cover_height is None or list_width is None:
+        return None, None
+
+    max_font_size = min(TRACKLIST_MAX_FONT_SIZE, int(height * 0.05))
+    available_height = height - top_margin - bottom_margin
+    raw_font_size = int(available_height / (len(tracks) * (1.0 + TRACKLIST_LINE_SPACING)))
+    font_size = min(max_font_size, raw_font_size)
+    if font_size < TRACKLIST_MIN_FONT_SIZE:
+        return None, None
+
+    base_font = None
+    highlight_font = None
+    base_line_height = None
+    highlight_line_height = None
+    line_texts_by_track = None
+    max_total_height = None
+    while font_size >= TRACKLIST_MIN_FONT_SIZE:
+        base_font = load_font(font_size)
+        highlight_size = int(round(font_size * 1.25))
+        if highlight_size <= font_size:
+            highlight_size = font_size + 6
+        highlight_size = min(highlight_size, font_size + 18)
+        highlight_font = load_font(highlight_size)
+        try:
+            bbox_base = base_font.getbbox("Hg")
+            bbox_high = highlight_font.getbbox("Hg")
+            base_text_height = bbox_base[3] - bbox_base[1]
+            highlight_text_height = bbox_high[3] - bbox_high[1]
+        except Exception:
+            base_text_height = font_size
+            highlight_text_height = highlight_size
+
+        base_line_height = int(base_text_height * (1.0 + TRACKLIST_LINE_SPACING))
+        highlight_line_height = int(highlight_text_height * (1.0 + TRACKLIST_LINE_SPACING))
+
+        dummy = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(dummy)
+
+        line_texts_by_track = []
+        total_lines = 0
+        max_lines_in_track = 1
+        for track in tracks:
+            line_text = f"{track['index']:02d}. {track['title']}"
+            wrapped = wrap_text_lines(
+                draw,
+                line_text,
+                highlight_font,
+                list_width,
+                TRACKLIST_MAX_LINES_PER_TRACK,
+            )
+            if not wrapped:
+                line_texts_by_track = None
+                break
+            line_texts_by_track.append(wrapped)
+            total_lines += len(wrapped)
+            max_lines_in_track = max(max_lines_in_track, len(wrapped))
+
+        if not line_texts_by_track:
+            font_size -= 1
+            continue
+
+        base_total_height = total_lines * base_line_height
+        max_extra = (highlight_line_height - base_line_height) * max_lines_in_track
+        max_total_height = base_total_height + max_extra
+        if max_total_height <= available_height:
+            break
+        font_size -= 1
+
+    if (
+        font_size < TRACKLIST_MIN_FONT_SIZE
+        or base_font is None
+        or highlight_font is None
+        or base_line_height is None
+        or highlight_line_height is None
+        or not line_texts_by_track
+        or max_total_height is None
+    ):
+        return None, None
+
+    start_y = max(top_margin, int((height - max_total_height) / 2))
+
+    cover_resized = cover_image.resize((cover_width, cover_height), Image.LANCZOS)
+    cover_y = int((height - cover_height) / 2)
+
+    text_color = text_color or (255, 255, 255)
+    base_luminance = 0.299 * text_color[0] + 0.587 * text_color[1] + 0.114 * text_color[2]
+    shadow_base = (20, 20, 20) if base_luminance > 128 else (240, 240, 240)
+    shadow_color = (shadow_base[0], shadow_base[1], shadow_base[2], 110)
+    base_alpha = 200
+    highlight_alpha = 255
+
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for highlight_idx in range(len(tracks)):
+        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        overlay.paste(cover_resized, (left_margin, cover_y), cover_resized)
+        draw = ImageDraw.Draw(overlay)
+
+        y = start_y
+        for idx, lines in enumerate(line_texts_by_track):
+            is_highlight = idx == highlight_idx
+            alpha = highlight_alpha if is_highlight else base_alpha
+            fill = (text_color[0], text_color[1], text_color[2], alpha)
+            font_to_use = highlight_font if is_highlight else base_font
+            line_height = highlight_line_height if is_highlight else base_line_height
+
+            shadow_alpha = 110 if is_highlight else 80
+            shadow_fill = (shadow_color[0], shadow_color[1], shadow_color[2], shadow_alpha)
+            shadow_soft = (
+                shadow_color[0],
+                shadow_color[1],
+                shadow_color[2],
+                max(40, shadow_alpha - 30),
+            )
+
+            for line_text in lines:
+                # Sombra ligera para lectura sobre el fondo
+                draw.text((list_x + 2, y + 2), line_text, font=font_to_use, fill=shadow_soft)
+                draw.text((list_x + 1, y + 1), line_text, font=font_to_use, fill=shadow_fill)
+                draw.text((list_x, y), line_text, font=font_to_use, fill=fill)
+                y += line_height
+
+        out_path = output_dir / f"track_{highlight_idx:03d}.png"
+        overlay.save(out_path, "PNG")
+
+    tracklist_path = output_dir / "tracklist.tsv"
+    with open(tracklist_path, "w", encoding="utf-8") as f:
+        for idx, track in enumerate(tracks):
+            f.write(f"{idx}\t{track['start']:.3f}\t{track['end']:.3f}\t{track['title']}\n")
+
+    return tracklist_path, output_dir
 
 
 def extract_cover_bytes_from_audio(audio_path: Path):
@@ -587,6 +922,8 @@ def render_video_with_cpp(
     audio_files,
     cover_main,
     cover_overlay,
+    tracklist_path,
+    track_overlays_path,
     audio_duration,
     total_duration,
     show_progress,
@@ -678,6 +1015,9 @@ def render_video_with_cpp(
 
     if cover_overlay and Path(cover_overlay).exists():
         base_cpp_cmd.extend(['--cover-overlay', str(cover_overlay)])
+    if tracklist_path and track_overlays_path:
+        base_cpp_cmd.extend(['--tracklist', str(tracklist_path)])
+        base_cpp_cmd.extend(['--track-overlays', str(track_overlays_path)])
 
     cpp_cmd = base_cpp_cmd.copy()
 
@@ -806,6 +1146,12 @@ def render_video_with_cpp(
         if temp_folder_path.exists():
             shutil.rmtree(temp_folder_path)
 
+    if track_overlays_path:
+        try:
+            shutil.rmtree(track_overlays_path)
+        except Exception:
+            pass
+
     destination_folder = move_folder_to_upload(original_folder_path, folder_name, show_progress)
     elapsed = time.time() - start_time
     if show_progress:
@@ -920,10 +1266,26 @@ def render_video(folder_path, folder_name, show_progress=False):
 
         cover_bg = cover_main
 
-        # Extraer color promedio y calcular complementario
+        # Extraer color promedio e invertir para usar en texto
         avg_color = extract_average_color(cover_bg)
+        inv_color = invert_color(avg_color)
         comp_r, comp_g, comp_b = get_complementary_color(*avg_color)
         spectrum_color = f"0x{comp_r:02x}{comp_g:02x}{comp_b:02x}"
+
+        tracklist_path = None
+        track_overlays_path = None
+        if USE_CPP_VHS:
+            tracks = build_tracklist(audio_files)
+            if tracks and cover_overlay:
+                overlays_dir = folder_path / "_track_overlays"
+                tracklist_path, track_overlays_path = generate_tracklist_overlays(
+                    cover_overlay_path=Path(cover_overlay),
+                    text_color=inv_color,
+                    tracks=tracks,
+                    output_dir=overlays_dir,
+                    width=VIDEO_WIDTH,
+                    height=VIDEO_HEIGHT
+                )
 
         # Obtener duración total de todos los audios (para la barra de progreso)
         audio_duration = sum(get_audio_duration(af) for af in audio_files)
@@ -950,6 +1312,8 @@ def render_video(folder_path, folder_name, show_progress=False):
                     audio_files=audio_files,
                     cover_main=cover_main,
                     cover_overlay=cover_overlay,
+                    tracklist_path=tracklist_path,
+                    track_overlays_path=track_overlays_path,
                     audio_duration=audio_duration,
                     total_duration=total_duration,
                     show_progress=show_progress,
@@ -1323,7 +1687,10 @@ def process_folders_parallel():
         print("\n\nRenderizado cancelado por el usuario.")
         for future in future_to_folder:
             future.cancel()
-        executor.shutdown(wait=False, cancel_futures=True)
+        try:
+            executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
         # Terminar procesos para liberar VRAM
         try:
             for proc in getattr(executor, "_processes", {}).values():
@@ -1335,11 +1702,15 @@ def process_folders_parallel():
             pass
     finally:
         if not cancelled:
-            executor.shutdown(wait=True)
+            try:
+                executor.shutdown(wait=True)
+            except Exception:
+                pass
         else:
             cleanup_temp()
-        if cancelled:
-            return
+
+    if cancelled:
+        return
 
     print(f"\n{'='*60}")
     print(f"RENDERIZADO COMPLETADO")
