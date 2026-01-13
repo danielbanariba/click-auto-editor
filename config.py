@@ -43,6 +43,8 @@ DIR_BANDAS_SUBIDAS = BASE_DIR / "bandas_que_supuestamente_ya_se_subieron"
 PROJECT_ROOT = Path(__file__).parent
 INTRO_VIDEO = PROJECT_ROOT / "content" / "0000000000000000.mp4"
 BANDAS_SUBIDAS_TXT = PROJECT_ROOT / "bandas-subidas-al-canal.txt"
+PLAYWRIGHT_PROFILE_DIR = PROJECT_ROOT / ".playwright_profile"
+PLAYWRIGHT_SELECTORS_DIR = PROJECT_ROOT / "selectores"
 
 # ============================================================================
 # CONFIGURACIÓN DE RENDERIZADO

@@ -1,6 +1,11 @@
 import os
 import random
 import subprocess
+import csv
+import ast
+import json
+import uuid
+import requests
 import numpy as np
 import io
 from pathlib import Path
@@ -74,6 +79,13 @@ TRACKLIST_COVER_SCALES = (0.85, 0.8, 0.75, 0.7)
 TRACKLIST_MAX_LINES_PER_TRACK = 2
 
 CUDA_ERROR_FLAG = Path(__file__).parent / ".cuda_cpp_disabled"
+ENV_LOADED = False
+DEATHGRIND_SESSION = None
+
+BASE_URL = "https://deathgrind.club"
+API_URL = f"{BASE_URL}/api"
+DELAY_BASE_429 = 30
+MAX_RETRIES_429 = int(os.environ.get("DEATHGRIND_MAX_429", "1"))
 
 
 # ============================================================================
@@ -316,19 +328,408 @@ def normalize_track_title(title: str) -> str:
     return cleaned.strip()
 
 
-def build_tracklist(audio_files):
+def normalize_compare(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def strip_album_suffix(text: str) -> str:
+    cleaned = text.strip()
+    cleaned = re.sub(r"\s*[\[(]\s*\d{4}\s*[\])]\s*$", "", cleaned)
+    cleaned = re.sub(
+        r"\s*[\[(]\s*(ep|album|demo|single|split|compilation|live|boxset)\s*[\])]\s*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return cleaned.strip()
+
+
+def parse_band_album_from_folder(folder_name: str):
+    if " - " in folder_name:
+        band, album = folder_name.split(" - ", 1)
+        return band.strip(), strip_album_suffix(album)
+    return folder_name.strip(), None
+
+
+def clean_track_title(title: str, band_name, album_name, fallback_title: str) -> str:
+    cleaned = normalize_track_title(title)
+    if not cleaned:
+        cleaned = normalize_track_title(fallback_title) or fallback_title
+
+    band = band_name or ""
+    album = album_name or ""
+
+    if band and album:
+        patterns = [
+            rf"^\s*{re.escape(band)}\s*[-–:|]+\s*{re.escape(album)}\s*[-–:|]+\s*",
+            rf"^\s*{re.escape(album)}\s*[-–:|]+\s*{re.escape(band)}\s*[-–:|]+\s*",
+        ]
+        for pattern in patterns:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+
+    if band:
+        cleaned = re.sub(rf"^\s*{re.escape(band)}\s*[-–:|]+\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(rf"\s*[-–:|]+\s*{re.escape(band)}\s*$", "", cleaned, flags=re.IGNORECASE)
+    if album:
+        cleaned = re.sub(rf"^\s*{re.escape(album)}\s*[-–:|]+\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(rf"\s*[-–:|]+\s*{re.escape(album)}\s*$", "", cleaned, flags=re.IGNORECASE)
+
+    cleaned = cleaned.strip()
+    if not cleaned:
+        cleaned = normalize_track_title(fallback_title) or fallback_title
+
+    band_norm = normalize_compare(band) if band else ""
+    album_norm = normalize_compare(album) if album else ""
+    title_norm = normalize_compare(cleaned)
+    if title_norm in {band_norm, album_norm, f"{band_norm} {album_norm}", f"{album_norm} {band_norm}"}:
+        cleaned = normalize_track_title(fallback_title) or fallback_title
+    return cleaned
+
+
+def cargar_env(env_path=".env"):
+    global ENV_LOADED
+    if ENV_LOADED:
+        return
+    ENV_LOADED = True
+    if not os.path.exists(env_path):
+        return
+    with open(env_path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            if "=" in line:
+                key, val = line.strip().split("=", 1)
+                os.environ[key] = val
+
+
+def crear_sesion_autenticada():
+    global DEATHGRIND_SESSION
+    if DEATHGRIND_SESSION is not None:
+        return DEATHGRIND_SESSION
+
+    email = os.environ.get("DEATHGRIND_EMAIL")
+    password = os.environ.get("DEATHGRIND_PASSWORD")
+    if not email or not password:
+        print("[TRACKLIST] Credenciales DeathGrind no encontradas, se usa audio local.")
+        return None
+
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+    })
+
+    try:
+        session.get(f"{BASE_URL}/auth/sign-in", timeout=30)
+        csrf_token = session.cookies.get("csrfToken", "")
+        headers = {"x-csrf-token": csrf_token, "x-uuid": uuid.uuid4().hex}
+        response = session.post(
+            f"{API_URL}/auth/login",
+            json={"login": email, "password": password},
+            headers=headers,
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        print(f"[TRACKLIST] Error de conexion DeathGrind: {exc}")
+        return None
+
+    if response.status_code not in (200, 202):
+        print(f"[TRACKLIST] Error login DeathGrind: {response.status_code}")
+        return None
+
+    csrf_token = session.cookies.get("csrfToken", "")
+    session.headers.update({"x-csrf-token": csrf_token, "x-uuid": headers["x-uuid"]})
+    DEATHGRIND_SESSION = session
+    return session
+
+
+def api_get(session, endpoint, params=None, max_retries=5):
+    if session is None:
+        return None
+    url = f"{API_URL}{endpoint}"
+    retries_429 = 0
+    retries_error = 0
+
+    while True:
+        try:
+            response = session.get(url, params=params, timeout=30)
+            if response.status_code == 429:
+                retries_429 += 1
+                if MAX_RETRIES_429 is not None and retries_429 >= MAX_RETRIES_429:
+                    print("[TRACKLIST] Rate limit DeathGrind, se omite API.")
+                    return None
+                wait_time = DELAY_BASE_429 * retries_429
+                print(f"[TRACKLIST] Rate limit DeathGrind, esperando {wait_time}s...")
+                time.sleep(wait_time)
+                continue
+            if response.status_code != 200:
+                retries_error += 1
+                if retries_error >= max_retries:
+                    return None
+                time.sleep(2)
+                continue
+            return response.json()
+        except requests.RequestException:
+            retries_error += 1
+            if retries_error >= max_retries:
+                return None
+            time.sleep(2)
+
+
+def normalize_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value).lower()).strip()
+
+
+def normalize_album_name(value: str) -> str:
+    return normalize_name(strip_album_suffix(value))
+
+
+def get_repertorio_csv_path():
+    csv_path = os.environ.get("DEATHGRIND_REPERTORIO_CSV")
+    if csv_path:
+        return csv_path
+    default_csv = Path("/home/banar/Desktop/scrapper-deathgrind/data/bandas_completo.csv")
+    if default_csv.exists():
+        return str(default_csv)
+    return None
+
+
+def buscar_post_id_en_csv(csv_path, band_name, album_name):
+    if not csv_path:
+        return None
+    path = Path(csv_path)
+    if not path.exists():
+        return None
+
+    norm_band = normalize_name(band_name)
+    norm_album = normalize_album_name(album_name) if album_name else ""
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                album = row.get("album") or ""
+                title = row.get("title") or ""
+                if not album and title and " - " in title:
+                    album = title.split(" - ", 1)[1]
+                if norm_album and normalize_album_name(album) != norm_album:
+                    continue
+                bands_raw = row.get("bands") or row.get("band") or ""
+                try:
+                    bands = ast.literal_eval(bands_raw) if bands_raw else []
+                except Exception:
+                    bands = [bands_raw]
+                bands = [band for band in bands if band]
+                if bands and not any(normalize_name(band) == norm_band for band in bands):
+                    continue
+                post_id = row.get("post_id")
+                if post_id:
+                    try:
+                        return int(post_id)
+                    except ValueError:
+                        return None
+    except Exception:
+        return None
+    return None
+
+
+def match_post(post, band_name, album_name):
+    post_album = post.get("album") or post.get("title") or ""
+    bands = post.get("bands", [])
+    band_match = False
+    for band in bands:
+        name = band.get("name") if isinstance(band, dict) else str(band)
+        if normalize_name(name) == normalize_name(band_name):
+            band_match = True
+            break
+    if not band_match:
+        return False
+    if album_name:
+        return normalize_album_name(post_album) == normalize_album_name(album_name)
+    return True
+
+
+def buscar_post_id_en_api(session, band_name, album_name):
+    album_search = strip_album_suffix(album_name or "")
+    query = f"{band_name} {album_search}".strip()
+    data = api_get(session, "/posts/filter", params={"search": query})
+    if not data:
+        return None
+    posts = data.get("posts", [])
+    for post in posts:
+        if match_post(post, band_name, album_name):
+            return post.get("postId") or post.get("id")
+
+    offset = data.get("offset")
+    while data.get("hasMore") and offset is not None:
+        data = api_get(session, "/posts/filter", params={"search": query, "offset": offset})
+        if not data:
+            break
+        posts = data.get("posts", [])
+        for post in posts:
+            if match_post(post, band_name, album_name):
+                return post.get("postId") or post.get("id")
+        offset = data.get("offset")
+    return None
+
+
+TRACKLIST_KEYS = (
+    "tracklist",
+    "trackList",
+    "tracks",
+    "track",
+    "songs",
+    "songList",
+    "track_listing",
+    "trackListing",
+)
+
+
+def find_tracklist_in_data(data, depth=0, max_depth=3):
+    if depth > max_depth:
+        return None
+    if isinstance(data, dict):
+        for key in TRACKLIST_KEYS:
+            if key in data:
+                return data.get(key)
+        for value in data.values():
+            if isinstance(value, (dict, list)):
+                found = find_tracklist_in_data(value, depth + 1, max_depth)
+                if found is not None:
+                    return found
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, (dict, list)):
+                found = find_tracklist_in_data(item, depth + 1, max_depth)
+                if found is not None:
+                    return found
+    return None
+
+
+def parse_track_number(value):
+    if not value:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    match = re.search(r"\d+", str(value))
+    if match:
+        return int(match.group(0))
+    return None
+
+
+def parse_track_title_item(item):
+    if isinstance(item, dict):
+        for key in ("title", "name", "track", "song", "trackTitle", "track_name"):
+            value = item.get(key)
+            if value:
+                return normalize_track_title(str(value))
+        return None
+    if isinstance(item, str):
+        return normalize_track_title(item)
+    return None
+
+
+def parse_track_number_item(item):
+    if isinstance(item, dict):
+        for key in ("trackNumber", "track_number", "track", "position", "index", "number"):
+            value = item.get(key)
+            track_number = parse_track_number(value)
+            if track_number is not None:
+                return track_number
+    if isinstance(item, str):
+        return parse_track_number(item)
+    return None
+
+
+def parse_tracklist_raw(raw):
+    if raw is None:
+        return []
+    if isinstance(raw, dict):
+        for key in TRACKLIST_KEYS:
+            if key in raw:
+                return parse_tracklist_raw(raw.get(key))
+        return []
+
+    entries = []
+    if isinstance(raw, str):
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        for idx, line in enumerate(lines):
+            title = normalize_track_title(line)
+            track_number = parse_track_number(line)
+            if title:
+                entries.append((track_number, idx, title))
+    elif isinstance(raw, list):
+        for idx, item in enumerate(raw):
+            title = parse_track_title_item(item)
+            if not title:
+                continue
+            track_number = parse_track_number_item(item)
+            entries.append((track_number, idx, title))
+
+    if not entries:
+        return []
+
+    if any(track_number is not None for track_number, _idx, _title in entries):
+        entries.sort(key=lambda item: (item[0] if item[0] is not None else 9999, item[1]))
+    return [title for _track_number, _idx, title in entries]
+
+
+def obtener_tracklist_api(session, post_id):
+    if not session or not post_id:
+        return []
+    data = api_get(session, f"/posts/{post_id}")
+    if not data:
+        return []
+    raw = find_tracklist_in_data(data)
+    return parse_tracklist_raw(raw)
+
+
+def obtener_tracklist_deathgrind(folder_name, audio_count):
+    cargar_env()
+    session = crear_sesion_autenticada()
+    if not session:
+        return []
+
+    band_name, album_name = parse_band_album_from_folder(folder_name)
+    csv_path = get_repertorio_csv_path()
+    post_id = buscar_post_id_en_csv(csv_path, band_name, album_name)
+    if not post_id:
+        post_id = buscar_post_id_en_api(session, band_name, album_name)
+    if not post_id:
+        return []
+
+    titles = obtener_tracklist_api(session, post_id)
+    if titles and len(titles) == audio_count:
+        return titles
+    return []
+
+
+def build_tracklist(audio_files, folder_name=None, api_titles=None):
     """
     Construye una lista de pistas con tiempos de inicio/fin.
     """
+    band_name = None
+    album_name = None
+    if folder_name:
+        band_name, album_name = parse_band_album_from_folder(folder_name)
+
+    use_api = False
+    clean_api_titles = []
+    if api_titles and len(api_titles) == len(audio_files):
+        clean_api_titles = [normalize_track_title(title) for title in api_titles]
+        if all(title for title in clean_api_titles):
+            use_api = True
+
     tracks = []
     current = 0.0
     for idx, audio_file in enumerate(audio_files, start=1):
         duration = get_audio_duration(audio_file)
         if duration <= 0:
             duration = 0.1
-        title = normalize_track_title(audio_file.stem)
+        fallback = audio_file.stem
+        if use_api:
+            title = clean_api_titles[idx - 1]
+        else:
+            title = clean_track_title(audio_file.stem, band_name, album_name, fallback)
         if not title:
-            title = f"Track {idx:02d}"
+            title = normalize_track_title(fallback) or fallback
         start = current
         end = current + duration
         tracks.append({
@@ -394,6 +795,20 @@ def truncate_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) ->
     while trimmed and measure_text(draw, trimmed + ellipsis, font) > max_width:
         trimmed = trimmed[:-1]
     return (trimmed + ellipsis) if trimmed else text
+
+
+def font_line_height(font, fallback_size: int) -> int:
+    try:
+        ascent, descent = font.getmetrics()
+        if ascent or descent:
+            return ascent + descent
+    except Exception:
+        pass
+    try:
+        bbox = font.getbbox("HgÁÉqy")
+        return bbox[3] - bbox[1]
+    except Exception:
+        return fallback_size
 
 
 def wrap_text_lines(draw: ImageDraw.ImageDraw, text: str, font, max_width: int, max_lines: int):
@@ -512,14 +927,8 @@ def generate_tracklist_overlays(
             highlight_size = font_size + 6
         highlight_size = min(highlight_size, font_size + 18)
         highlight_font = load_font(highlight_size)
-        try:
-            bbox_base = base_font.getbbox("Hg")
-            bbox_high = highlight_font.getbbox("Hg")
-            base_text_height = bbox_base[3] - bbox_base[1]
-            highlight_text_height = bbox_high[3] - bbox_high[1]
-        except Exception:
-            base_text_height = font_size
-            highlight_text_height = highlight_size
+        base_text_height = font_line_height(base_font, font_size)
+        highlight_text_height = font_line_height(highlight_font, highlight_size)
 
         base_line_height = int(base_text_height * (1.0 + TRACKLIST_LINE_SPACING))
         highlight_line_height = int(highlight_text_height * (1.0 + TRACKLIST_LINE_SPACING))
@@ -1275,7 +1684,12 @@ def render_video(folder_path, folder_name, show_progress=False):
         tracklist_path = None
         track_overlays_path = None
         if USE_CPP_VHS:
-            tracks = build_tracklist(audio_files)
+            api_titles = obtener_tracklist_deathgrind(folder_name, len(audio_files))
+            if api_titles:
+                print(f"[TRACKLIST] {folder_name} titulos obtenidos desde DeathGrind.")
+            else:
+                print(f"[TRACKLIST] {folder_name} usando titulos de audio local.")
+            tracks = build_tracklist(audio_files, folder_name=folder_name, api_titles=api_titles)
             if tracks and cover_overlay:
                 overlays_dir = folder_path / "_track_overlays"
                 tracklist_path, track_overlays_path = generate_tracklist_overlays(

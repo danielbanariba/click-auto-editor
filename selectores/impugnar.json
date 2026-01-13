@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "steps": {
+    "impugnar": {
+      "aria_label": "Take action",
+      "text": "Take action",
+      "tag": "button",
+      "role": "button",
+      "css": "ytcp-button#actions-button > ytcp-button-shape > button"
+    },
+    "impugnar_confirmar": {
+      "text": "Dispute\nDispute a claim if you have the necessary rights to the content, or other valid reasons. It takes up to 30 days for a final resolution from the claimant. Your channel won\u2019t receive a strike if",
+      "tag": "button",
+      "role": "button",
+      "css": "tp-yt-paper-dialog#dialog > div:nth-of-type(2) > div > iron-selector > button:nth-of-type(4)"
+    },
+    "continuar": {
+      "aria_label": "Continue",
+      "text": "Continue",
+      "tag": "button",
+      "role": "button",
+      "css": "ytcp-button#continue-button > ytcp-button-shape > button"
+    },
+    "licencia": {
+      "name": "AUTHORIZED",
+      "text": "License\nI have permission or a license to use the content claimed in my video",
+      "tag": "tp-yt-paper-radio-button",
+      "role": "radio",
+      "css": "tp-yt-paper-radio-group#type-radios > tp-yt-paper-radio-button:nth-of-type(2)"
+    },
+    "info_licencia": {
+      "aria_label": "Specifics that will help the claimant verify your permission to use this content will help them to process your dispute.",
+      "placeholder": "Specifics that will help the claimant verify your permission to use this content will help them to process your dispute.",
+      "tag": "textarea",
+      "role": "textbox",
+      "css": "ytcp-form-textarea#rationale > div:nth-of-type(1) > textarea"
+    },
+    "firma": {
+      "aria_label": "Signature",
+      "tag": "textarea",
+      "role": "textbox",
+      "css": "ytcp-form-textarea#signature > div:nth-of-type(1) > textarea"
+    }
+  }
+}

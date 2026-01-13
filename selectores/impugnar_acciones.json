@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "actions": [
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "aria_label": "Take action",
+        "text": "Take action",
+        "tag": "button",
+        "role": "button",
+        "css": "ytcp-button#actions-button > ytcp-button-shape > button"
+      },
+      "time": 1768342018462
+    },
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "text": "Dispute\nDispute a claim if you have the necessary rights to the content, or other valid reasons. It takes up to 30 days for a final resolution from the claimant. Your channel won\u2019t receive a strike if",
+        "tag": "button",
+        "role": "button",
+        "css": "tp-yt-paper-dialog#dialog > div:nth-of-type(2) > div > iron-selector > button:nth-of-type(4)"
+      },
+      "time": 1768342021411
+    },
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "aria_label": "Continue",
+        "text": "Continue",
+        "tag": "button",
+        "role": "button",
+        "css": "ytcp-button#confirm-button > ytcp-button-shape > button"
+      },
+      "time": 1768342022724
+    },
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "aria_label": "Continue",
+        "text": "Continue",
+        "tag": "button",
+        "role": "button",
+        "css": "ytcp-button#continue-button > ytcp-button-shape > button"
+      },
+      "time": 1768342025229
+    },
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "name": "AUTHORIZED",
+        "text": "License\nI have permission or a license to use the content claimed in my video",
+        "tag": "tp-yt-paper-radio-button",
+        "role": "radio",
+        "css": "tp-yt-paper-radio-group#type-radios > tp-yt-paper-radio-button:nth-of-type(2)"
+      },
+      "time": 1768342026390
+    },
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "aria_label": "Continue",
+        "text": "Continue",
+        "tag": "button",
+        "role": "button",
+        "css": "ytcp-button#continue-button > ytcp-button-shape > button"
+      },
+      "time": 1768342027636
+    },
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "aria_label": "Scytherium  - The Midnight Cadenza  (Full Album) Dispute claim: The Inversion",
+        "id": "dialog",
+        "text": "Video: Scytherium - The Midnight Cadenza (Full Album)\nDispute claim: The Inversion\nOverview\nReason\nDetails\nRationale\n\nNot all licenses are the same\n\nIf you have a license, make sure you understand the",
+        "tag": "tp-yt-paper-dialog",
+        "role": "dialog",
+        "css": "tp-yt-paper-dialog#dialog"
+      },
+      "time": 1768342029654
+    },
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "aria_label": "Scytherium  - The Midnight Cadenza  (Full Album) Dispute claim: The Inversion",
+        "id": "dialog",
+        "text": "Video: Scytherium - The Midnight Cadenza (Full Album)\nDispute claim: The Inversion\nOverview\nReason\nDetails\nRationale\n\nNot all licenses are the same\n\nIf you have a license, make sure you understand the",
+        "tag": "tp-yt-paper-dialog",
+        "role": "dialog",
+        "css": "tp-yt-paper-dialog#dialog"
+      },
+      "time": 1768342031168
+    },
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "aria_label": "Continue",
+        "text": "Continue",
+        "tag": "button",
+        "role": "button",
+        "css": "ytcp-button#continue-button > ytcp-button-shape > button"
+      },
+      "time": 1768342031626
+    },
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "aria_label": "Scytherium  - The Midnight Cadenza  (Full Album) Dispute claim: The Inversion",
+        "id": "dialog",
+        "text": "Video: Scytherium - The Midnight Cadenza (Full Album)\nDispute claim: The Inversion\nOverview\nReason\nDetails\nRationale\nPlease include your license information below (required)\n25/2000\nThis will go to th",
+        "tag": "tp-yt-paper-dialog",
+        "role": "dialog",
+        "css": "tp-yt-paper-dialog#dialog"
+      },
+      "time": 1768342036065
+    },
+    {
+      "type": "fill",
+      "value": "Estimados representantes:\n\nMe dirijo a ustedes con el prop\u00f3sito de solicitar autorizaci\u00f3n para compartir su m\u00fasica en mi canal de YouTube. He intentado obtener los permisos correspondientes del \u00e1lbum, sin embargo, no he logrado encontrar informaci\u00f3n de contacto oficial de la banda o sus representantes para realizar esta solicitud de manera formal.\n\nMe gustar\u00eda establecer una comunicaci\u00f3n directa con ustedes para discutir los t\u00e9rminos y condiciones que consideren apropiados para el uso de su material musical. Estoy dispuesto a evaluar diferentes opciones que beneficien a ambas partes.\n\nQuedo atento a su respuesta y disponible para proporcionar cualquier informaci\u00f3n adicional que requieran.\n\nSaludos cordiales desde Honduras,",
+      "info": {
+        "aria_label": "Specifics that will help the claimant verify your permission to use this content will help them to process your dispute.",
+        "placeholder": "Specifics that will help the claimant verify your permission to use this content will help them to process your dispute.",
+        "tag": "textarea",
+        "role": "textbox",
+        "css": "ytcp-form-textarea#rationale > div:nth-of-type(1) > textarea"
+      },
+      "time": 1768342049288
+    },
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "aria_label": "Scytherium  - The Midnight Cadenza  (Full Album) Dispute claim: The Inversion",
+        "id": "dialog",
+        "text": "Video: Scytherium - The Midnight Cadenza (Full Album)\nDispute claim: The Inversion\nOverview\nReason\nDetails\nRationale\nPlease include your license information below (required)\nThis will go to the claima",
+        "tag": "tp-yt-paper-dialog",
+        "role": "dialog",
+        "css": "tp-yt-paper-dialog#dialog"
+      },
+      "time": 1768342049378
+    },
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "aria_label": "Scytherium  - The Midnight Cadenza  (Full Album) Dispute claim: The Inversion",
+        "id": "dialog",
+        "text": "Video: Scytherium - The Midnight Cadenza (Full Album)\nDispute claim: The Inversion\nOverview\nReason\nDetails\nRationale\nPlease include your license information below (required)\nThis will go to the claima",
+        "tag": "tp-yt-paper-dialog",
+        "role": "dialog",
+        "css": "tp-yt-paper-dialog#dialog"
+      },
+      "time": 1768342049791
+    },
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "aria_label": "Scytherium  - The Midnight Cadenza  (Full Album) Dispute claim: The Inversion",
+        "id": "dialog",
+        "text": "Video: Scytherium - The Midnight Cadenza (Full Album)\nDispute claim: The Inversion\nOverview\nReason\nDetails\nRationale\nPlease include your license information below (required)\nThis will go to the claima",
+        "tag": "tp-yt-paper-dialog",
+        "role": "dialog",
+        "css": "tp-yt-paper-dialog#dialog"
+      },
+      "time": 1768342050114
+    },
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "aria_label": "Signature",
+        "tag": "textarea",
+        "role": "textbox",
+        "css": "ytcp-form-textarea#signature > div:nth-of-type(1) > textarea"
+      },
+      "time": 1768342051479
+    },
+    {
+      "type": "fill",
+      "value": "Daniel Alejandro Barrientos Anariba",
+      "info": {
+        "aria_label": "Signature",
+        "tag": "textarea",
+        "role": "textbox",
+        "css": "ytcp-form-textarea#signature > div:nth-of-type(1) > textarea"
+      },
+      "time": 1768342061050
+    },
+    {
+      "type": "click",
+      "value": null,
+      "info": {
+        "aria_label": "Submit",
+        "text": "Submit",
+        "tag": "button",
+        "role": "button",
+        "css": "ytcp-button#submit-button > ytcp-button-shape > button"
+      },
+      "time": 1768342061154
+    }
+  ]
+}

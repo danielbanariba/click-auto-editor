@@ -10,3 +10,5 @@ PASS.py
 content/vhs_noise.mp4
 
 .env
+
+.playwright_profile
