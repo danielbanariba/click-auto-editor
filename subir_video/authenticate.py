@@ -1,12 +1,17 @@
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from pathlib import Path
 import os
 
 # Define los scopes de la API de YouTube
-SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
+SCOPES = [
+    'https://www.googleapis.com/auth/youtube.upload',
+    'https://www.googleapis.com/auth/youtube.readonly',
+    'https://www.googleapis.com/auth/youtube',
+]
 
 def authenticate():
     # Autentica usando las credenciales de OAuth 2.0
@@ -22,11 +27,16 @@ def authenticate():
     credentials = None
     if token_path.exists():
         credentials = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+        if not credentials.has_scopes(SCOPES):
+            credentials = None
 
     if not credentials or not credentials.valid:
         if credentials and credentials.expired and credentials.refresh_token:
-            credentials.refresh(Request())
-        else:
+            try:
+                credentials.refresh(Request())
+            except RefreshError:
+                credentials = None
+        if not credentials or not credentials.valid:
             flow = InstalledAppFlow.from_client_secrets_file(str(secrets_file), SCOPES)
             credentials = flow.run_local_server(port=0)
         token_path.write_text(credentials.to_json(), encoding="utf-8")

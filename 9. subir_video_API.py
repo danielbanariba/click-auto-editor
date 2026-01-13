@@ -4,9 +4,16 @@ import ast
 import csv
 import json
 import os
+import random
 import re
+import shutil
+import ssl
+import sys
 import time
+import webbrowser
+from urllib.parse import quote, unquote
 import uuid
+from datetime import datetime, timedelta, time as dtime, timezone
 from pathlib import Path
 
 import requests
@@ -14,7 +21,7 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from mutagen import File as MutagenFile
 
-from config import AUDIO_FORMATS, DIR_UPLOAD
+from config import AUDIO_FORMATS, DIR_UPLOAD, DIR_YA_SUBIDOS
 from subir_video.authenticate import authenticate
 
 BASE_URL = "https://deathgrind.club"
@@ -26,6 +33,9 @@ DELAY_BASE_429 = 30
 MAX_RETRIES_ERROR = 5
 MAX_RETRIES_429 = int(os.environ.get("DEATHGRIND_MAX_429", "1"))
 DEATHGRIND_DISABLED = False
+
+DEFAULT_SCHEDULE_HOURS = [8, 12]
+DEFAULT_PLAYLIST_PRIVACY = os.environ.get("YOUTUBE_PLAYLIST_PRIVACY", "public")
 
 TIPOS_DISCO = {
     1: "Album", 2: "EP", 3: "Demo", 4: "Single",
@@ -277,6 +287,43 @@ def normalize_name(value):
     return re.sub(r"[^a-z0-9]+", " ", str(value).lower()).strip()
 
 
+def limpiar_genero_texto(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    text = re.sub(r"^\(\d+\)", "", text).strip()
+    text = re.sub(r"^\d+\s*", "", text).strip()
+    return text if text else None
+
+
+def split_genres(value):
+    if not value:
+        return []
+    if isinstance(value, list):
+        parts = value
+    else:
+        parts = re.split(r"[,/;]+", str(value))
+    cleaned = []
+    seen = set()
+    for part in parts:
+        item = limpiar_genero_texto(part)
+        if not item:
+            continue
+        key = item.lower()
+        if key == "unknown":
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(item)
+    return cleaned
+
+
+def format_genre_text(value):
+    parts = split_genres(value)
+    return "/".join(parts) if parts else "Unknown"
+
+
 def strip_album_suffix(value):
     cleaned = str(value)
     patterns = [
@@ -325,6 +372,13 @@ def extraer_genero(post, generos_lookup):
     generos = []
     if isinstance(raw, dict):
         raw = [raw]
+    if isinstance(raw, str):
+        try:
+            parsed = ast.literal_eval(raw)
+            if isinstance(parsed, (list, tuple)):
+                raw = list(parsed)
+        except Exception:
+            raw = [int(val) for val in re.findall(r"\d+", raw)] or [raw]
     if isinstance(raw, list):
         for item in raw:
             if isinstance(item, dict):
@@ -332,19 +386,23 @@ def extraer_genero(post, generos_lookup):
                 name = item.get("name") or item.get("genre")
                 if not name and genre_id in generos_lookup:
                     name = generos_lookup.get(genre_id)
-                if genre_id and name:
-                    generos.append(f"({genre_id}){name}")
-                elif name:
-                    generos.append(str(name))
+                if name:
+                    cleaned = limpiar_genero_texto(name)
+                    if cleaned:
+                        generos.append(cleaned)
                 elif genre_id and genre_id in generos_lookup:
-                    generos.append(f"({genre_id}){generos_lookup.get(genre_id)}")
+                    generos.append(generos_lookup.get(genre_id))
             else:
                 if isinstance(item, int) and item in generos_lookup:
-                    generos.append(f"({item}){generos_lookup[item]}")
+                    generos.append(generos_lookup[item])
                 else:
-                    generos.append(str(item))
+                    cleaned = limpiar_genero_texto(item)
+                    if cleaned and not cleaned.isdigit():
+                        generos.append(cleaned)
     elif isinstance(raw, str):
-        generos.append(raw)
+        cleaned = limpiar_genero_texto(raw)
+        if cleaned:
+            generos.append(cleaned)
     return ", ".join(generos) if generos else None
 
 
@@ -355,6 +413,13 @@ def extraer_anio(post):
     if isinstance(release_date, (str, int)):
         return release_date
     return None
+
+
+def extraer_anio_de_texto(texto):
+    if not texto:
+        return None
+    match = re.search(r"(19|20)\d{2}", str(texto))
+    return match.group(0) if match else None
 
 
 def obtener_band_id(post, band_name):
@@ -440,10 +505,16 @@ def buscar_release_en_csv(csv_path, band_name, album_name):
                     except Exception:
                         genre_ids = [int(val) for val in re.findall(r"\d+", str(genre_raw))]
                 type_id = row.get("type_id")
-                try:
-                    type_id = int(type_id) if type_id else None
-                except ValueError:
-                    type_id = None
+                if type_id:
+                    try:
+                        parsed = ast.literal_eval(type_id)
+                        if isinstance(parsed, (list, tuple)):
+                            type_id = parsed[0] if parsed else None
+                        elif isinstance(parsed, int):
+                            type_id = parsed
+                    except Exception:
+                        match = re.search(r"\d+", str(type_id))
+                        type_id = int(match.group(0)) if match else None
                 year = row.get("year")
                 try:
                     year = int(year) if year else None
@@ -556,22 +627,8 @@ def normalizar_link(item):
     return service_key, url
 
 
-def merge_links(base, new_links):
-    for category in ("stream", "follow"):
-        base.setdefault(category, {})
-        for key, value in new_links.get(category, {}).items():
-            if key not in base[category]:
-                base[category][key] = value
-    return base
-
-
-def extraer_links_deathgrind(session, post_id):
+def extraer_links_desde_data(data):
     links = {"stream": {}, "follow": {}}
-    if DEATHGRIND_DISABLED:
-        return links
-    if not session or not post_id:
-        return links
-    data = api_get(session, f"/posts/{post_id}/links")
     if not data:
         return links
     for item in iter_link_items(data):
@@ -583,6 +640,24 @@ def extraer_links_deathgrind(session, post_id):
         elif service_key in FOLLOW_SERVICES:
             links["follow"].setdefault(service_key, url)
     return links
+
+
+def merge_links(base, new_links):
+    for category in ("stream", "follow"):
+        base.setdefault(category, {})
+        for key, value in new_links.get(category, {}).items():
+            if key not in base[category]:
+                base[category][key] = value
+    return base
+
+
+def extraer_links_deathgrind(session, post_id):
+    if DEATHGRIND_DISABLED:
+        return {"stream": {}, "follow": {}}
+    if not session or not post_id:
+        return {"stream": {}, "follow": {}}
+    data = api_get(session, f"/posts/{post_id}/links")
+    return extraer_links_desde_data(data)
 
 
 def first_value(values):
@@ -815,6 +890,379 @@ def build_tracklist(tracks, api_titles=None):
     return lines
 
 
+def parse_rfc3339(value):
+    if not value:
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def normalize_slot(dt):
+    return dt.replace(second=0, microsecond=0)
+
+
+def parse_schedule_hours():
+    raw = os.environ.get("YOUTUBE_SCHEDULE_HOURS")
+    if raw:
+        hours = []
+        for part in raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                hour = int(part)
+            except ValueError:
+                continue
+            if 0 <= hour <= 23:
+                hours.append(hour)
+        if hours:
+            return sorted(set(hours))
+    return DEFAULT_SCHEDULE_HOURS
+
+
+def get_uploads_playlist_id(youtube):
+    response = youtube.channels().list(part="contentDetails", mine=True).execute()
+    items = response.get("items", [])
+    if not items:
+        return None
+    return items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+
+
+def fetch_scheduled_publish_times(youtube, max_items=200):
+    playlist_id = get_uploads_playlist_id(youtube)
+    if not playlist_id:
+        return set(), {}
+    tz_local = datetime.now().astimezone().tzinfo
+    scheduled = set()
+    counts_by_date = {}
+    fetched = 0
+    page_token = None
+
+    while True:
+        resp = youtube.playlistItems().list(
+            part="snippet",
+            playlistId=playlist_id,
+            maxResults=50,
+            pageToken=page_token,
+        ).execute()
+        items = resp.get("items", [])
+        if not items:
+            break
+
+        video_ids = []
+        for item in items:
+            resource = item.get("snippet", {}).get("resourceId", {})
+            video_id = resource.get("videoId")
+            if video_id:
+                video_ids.append(video_id)
+
+        for i in range(0, len(video_ids), 50):
+            chunk = video_ids[i:i + 50]
+            vids = youtube.videos().list(
+                part="status",
+                id=",".join(chunk),
+            ).execute()
+            for video in vids.get("items", []):
+                status = video.get("status", {})
+                publish_at = status.get("publishAt")
+                if not publish_at:
+                    continue
+                dt = parse_rfc3339(publish_at)
+                if not dt:
+                    continue
+                local_dt = dt.astimezone(tz_local)
+                if local_dt < datetime.now(tz_local):
+                    continue
+                slot = normalize_slot(local_dt)
+                scheduled.add(slot)
+                date_key = slot.date()
+                counts_by_date[date_key] = counts_by_date.get(date_key, 0) + 1
+
+        fetched += len(items)
+        if fetched >= max_items:
+            break
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+
+    return scheduled, counts_by_date
+
+
+def build_daily_slot(date_value, hour, tz_local, taken_slots):
+    minute_choices = [0, 15, 30, 45]
+    for _ in range(60):
+        minute = random.choice(minute_choices)
+        candidate = datetime.combine(date_value, dtime(hour, minute), tzinfo=tz_local)
+        slot = normalize_slot(candidate)
+        if slot not in taken_slots:
+            return slot
+    for minute in minute_choices:
+        candidate = datetime.combine(date_value, dtime(hour, minute), tzinfo=tz_local)
+        slot = normalize_slot(candidate)
+        if slot not in taken_slots:
+            return slot
+    return normalize_slot(datetime.combine(date_value, dtime(hour, 0), tzinfo=tz_local))
+
+
+def find_next_publish_slot(start_dt, taken_slots, counts_by_date, hours):
+    tz_local = start_dt.tzinfo
+    min_start = start_dt + timedelta(minutes=5)
+    max_per_day = min(len(hours), 2)
+    current_date = start_dt.date()
+
+    while True:
+        if counts_by_date.get(current_date, 0) >= max_per_day:
+            current_date += timedelta(days=1)
+            continue
+
+        day_slots = []
+        for hour in hours:
+            day_slots.append(build_daily_slot(current_date, hour, tz_local, taken_slots))
+        day_slots.sort()
+
+        for slot in day_slots:
+            if slot < min_start:
+                continue
+            if slot in taken_slots:
+                continue
+            if counts_by_date.get(current_date, 0) >= max_per_day:
+                break
+            taken_slots.add(slot)
+            counts_by_date[current_date] = counts_by_date.get(current_date, 0) + 1
+            return slot
+
+        current_date += timedelta(days=1)
+
+
+def list_playlists(youtube):
+    playlists = {}
+    page_token = None
+    while True:
+        resp = youtube.playlists().list(
+            part="snippet",
+            mine=True,
+            maxResults=50,
+            pageToken=page_token,
+        ).execute()
+        for item in resp.get("items", []):
+            title = item.get("snippet", {}).get("title")
+            if not title:
+                continue
+            playlists[title.lower()] = item.get("id")
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return playlists
+
+
+def is_playlist_not_found(exc):
+    if not isinstance(exc, HttpError):
+        return False
+    if getattr(exc, "resp", None) and exc.resp.status == 404:
+        return True
+    try:
+        data = json.loads(exc.content.decode("utf-8"))
+        for err in data.get("error", {}).get("errors", []):
+            if err.get("reason") == "playlistNotFound":
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def refresh_playlist(youtube, title, cache, privacy=DEFAULT_PLAYLIST_PRIVACY):
+    key = title.lower().strip()
+    cache.pop(key, None)
+    return get_or_create_playlist(youtube, title, cache, privacy=privacy)
+
+
+def get_or_create_playlist(youtube, title, cache, privacy=DEFAULT_PLAYLIST_PRIVACY):
+    if not title:
+        return None
+    key = title.lower().strip()
+    if not key:
+        return None
+    playlist_id = cache.get(key)
+    if playlist_id:
+        return playlist_id
+
+    body = {
+        "snippet": {"title": title},
+        "status": {"privacyStatus": privacy},
+    }
+    resp = youtube.playlists().insert(part="snippet,status", body=body).execute()
+    playlist_id = resp.get("id")
+    if playlist_id:
+        cache[key] = playlist_id
+    return playlist_id
+
+
+def is_video_in_playlist(youtube, playlist_id, video_id, max_items=200):
+    page_token = None
+    fetched = 0
+    while True:
+        resp = youtube.playlistItems().list(
+            part="snippet",
+            playlistId=playlist_id,
+            maxResults=50,
+            pageToken=page_token,
+        ).execute()
+        items = resp.get("items", [])
+        for item in items:
+            resource = item.get("snippet", {}).get("resourceId", {})
+            if resource.get("videoId") == video_id:
+                return True
+        fetched += len(items)
+        if fetched >= max_items:
+            return False
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return False
+
+
+def add_video_to_playlist(youtube, playlist_id, video_id):
+    body = {
+        "snippet": {
+            "playlistId": playlist_id,
+            "resourceId": {
+                "kind": "youtube#video",
+                "videoId": video_id,
+            },
+        }
+    }
+    youtube.playlistItems().insert(part="snippet", body=body).execute()
+
+
+def add_video_to_playlists(youtube, video_id, band_name, genres, playlist_cache):
+    if not video_id:
+        return
+    max_scan = int(os.environ.get("YOUTUBE_PLAYLIST_SCAN", "200"))
+    playlist_titles = []
+    if band_name and band_name.lower() != "unknown":
+        playlist_titles.append(band_name)
+    playlist_titles.extend(genres)
+
+    for title in playlist_titles:
+        if not title:
+            continue
+        playlist_id = get_or_create_playlist(youtube, title, playlist_cache)
+        if not playlist_id:
+            continue
+        try:
+            in_playlist = is_video_in_playlist(youtube, playlist_id, video_id, max_items=max_scan)
+        except HttpError as exc:
+            if is_playlist_not_found(exc):
+                playlist_id = refresh_playlist(youtube, title, playlist_cache)
+                in_playlist = False
+            else:
+                raise
+        if not playlist_id:
+            continue
+        if not in_playlist:
+            try:
+                add_video_to_playlist(youtube, playlist_id, video_id)
+            except HttpError as exc:
+                if is_playlist_not_found(exc):
+                    playlist_id = refresh_playlist(youtube, title, playlist_cache)
+                    if playlist_id:
+                        add_video_to_playlist(youtube, playlist_id, video_id)
+                else:
+                    raise
+
+
+def clean_url(url):
+    if not url:
+        return None
+    url = unquote(url)
+    url = re.sub(r"%2F", "/", url)
+    url = re.sub(r"%3A", ":", url)
+    if "spotify.com" in url:
+        if "/album/" in url or "/artist/" in url:
+            return url.split("?")[0].split("#")[0]
+    if "youtube.com" in url:
+        if "watch?v=" in url:
+            video_id = url.split("watch?v=")[1].split("&")[0]
+            return f"https://www.youtube.com/watch?v={video_id}"
+        if "/channel/" in url or "/c/" in url or "/user/" in url:
+            return url.split("?")[0].split("#")[0]
+    return url.split("?")[0].split("#")[0]
+
+
+def extraer_links_band_api(session, band_id):
+    links = {"stream": {}, "follow": {}}
+    if DEATHGRIND_DISABLED:
+        return links
+    if not session or not band_id:
+        return links
+
+    for endpoint in (f"/bands/{band_id}", f"/bands/{band_id}/links", f"/bands/{band_id}/discography"):
+        data = api_get(session, endpoint)
+        if not data:
+            continue
+        links = merge_links(links, extraer_links_desde_data(data))
+    return links
+
+
+def extraer_links_post_html(session, post_id):
+    links = {"stream": {}, "follow": {}}
+    if DEATHGRIND_DISABLED:
+        return links
+    if not session or not post_id:
+        return links
+    try:
+        resp = session.get(f"{BASE_URL}/posts/{post_id}", timeout=30)
+    except requests.RequestException:
+        return links
+    if resp.status_code != 200:
+        return links
+    html = resp.text or ""
+    for href in re.findall(r'href=["\']([^"\']+)["\']', html):
+        if not href.startswith("http"):
+            continue
+        cleaned = clean_url(href)
+        service_key, url = normalizar_link({"url": cleaned})
+        if not service_key or not url:
+            continue
+        if service_key in STREAM_SERVICES:
+            links["stream"].setdefault(service_key, url)
+        elif service_key in FOLLOW_SERVICES:
+            links["follow"].setdefault(service_key, url)
+    return links
+
+
+def extraer_links_band_html(session, band_id):
+    links = {"stream": {}, "follow": {}}
+    if DEATHGRIND_DISABLED:
+        return links
+    if not session or not band_id:
+        return links
+    try:
+        resp = session.get(f"{BASE_URL}/bands/{band_id}", timeout=30)
+    except requests.RequestException:
+        return links
+    if resp.status_code != 200:
+        return links
+    html = resp.text or ""
+    for href in re.findall(r'href=["\']([^"\']+)["\']', html):
+        if not href.startswith("http"):
+            continue
+        cleaned = clean_url(href)
+        service_key, url = normalizar_link({"url": cleaned})
+        if not service_key or not url:
+            continue
+        if service_key in STREAM_SERVICES:
+            links["stream"].setdefault(service_key, url)
+        elif service_key in FOLLOW_SERVICES:
+            links["follow"].setdefault(service_key, url)
+    return links
+
+
 def parse_band_album_from_folder(folder_name):
     if " - " in folder_name:
         band, album = folder_name.split(" - ", 1)
@@ -822,23 +1270,123 @@ def parse_band_album_from_folder(folder_name):
     return folder_name, folder_name
 
 
+def get_repertorio_csv_path():
+    csv_path = os.environ.get("DEATHGRIND_REPERTORIO_CSV")
+    if csv_path:
+        return csv_path
+    default_csv = Path("/home/banar/Desktop/scrapper-deathgrind/data/bandas_completo.csv")
+    if default_csv.exists():
+        return str(default_csv)
+    return None
+
+
+def build_preview_title(folder_path, repertorio):
+    band, album = parse_band_album_from_folder(folder_path.name)
+    album = strip_album_suffix(album)
+
+    release = None
+    csv_path = get_repertorio_csv_path()
+    if csv_path:
+        release = buscar_release_en_csv(csv_path, band, album)
+    if release is None and repertorio:
+        release = buscar_release_en_cache(repertorio, band, album)
+
+    release_tipo = None
+    if release:
+        release_tipo = elegir_tipo(release.get("type") or release.get("type_id"))
+    tipo_full = formatear_tipo_full(release_tipo)
+    return f"{band} - {album} ({tipo_full})"
+
+
+def abrir_busqueda_youtube(titulo):
+    if not titulo:
+        return
+    query = quote(titulo)
+    url = f"https://www.youtube.com/results?search_query={query}"
+    webbrowser.open(url)
+    print(f"Abriendo busqueda en YouTube: {titulo}")
+
+
+def safe_delete_folder(folder_path, root_path):
+    try:
+        folder_resolved = folder_path.resolve()
+        root_resolved = Path(root_path).resolve()
+    except FileNotFoundError:
+        print(f"No se encontro la carpeta para eliminar: {folder_path}")
+        return False
+
+    if folder_resolved == root_resolved or root_resolved not in folder_resolved.parents:
+        print(f"Se omite borrar carpeta fuera de {root_resolved}: {folder_resolved}")
+        return False
+
+    try:
+        shutil.rmtree(folder_resolved)
+        return True
+    except Exception as exc:
+        print(f"No se pudo eliminar {folder_resolved}: {exc}")
+    return False
+
+
+def mover_carpeta_subida(folder_path, destino_root):
+    try:
+        folder_resolved = folder_path.resolve()
+        upload_root = DIR_UPLOAD.resolve()
+    except FileNotFoundError:
+        print(f"No se encontro la carpeta para mover: {folder_path}")
+        return None
+
+    if upload_root not in folder_resolved.parents:
+        print(f"Se omite mover carpeta fuera de {upload_root}: {folder_resolved}")
+        return None
+
+    destino_root.mkdir(parents=True, exist_ok=True)
+    destino = destino_root / folder_resolved.name
+    if destino.exists():
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        destino = destino_root / f"{folder_resolved.name}__{stamp}"
+
+    try:
+        shutil.move(str(folder_resolved), str(destino))
+        return destino
+    except Exception as exc:
+        print(f"No se pudo mover {folder_resolved}: {exc}")
+        return None
+
+
+def verificacion_manual(folder_path, repertorio):
+    titulo = build_preview_title(folder_path, repertorio)
+    abrir_busqueda_youtube(titulo)
+    respuesta = input("¿Ya esta subido? [Y/n]: ")
+    normalizada = re.sub(r"[^a-z]", "", respuesta.strip().lower())
+    if normalizada.startswith(("y", "s")):
+        if safe_delete_folder(folder_path, DIR_UPLOAD):
+            print(f"Carpeta eliminada: {folder_path}")
+        return True
+    if normalizada and normalizada not in {"n", "no"}:
+        print("Entrada no valida, se continua con la subida.")
+    return False
+
+
 def construir_descripcion(genre, year, links, tracklist):
     lines = []
-    lines.append(f"Genre: {genre or 'Unknown'}")
+    lines.append(f"Genre: {format_genre_text(genre)}")
     lines.append(f"Year: {year or 'Unknown'}")
     lines.append("")
-    lines.append("Stream/Download:")
-    for key in STREAM_SERVICES:
-        url = links.get("stream", {}).get(key)
-        if url:
-            lines.append(f"{SERVICE_LABELS[key]}: {url}")
-    lines.append("")
-    lines.append("Follow:")
-    for key in FOLLOW_SERVICES:
-        url = links.get("follow", {}).get(key)
-        if url:
-            lines.append(f"{SERVICE_LABELS[key]}: {url}")
-    lines.append("")
+    stream_links = [f"{SERVICE_LABELS[key]}: {links.get('stream', {}).get(key)}"
+                    for key in STREAM_SERVICES if links.get("stream", {}).get(key)]
+    follow_links = [f"{SERVICE_LABELS[key]}: {links.get('follow', {}).get(key)}"
+                    for key in FOLLOW_SERVICES if links.get("follow", {}).get(key)]
+
+    if stream_links:
+        lines.append("Stream/Download:")
+        lines.extend(stream_links)
+        lines.append("")
+
+    if follow_links:
+        lines.append("Follow:")
+        lines.extend(follow_links)
+        lines.append("")
+
     lines.append("Tracklist:")
     lines.append("")
     lines.extend(tracklist)
@@ -856,29 +1404,109 @@ def encontrar_video(folder_path):
     return max(candidates, key=lambda item: item.stat().st_size)
 
 
-def subir_video(youtube, video_path, title, description, privacy="private", category_id="10"):
+RETRIABLE_STATUS_CODES = {500, 502, 503, 504}
+RETRIABLE_EXCEPTIONS = (
+    BrokenPipeError,
+    ConnectionResetError,
+    ConnectionAbortedError,
+    TimeoutError,
+    ssl.SSLError,
+)
+
+
+def subir_video(
+    youtube,
+    video_path,
+    title,
+    description,
+    privacy="private",
+    category_id="10",
+    publish_at=None,
+    label=None,
+):
     body = {
         "snippet": {
             "title": title,
             "description": description,
             "categoryId": category_id,
         },
-        "status": {
-            "privacyStatus": privacy,
-        },
+        "status": {},
     }
+    status = {"privacyStatus": privacy}
+    if publish_at:
+        status["privacyStatus"] = "private"
+        status["publishAt"] = publish_at
+    body["status"] = status
 
-    media = MediaFileUpload(str(video_path), mimetype="video/mp4", resumable=True)
+    chunk_mb = int(os.environ.get("YOUTUBE_CHUNK_SIZE_MB", "8"))
+    chunk_size = -1 if chunk_mb <= 0 else chunk_mb * 1024 * 1024
+    media = MediaFileUpload(str(video_path), mimetype="video/mp4", resumable=True, chunksize=chunk_size)
     request = youtube.videos().insert(
         part="snippet,status",
         body=body,
         media_body=media,
     )
-    response = request.execute()
+    response = None
+    retry = 0
+    max_retries = int(os.environ.get("YOUTUBE_UPLOAD_RETRIES", "8"))
+    last_percent = -1
+    label_text = f"{label}: " if label else ""
+
+    while response is None:
+        try:
+            status, response = request.next_chunk(num_retries=1)
+            if status:
+                progress = status.progress()
+                percent = int(progress * 100)
+                if percent != last_percent:
+                    width = 30
+                    filled = int(round(width * max(0.0, min(1.0, progress))))
+                    bar = "#" * filled + "-" * (width - filled)
+                    sys.stdout.write(f"\rSubiendo: {label_text}[{bar}] {percent:3d}%")
+                    sys.stdout.flush()
+                    last_percent = percent
+        except HttpError as exc:
+            if last_percent >= 0:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                last_percent = -1
+            if exc.resp is not None and exc.resp.status in RETRIABLE_STATUS_CODES:
+                retry += 1
+                if retry > max_retries:
+                    raise
+                wait_time = min(60, 2 ** retry)
+                print(f"Error temporal al subir ({exc.resp.status}). Reintentando en {wait_time}s...")
+                time.sleep(wait_time)
+                continue
+            raise
+        except RETRIABLE_EXCEPTIONS as exc:
+            if last_percent >= 0:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                last_percent = -1
+            retry += 1
+            if retry > max_retries:
+                raise
+            wait_time = min(60, 2 ** retry)
+            print(f"Error de conexion al subir ({exc}). Reintentando en {wait_time}s...")
+            time.sleep(wait_time)
+            continue
+    if last_percent >= 0:
+        width = 30
+        bar = "#" * width
+        sys.stdout.write(f"\rSubiendo: {label_text}[{bar}] 100%\n")
+        sys.stdout.flush()
     return response
 
 
-def procesar_carpeta(folder_path, session, generos, generos_lookup, repertorio, allow_genre_fallback=False):
+def procesar_carpeta(
+    folder_path,
+    session,
+    generos,
+    generos_lookup,
+    repertorio,
+    allow_genre_fallback=False,
+):
     tracks, context = collect_audio_tracks(folder_path)
     if not tracks:
         print(f"No hay audios en {folder_path}, se omite.")
@@ -890,11 +1518,7 @@ def procesar_carpeta(folder_path, session, generos, generos_lookup, repertorio, 
     if context["album"]:
         album = context["album"]
 
-    csv_path = os.environ.get("DEATHGRIND_REPERTORIO_CSV")
-    if not csv_path:
-        default_csv = Path("/home/banar/Desktop/scrapper-deathgrind/data/bandas_completo.csv")
-        if default_csv.exists():
-            csv_path = str(default_csv)
+    csv_path = get_repertorio_csv_path()
 
     release = None
     if csv_path:
@@ -914,15 +1538,30 @@ def procesar_carpeta(folder_path, session, generos, generos_lookup, repertorio, 
     release_year = None
     genre_text = None
     post_id = None
+    band_id = None
 
     if post:
         release_tipo = elegir_tipo(post.get("type") or post.get("type_id"))
         release_year = extraer_anio(post)
         genre_text = extraer_genero(post, generos_lookup)
         post_id = post.get("postId") or post.get("post_id") or post.get("id")
+        band_id = post.get("bandId") or post.get("band_id") or obtener_band_id(post, band)
+
+    if session and post_id and (not band_id or not release_tipo or not release_year or not genre_text):
+        post_detail = api_get(session, f"/posts/{post_id}")
+        if post_detail:
+            if not band_id:
+                band_id = post_detail.get("bandId") or post_detail.get("band_id") or obtener_band_id(post_detail, band)
+            if not release_tipo:
+                release_tipo = elegir_tipo(post_detail.get("type") or post_detail.get("type_id"))
+            if not release_year:
+                release_year = extraer_anio(post_detail)
+            if not genre_text:
+                genre_text = extraer_genero(post_detail, generos_lookup)
+            post = post_detail
 
     if not release_year:
-        release_year = context["year"]
+        release_year = extraer_anio_de_texto(folder_path.name) or context["year"]
     if not genre_text:
         genre_text = context["genre"]
 
@@ -932,6 +1571,19 @@ def procesar_carpeta(folder_path, session, generos, generos_lookup, repertorio, 
     links = {"stream": {}, "follow": {}}
     if session and post_id:
         links = extraer_links_deathgrind(session, post_id)
+        tiene_links = any(links["stream"].values()) or any(links["follow"].values())
+        if not tiene_links:
+            html_links = extraer_links_post_html(session, post_id)
+            links = merge_links(links, html_links)
+
+    tiene_links = any(links["stream"].values()) or any(links["follow"].values())
+    if session and band_id and not tiene_links:
+        band_links = extraer_links_band_api(session, band_id)
+        links = merge_links(links, band_links)
+        tiene_links = any(links["stream"].values()) or any(links["follow"].values())
+        if not tiene_links:
+            html_links = extraer_links_band_html(session, band_id)
+            links = merge_links(links, html_links)
 
     track_titles = []
     if post:
@@ -943,10 +1595,13 @@ def procesar_carpeta(folder_path, session, generos, generos_lookup, repertorio, 
 
     tracklist = build_tracklist(tracks, track_titles if track_titles else None)
     description = construir_descripcion(genre_text, release_year, links, tracklist)
+    genres_list = split_genres(genre_text)
 
     return {
         "title": title,
         "description": description,
+        "band": band,
+        "genres": genres_list,
     }
 
 
@@ -957,6 +1612,11 @@ def main():
     parser.add_argument("--todo", action="store_true", help="Procesar todas las carpetas disponibles")
     parser.add_argument("--con-generos", action="store_true", help="Hacer busqueda completa por generos (mas lenta)")
     parser.add_argument("--sin-deathgrind", action="store_true", help="No usar la API de DeathGrind")
+    parser.add_argument("--sin-links-web", action="store_true", help="(Deprecated) Ya no se usa")
+    parser.add_argument("--buscar-links", action="store_true", help="(Deprecated) Ya no se usa")
+    parser.add_argument("--sin-verificacion", action="store_true", help="No abrir verificacion manual en YouTube")
+    parser.add_argument("--privacidad", choices=["public", "private", "unlisted"], default="public")
+    parser.add_argument("--publicar-ahora", action="store_true", help="(Deprecated) Ya se publica al momento")
     args = parser.parse_args()
 
     cargar_env()
@@ -971,6 +1631,11 @@ def main():
     repertorio = cargar_repertorio()
 
     youtube = authenticate()
+    playlist_cache = {}
+    try:
+        playlist_cache = list_playlists(youtube)
+    except HttpError as exc:
+        print(f"No se pudo leer playlists existentes: {exc}")
     if session and not args.sin_deathgrind:
         ok = deathgrind_smoke_test(session, generos)
         if not ok:
@@ -988,38 +1653,77 @@ def main():
         print(f"No existe la carpeta: {upload_dir}")
         return
 
-    if args.carpeta:
-        folders = [upload_dir]
-    else:
-        folders = [path for path in upload_dir.iterdir() if path.is_dir()]
-        if not args.todo and args.limite:
-            folders = folders[:args.limite]
-
-    if not folders:
-        print("No se encontraron carpetas para subir.")
-        return
-
     allow_genre_fallback = args.con_generos
+    max_uploads = None if args.todo else args.limite
+    scan_interval = int(os.environ.get("UPLOAD_SCAN_INTERVAL", "30"))
 
-    for folder_path in folders:
-        video_path = encontrar_video(folder_path)
-        if not video_path:
-            print(f"No hay video .mp4 en {folder_path}, se omite.")
+    while True:
+        if args.carpeta:
+            folders = [upload_dir] if upload_dir.exists() else []
+        else:
+            folders = [path for path in upload_dir.iterdir() if path.is_dir()]
+            random.shuffle(folders)
+
+        if not folders:
+            if args.carpeta:
+                print("No se encontro la carpeta especificada.")
+                return
+            print(f"No hay carpetas para subir. Esperando {scan_interval}s...")
+            time.sleep(scan_interval)
             continue
-        print(f"Procesando {folder_path.name}...")
-        metadata = procesar_carpeta(folder_path, session, generos, generos_lookup, repertorio, allow_genre_fallback)
-        if not metadata:
-            continue
-        try:
-            response = subir_video(
-                youtube,
-                video_path,
-                metadata["title"],
-                metadata["description"],
+
+        uploaded = 0
+        for folder_path in folders:
+            if max_uploads is not None and uploaded >= max_uploads:
+                break
+            video_path = encontrar_video(folder_path)
+            if not video_path:
+                print(f"No hay video .mp4 en {folder_path}, se omite.")
+                continue
+            if not args.sin_verificacion:
+                if verificacion_manual(folder_path, repertorio):
+                    continue
+            print(f"Procesando {folder_path.name}...")
+            metadata = procesar_carpeta(
+                folder_path,
+                session,
+                generos,
+                generos_lookup,
+                repertorio,
+                allow_genre_fallback,
             )
-            print(f"Video subido: {response.get('id')}")
-        except HttpError as exc:
-            print(f"Error YouTube API en {folder_path.name}: {exc}")
+            if not metadata:
+                continue
+            try:
+                response = subir_video(
+                    youtube,
+                    video_path,
+                    metadata["title"],
+                    metadata["description"],
+                    privacy=args.privacidad,
+                    publish_at=None,
+                    label=metadata.get("title"),
+                )
+                print(f"Video subido: {response.get('id')}")
+                uploaded += 1
+                try:
+                    add_video_to_playlists(
+                        youtube,
+                        response.get("id"),
+                        metadata.get("band"),
+                        metadata.get("genres", []),
+                        playlist_cache,
+                    )
+                except HttpError as exc:
+                    print(f"No se pudo agregar a playlists: {exc}")
+                destino = mover_carpeta_subida(folder_path, DIR_YA_SUBIDOS)
+                if destino:
+                    print(f"Carpeta movida a {destino}")
+            except HttpError as exc:
+                print(f"Error YouTube API en {folder_path.name}: {exc}")
+
+        if args.carpeta:
+            break
 
 
 if __name__ == "__main__":
