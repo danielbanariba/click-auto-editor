@@ -32,14 +32,16 @@ firma = "Daniel Alejandro Barrientos Anariba"
 DEFAULT_URL = os.environ.get("YOUTUBE_STUDIO_URL", "https://studio.youtube.com/")
 DEFAULT_CHANNEL = os.environ.get("PLAYWRIGHT_CHANNEL", "chrome")
 DEFAULT_EXECUTABLE_PATH = os.environ.get("PLAYWRIGHT_EXECUTABLE_PATH")
+DEFAULT_USER_DATA_DIR = os.environ.get("PLAYWRIGHT_USER_DATA_DIR") or str(Path.home() / ".config" / "chromium-pw")
+DEFAULT_PROFILE_NAME = os.environ.get("PLAYWRIGHT_PROFILE_NAME", "Default")
 SELECTORS_PATH = PLAYWRIGHT_SELECTORS_DIR / "impugnar.json"
 ACTIONS_PATH = PLAYWRIGHT_SELECTORS_DIR / "impugnar_acciones.json"
 
 P_CONTINUAR = re.compile(r"(continuar|siguiente|next|continue|submit|enviar|send)", re.IGNORECASE)
-P_IMPUGNAR = re.compile(r"(impugnar|disputar|dispute)", re.IGNORECASE)
-P_IMPUGNAR_CONFIRMAR = re.compile(r"(continuar con.*impugn|confirmar.*impugn|seguir.*impugn|dispute)", re.IGNORECASE)
+P_IMPUGNAR = re.compile(r"(impugnar|disputar|dispute|take action|tomar medidas)", re.IGNORECASE)
+P_IMPUGNAR_CONFIRMAR = re.compile(r"(continuar con.*impugn|confirmar.*impugn|seguir.*impugn|dispute|dispute claim|impugnar)", re.IGNORECASE)
 P_SELECCIONAR = re.compile(
-    r"(seleccionar.*canci[oó]n|select.*song|ver detalles|detalles de la reclamaci[oó]n|reclamaci[oó]n de derechos de autor|copyright claim)",
+    r"(seleccionar.*canci[oó]n|select.*song|ver detalles|see details|detalles de la reclamaci[oó]n|reclamaci[oó]n de derechos de autor|copyright claim)",
     re.IGNORECASE,
 )
 P_LICENCIA = re.compile(r"(licencia|license|permiso|permission)", re.IGNORECASE)
@@ -50,6 +52,17 @@ P_INFO_LICENCIA = re.compile(
 )
 P_FIRMA = re.compile(r"(firma|signature|nombre completo|nombre y apellido|full name)", re.IGNORECASE)
 P_CERRAR = re.compile(r"(cerrar|finalizar|listo|done|close)", re.IGNORECASE)
+P_RATIONALE = re.compile(r"(rationale|details|reason|motivo|justificaci[oó]n|razonamiento|detalles)", re.IGNORECASE)
+P_REASON = re.compile(r"(reason|motivo|raz[oó]n)", re.IGNORECASE)
+P_DETAILS = re.compile(r"(details|detalles)", re.IGNORECASE)
+P_READ_CONFIRM = re.compile(
+    r"(please read.*check the box|read the text above|check the box to continue|marque.*casilla|marca.*casilla|lee.*texto|leer.*arriba)",
+    re.IGNORECASE,
+)
+P_CONFIRM_PERMISSION = re.compile(
+    r"(i have permission to use the content|permission to use the content|copyright owner|tengo permiso|permiso para usar|estoy autorizado)",
+    re.IGNORECASE,
+)
 
 SELECTOR_STEPS = [
     ("seleccionar_cancion", "Selecciona el video o la reclamacion para ver detalles."),
@@ -57,6 +70,7 @@ SELECTOR_STEPS = [
     ("impugnar_confirmar", "Confirma la impugnacion si aparece un paso extra."),
     ("continuar", "Haz clic en Continuar / Siguiente."),
     ("licencia", "Selecciona la opcion de Licencia o Permiso."),
+    ("confirmar_lectura", "Marca la casilla 'I have permission' / lectura."),
     ("aceptar_terminos", "Marca Acepto los terminos (checkbox)."),
     ("info_licencia", "Haz clic en el campo de informacion de tu licencia."),
     ("firma", "Haz clic en el campo de firma."),
@@ -510,7 +524,14 @@ def click_license_fallback(root):
                 text = item.inner_text().strip().lower()
             except Exception:
                 continue
-            if "license" in text or "licencia" in text or "permiso" in text or "permission" in text:
+            if (
+                "license" in text
+                or "licencia" in text
+                or "permiso" in text
+                or "permission" in text
+                or "i have permission" in text
+                or "permission to use" in text
+            ):
                 try:
                     item.scroll_into_view_if_needed()
                     item.click()
@@ -519,6 +540,31 @@ def click_license_fallback(root):
                     continue
     except Exception:
         pass
+    return False
+
+
+def wait_for_license_step(root, timeout_ms=10000):
+    start = time.time()
+    while (time.time() - start) * 1000 < timeout_ms:
+        try:
+            radios = root.locator("tp-yt-paper-radio-button, ytcp-radio-button, [role='radio']")
+            count = radios.count()
+            for i in range(count):
+                radio = radios.nth(i)
+                try:
+                    if not radio.is_visible():
+                        continue
+                except Exception:
+                    continue
+                try:
+                    text = radio.inner_text().strip().lower()
+                except Exception:
+                    text = ""
+                if "license" in text or "licencia" in text or "permiso" in text or "permission" in text:
+                    return True
+        except Exception:
+            pass
+        time.sleep(0.4)
     return False
 
 
@@ -629,12 +675,30 @@ def fill_by_label(root, patterns, value, timeout_ms=3000, press_enter=False):
 
 
 def fill_textarea_fallback(root, value):
-    locator = root.locator("textarea:visible")
+    locator = root.locator("textarea")
+    candidate = None
     try:
-        if locator.count() > 0:
-            target = locator.first
-            target.scroll_into_view_if_needed()
-            target.fill(value)
+        count = locator.count()
+        for i in range(count):
+            target = locator.nth(i)
+            try:
+                if not target.is_visible():
+                    continue
+            except Exception:
+                continue
+            aria = (target.get_attribute("aria-label") or "").lower()
+            placeholder = (target.get_attribute("placeholder") or "").lower()
+            hints = f"{aria} {placeholder}".strip()
+            if "signature" in hints or "firma" in hints:
+                continue
+            if any(token in hints for token in ("specifics", "permission", "license", "licencia", "permiso", "rationale", "justificacion", "justificación", "motivo")):
+                candidate = target
+                break
+            if candidate is None:
+                candidate = target
+        if candidate is not None:
+            candidate.scroll_into_view_if_needed()
+            candidate.fill(value)
             return True
     except Exception:
         pass
@@ -651,6 +715,397 @@ def fill_last_textbox_fallback(root, value):
             return True
     except Exception:
         pass
+    return False
+
+
+def fill_signature_fallback(root, value):
+    locator = root.locator("textarea")
+    try:
+        count = locator.count()
+        for i in range(count):
+            target = locator.nth(i)
+            try:
+                if not target.is_visible():
+                    continue
+            except Exception:
+                continue
+            aria = (target.get_attribute("aria-label") or "").lower()
+            placeholder = (target.get_attribute("placeholder") or "").lower()
+            hints = f"{aria} {placeholder}".strip()
+            if "signature" in hints or "firma" in hints:
+                target.scroll_into_view_if_needed()
+                target.fill(value)
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def click_rationale_tab(root):
+    return click_action(
+        root,
+        [P_RATIONALE],
+        roles=("tab", "button", "link", "option"),
+        optional=True,
+        descripcion="Rationale",
+    )
+
+
+def click_reason_tab(root):
+    return click_action(
+        root,
+        [P_REASON],
+        roles=("tab", "button", "link", "option"),
+        optional=True,
+        descripcion="Reason",
+    )
+
+
+def click_details_tab(root):
+    return click_action(
+        root,
+        [P_DETAILS],
+        roles=("tab", "button", "link", "option"),
+        optional=True,
+        descripcion="Details",
+    )
+
+
+def selector_matches_read(info):
+    if not info:
+        return False
+    role = (info.get("role") or "").lower()
+    if role == "checkbox":
+        return True
+    parts = []
+    for key in ("text", "aria_label", "title", "name", "data_testid"):
+        value = info.get(key)
+        if value:
+            parts.append(str(value).lower())
+    if not parts:
+        return False
+    blob = " ".join(parts)
+    return bool(re.search(P_READ_CONFIRM, blob) or re.search(P_CONFIRM_PERMISSION, blob))
+
+
+def click_read_checkbox(root, page=None, selector_info=None):
+    patterns = [P_READ_CONFIRM, P_CONFIRM_PERMISSION]
+    if selector_info and selector_matches_read(selector_info):
+        if click_by_selector_info(root, selector_info, optional=True):
+            return True
+    if page is not None:
+        try:
+            page.evaluate(
+                """
+                () => {
+                  const dialog =
+                    document.querySelector('tp-yt-paper-dialog#dialog, ytcp-dialog');
+                  if (dialog && dialog.scrollHeight > dialog.clientHeight) {
+                    dialog.scrollTo(0, dialog.scrollHeight);
+                  }
+                }
+                """
+            )
+        except Exception:
+            pass
+    if click_action(
+        root,
+        patterns,
+        roles=("checkbox", "label", "button", "option", "link"),
+        optional=True,
+        descripcion="Confirmar lectura",
+    ):
+        return True
+
+    try:
+        checkboxes = root.locator("tp-yt-paper-checkbox, ytcp-checkbox, [role='checkbox']")
+        count = checkboxes.count()
+        for i in range(count):
+            checkbox = checkboxes.nth(i)
+            try:
+                if not checkbox.is_visible():
+                    continue
+            except Exception:
+                continue
+            try:
+                text = checkbox.inner_text().strip().lower()
+            except Exception:
+                text = ""
+            aria = (checkbox.get_attribute("aria-label") or "").lower()
+            hints = f"{text} {aria}".strip()
+            if any(re.search(pattern, hints) for pattern in patterns):
+                checkbox.scroll_into_view_if_needed()
+                try:
+                    checkbox.check()
+                except Exception:
+                    checkbox.click()
+                return True
+        for i in range(count):
+            checkbox = checkboxes.nth(i)
+            try:
+                if not checkbox.is_visible():
+                    continue
+            except Exception:
+                continue
+            aria = (checkbox.get_attribute("aria-label") or "").lower()
+            if re.search(r"(read|check|leer|casilla|confirm)", aria) or any(
+                re.search(pattern, aria) for pattern in patterns
+            ):
+                checkbox.scroll_into_view_if_needed()
+                try:
+                    checkbox.check()
+                except Exception:
+                    checkbox.click()
+                return True
+        if count == 1:
+            checkbox = checkboxes.first
+            if checkbox.is_visible():
+                checkbox.scroll_into_view_if_needed()
+                try:
+                    checkbox.check()
+                except Exception:
+                    checkbox.click()
+                return True
+    except Exception:
+        pass
+    if page is not None:
+        try:
+            if click_read_checkbox_js(page, patterns):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def click_read_checkbox_js(page, patterns):
+    compiled = [pattern.pattern for pattern in patterns]
+    return page.evaluate(
+        """
+        (patterns) => {
+          const regexes = patterns.map((pattern) => new RegExp(pattern, 'i'));
+          const matches = (text) => regexes.some((regex) => regex.test(text));
+          const dialog =
+            document.querySelector('tp-yt-paper-dialog#dialog, ytcp-dialog') || document;
+          const checkboxes = Array.from(
+            dialog.querySelectorAll(
+              'input[type="checkbox"], tp-yt-paper-checkbox, ytcp-checkbox, [role="checkbox"]'
+            )
+          );
+          for (const cb of checkboxes) {
+            let label = cb.getAttribute('aria-label') || '';
+            const labelledBy = cb.getAttribute('aria-labelledby');
+            if (labelledBy) {
+              const ids = labelledBy.split(/\\s+/);
+              const labels = ids
+                .map((id) => (document.getElementById(id) || {}).textContent || '')
+                .join(' ');
+              label = `${label} ${labels}`.trim();
+            }
+            if (label && matches(label)) {
+              cb.click();
+              return true;
+            }
+          }
+          const texts = Array.from(
+            dialog.querySelectorAll(
+              'yt-formatted-string, span, div, label, p, ytcp-checkbox, tp-yt-paper-checkbox'
+            )
+          );
+          for (const el of texts) {
+            const text = (el.innerText || el.textContent || '').trim();
+            if (!text) continue;
+            if (!matches(text)) continue;
+            let container =
+              el.closest('ytcp-checkbox, tp-yt-paper-checkbox, label, div, section') ||
+              el.parentElement;
+            let checkbox =
+              container &&
+              container.querySelector(
+                'input[type="checkbox"], tp-yt-paper-checkbox, ytcp-checkbox, [role="checkbox"]'
+              );
+            if (!checkbox) {
+              checkbox = dialog.querySelector(
+                'input[type="checkbox"], tp-yt-paper-checkbox, ytcp-checkbox, [role="checkbox"]'
+              );
+            }
+            try {
+              el.click();
+            } catch (e) {}
+            if (checkbox) {
+              checkbox.click();
+              return true;
+            }
+          }
+          const fallback = Array.from(
+            dialog.querySelectorAll('input[type="checkbox"], tp-yt-paper-checkbox, ytcp-checkbox, [role="checkbox"]')
+          );
+          for (const cb of fallback) {
+            const checked =
+              cb.checked === true ||
+              cb.getAttribute('aria-checked') === 'true' ||
+              cb.hasAttribute('checked');
+            if (!checked) {
+              cb.click();
+              return true;
+            }
+          }
+          return false;
+        }
+        """,
+        compiled,
+    )
+
+
+def click_dispute_step(page, selectors, timeout_ms=12000):
+    start = time.time()
+    while (time.time() - start) * 1000 < timeout_ms:
+        if click_by_selector_info(page, selectors.get("impugnar_confirmar"), timeout_ms=1000, optional=True):
+            return True
+        if click_action(
+            page,
+            [P_IMPUGNAR_CONFIRMAR],
+            roles=("button", "menuitem", "link"),
+            timeout_ms=1000,
+            optional=True,
+        ):
+            return True
+        time.sleep(0.4)
+    return False
+
+
+def select_license_option(page, selectors, delay_s):
+    for _ in range(3):
+        root = get_active_root(page)
+        try:
+            radios = root.locator("tp-yt-paper-radio-button, ytcp-radio-button, [role='radio']")
+            count = radios.count()
+            for i in range(count):
+                radio = radios.nth(i)
+                try:
+                    if not radio.is_visible():
+                        continue
+                except Exception:
+                    continue
+                try:
+                    text = radio.inner_text().strip().lower()
+                except Exception:
+                    text = ""
+                if (
+                    "license" in text
+                    or "licencia" in text
+                    or "permission" in text
+                    or "permiso" in text
+                    or "i have permission" in text
+                    or "permission to use" in text
+                ):
+                    checked = (radio.get_attribute("aria-checked") or "").lower() == "true"
+                    checked = checked or (radio.get_attribute("checked") is not None)
+                    if checked:
+                        return True
+        except Exception:
+            pass
+
+        if click_with_selector(
+            root,
+            selectors.get("licencia"),
+            [P_LICENCIA],
+            roles=("radio", "button", "option"),
+            timeout_ms=4000,
+            optional=True,
+            descripcion="Licencia",
+        ):
+            return True
+        if click_license_fallback(root) or click_license_fallback(page):
+            return True
+
+        click_reason_tab(root)
+        time.sleep(delay_s)
+        root = get_active_root(page)
+        if click_with_selector(
+            root,
+            selectors.get("licencia"),
+            [P_LICENCIA],
+            roles=("radio", "button", "option"),
+            timeout_ms=4000,
+            optional=True,
+            descripcion="Licencia",
+        ):
+            return True
+        if click_license_fallback(root) or click_license_fallback(page):
+            return True
+        time.sleep(delay_s)
+    return False
+
+
+def try_fill_info_licencia(page, root, selectors, mensaje, delay_s):
+    if (
+        fill_with_selector(root, selectors.get("info_licencia"), [P_INFO_LICENCIA], mensaje)
+        or fill_textarea_fallback(root, mensaje)
+    ):
+        return True
+
+    for _ in range(3):
+        click_details_tab(root)
+        click_rationale_tab(root)
+        time.sleep(delay_s)
+        root = get_active_root(page)
+        if (
+            fill_with_selector(root, selectors.get("info_licencia"), [P_INFO_LICENCIA], mensaje)
+            or fill_textarea_fallback(root, mensaje)
+        ):
+            return True
+        try:
+            page.mouse.wheel(0, 800)
+        except Exception:
+            pass
+        time.sleep(delay_s)
+        root = get_active_root(page)
+        if (
+            fill_with_selector(root, selectors.get("info_licencia"), [P_INFO_LICENCIA], mensaje)
+            or fill_textarea_fallback(root, mensaje)
+        ):
+            return True
+
+        click_repeatedly(root, [P_CONTINUAR], max_clicks=1, selector_info=selectors.get("continuar"))
+        time.sleep(delay_s)
+        root = get_active_root(page)
+        if (
+            fill_with_selector(root, selectors.get("info_licencia"), [P_INFO_LICENCIA], mensaje)
+            or fill_textarea_fallback(root, mensaje)
+        ):
+            return True
+
+    return False
+
+
+def click_continue_step(page, selectors, delay_s):
+    for _ in range(2):
+        root = get_active_root(page)
+        locator = locator_from_selector_info(root, selectors.get("continuar"))
+        if locator is None:
+            try:
+                locator = root.get_by_role("button", name=P_CONTINUAR)
+            except Exception:
+                locator = None
+        if locator is not None:
+            try:
+                target = locator.first
+                target.wait_for(state="visible", timeout=2000)
+                try:
+                    if not target.is_enabled():
+                        click_read_checkbox(root, page)
+                        time.sleep(delay_s)
+                except Exception:
+                    pass
+                target.scroll_into_view_if_needed()
+                target.click()
+                return True
+            except Exception:
+                pass
+        if click_action(root, [P_CONTINUAR], roles=("button", "link"), timeout_ms=2000, optional=True):
+            return True
+        click_read_checkbox(root, page)
+        time.sleep(delay_s)
     return False
 
 
@@ -676,11 +1131,12 @@ def check_all_visible_checkboxes(root):
     return checked
 
 
-def impugnar_una_reclamacion(page, delay_s, espera_envio_s, selectors):
+def impugnar_una_reclamacion(page, delay_s, espera_envio_s, selectors, modo_modal=False):
     root = page
     selectors = selectors or {}
     print("Buscando la accion de impugnacion...")
 
+    print("Paso 1/7: abrir menu Take action / Impugnar.")
     if not click_with_selector(
         root,
         selectors.get("impugnar"),
@@ -689,14 +1145,18 @@ def impugnar_una_reclamacion(page, delay_s, espera_envio_s, selectors):
         optional=True,
         descripcion="Impugnar",
     ):
-        click_with_selector(
+        if not click_with_selector(
             root,
             selectors.get("seleccionar_cancion"),
             [P_SELECCIONAR],
             roles=("button", "link", "row"),
             optional=True,
             descripcion="Seleccionar cancion",
-        )
+        ):
+            if modo_modal:
+                print("No se encontraron mas reclamaciones en el modal.")
+                return None
+            return False
         time.sleep(delay_s)
         if not click_with_selector(
             root,
@@ -711,33 +1171,44 @@ def impugnar_una_reclamacion(page, delay_s, espera_envio_s, selectors):
     time.sleep(delay_s)
     root = get_active_root(page)
 
-    click_repeatedly(root, [P_CONTINUAR], max_clicks=2, selector_info=selectors.get("continuar"))
-    click_with_selector(
-        root,
-        selectors.get("impugnar_confirmar"),
-        [P_IMPUGNAR_CONFIRMAR],
-        roles=("button", "menuitem", "link"),
-        optional=True,
-        descripcion="Confirmar impugnacion",
-    )
+    print("Paso 2/7: seleccionar Dispute / Impugnar.")
+    if not click_dispute_step(page, selectors):
+        print("No se encontro el boton de Dispute/Impugnar.")
+        return False
     time.sleep(delay_s)
+    root = get_active_root(page)
 
-    click_repeatedly(root, [P_CONTINUAR], max_clicks=2, selector_info=selectors.get("continuar"))
-
-    if not click_with_selector(
-        root,
-        selectors.get("licencia"),
-        [P_LICENCIA],
-        roles=("radio", "button", "option"),
-        timeout_ms=10000,
-        optional=True,
-        descripcion="Licencia",
-    ):
-        if not click_license_fallback(root):
-            print("No se encontro el elemento: Licencia")
-            return False
+    print("Paso 3/7: esperar las opciones de Reason/Details.")
+    if not wait_for_license_step(root):
+        print("No se encontraron las opciones de licencia.")
+        return False
     time.sleep(delay_s)
-    click_repeatedly(root, [P_CONTINUAR], max_clicks=2, selector_info=selectors.get("continuar"))
+    root = get_active_root(page)
+
+    print("Paso 4/7: marcar 'I have permission / license'.")
+    if not select_license_option(page, selectors, delay_s):
+        print("No se encontro el elemento: Licencia")
+        return False
+    time.sleep(delay_s)
+    root = get_active_root(page)
+
+    print("Paso 5/7: continuar al aviso de lectura.")
+    if not click_continue_step(page, selectors, delay_s):
+        print("No se pudo avanzar al aviso de lectura.")
+        return False
+    time.sleep(delay_s)
+    root = get_active_root(page)
+
+    print("Paso 6/7: marcar la casilla de confirmacion y continuar.")
+    selector_lectura = selectors.get("confirmar_lectura") or selectors.get("aceptar_terminos")
+    if not click_read_checkbox(root, page, selector_lectura):
+        if check_all_visible_checkboxes(root) == 0:
+            print("No se pudo marcar la casilla de confirmacion.")
+    time.sleep(delay_s)
+    if not click_continue_step(page, selectors, delay_s):
+        print("No se pudo avanzar al formulario de detalles.")
+        return False
+    root = get_active_root(page)
 
     click_with_selector(
         root,
@@ -751,10 +1222,8 @@ def impugnar_una_reclamacion(page, delay_s, espera_envio_s, selectors):
     click_repeatedly(root, [P_CONTINUAR], max_clicks=1, selector_info=selectors.get("continuar"))
 
     root = get_active_root(page)
-    if not (
-        fill_with_selector(root, selectors.get("info_licencia"), [P_INFO_LICENCIA], mensaje)
-        or fill_textarea_fallback(root, mensaje)
-    ):
+    print("Paso 7/7: escribir detalles y firma.")
+    if not try_fill_info_licencia(page, root, selectors, mensaje, delay_s):
         print("No se encontro el campo de informacion de licencia.")
         return False
 
@@ -763,6 +1232,7 @@ def impugnar_una_reclamacion(page, delay_s, espera_envio_s, selectors):
 
     if not (
         fill_with_selector(root, selectors.get("firma"), [P_FIRMA], firma)
+        or fill_signature_fallback(root, firma)
         or fill_last_textbox_fallback(root, firma)
     ):
         print("No se encontro el campo de firma.")
@@ -909,15 +1379,16 @@ def parse_args():
     parser.add_argument("--headless", action="store_true", help="Ejecutar sin interfaz grafica.")
     parser.add_argument("--channel", default=DEFAULT_CHANNEL, help="Canal del navegador (chrome, msedge). Usa 'none' para Chromium integrado.")
     parser.add_argument("--executable-path", default=None, help="Ruta del ejecutable del navegador (Chromium/Chrome).")
-    parser.add_argument("--user-data-dir", default=None, help="Ruta del perfil del navegador para reutilizar sesion.")
-    parser.add_argument("--profile", default=os.environ.get("PLAYWRIGHT_PROFILE_NAME"), help="Nombre del perfil dentro del navegador (Default, Profile 1).")
+    parser.add_argument("--user-data-dir", default=DEFAULT_USER_DATA_DIR, help="Ruta del perfil del navegador para reutilizar sesion.")
+    parser.add_argument("--profile", default=DEFAULT_PROFILE_NAME, help="Nombre del perfil dentro del navegador (Default, Profile 1).")
     parser.add_argument("--usar-perfil-chrome", action="store_true", help="Usar el perfil local de Chrome para reutilizar sesion.")
     parser.add_argument("--aprender", action="store_true", help="Grabar selectores manualmente para esta pantalla.")
     parser.add_argument("--selectores", default=None, help="Ruta del archivo JSON de selectores.")
     parser.add_argument("--grabar", action="store_true", help="Grabar todas las acciones para esta pantalla.")
     parser.add_argument("--acciones", default=None, help="Ruta del archivo JSON de acciones grabadas.")
+    parser.add_argument("--desde-modal", action="store_true", default=True, help="Iniciar desde el modal de reclamaciones y procesar todas.")
     parser.add_argument("--max", type=int, default=0, help="Cantidad de impugnaciones a procesar (0 = infinito).")
-    parser.add_argument("--delay", type=float, default=1.0, help="Segundos de espera corta entre pasos.")
+    parser.add_argument("--delay", type=float, default=2.0, help="Segundos de espera corta entre pasos.")
     parser.add_argument("--espera-envio", type=float, default=6.0, help="Segundos de espera despues de enviar.")
     parser.add_argument("--no-esperar", action="store_true", help="No esperar confirmacion manual al inicio.")
     parser.add_argument("--espera-entre", type=float, default=2.0, help="Segundos de espera entre impugnaciones.")
@@ -972,7 +1443,10 @@ def main():
                 if args.max and total >= args.max:
                     break
 
-                ok = impugnar_una_reclamacion(page, args.delay, args.espera_envio, selectors)
+                ok = impugnar_una_reclamacion(page, args.delay, args.espera_envio, selectors, modo_modal=args.desde_modal)
+                if ok is None:
+                    print("No hay mas reclamaciones para impugnar.")
+                    break
                 if not ok:
                     print("No se pudo completar la impugnacion. Revisa la pantalla y los selectores.")
                     break
@@ -983,7 +1457,10 @@ def main():
         except KeyboardInterrupt:
             print("\nProceso detenido por el usuario.")
         finally:
-            context.close()
+            try:
+                context.close()
+            except BaseException:
+                pass
 
 
 if __name__ == "__main__":

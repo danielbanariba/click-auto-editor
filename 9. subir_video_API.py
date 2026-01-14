@@ -422,6 +422,49 @@ def extraer_anio_de_texto(texto):
     return match.group(0) if match else None
 
 
+def extraer_pais_valor(value):
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        for key in ("name", "title", "label", "value", "country", "countryName", "country_name"):
+            parsed = extraer_pais_valor(value.get(key))
+            if parsed:
+                return parsed
+        return None
+    if isinstance(value, list):
+        for item in value:
+            parsed = extraer_pais_valor(item)
+            if parsed:
+                return parsed
+        return None
+    text = str(value).strip()
+    return text if text else None
+
+
+def extraer_pais_desde_data(data, band_id=None, band_name=None):
+    if not isinstance(data, dict):
+        return None
+    for key in ("country", "pais", "origin", "countryName", "country_name", "location"):
+        parsed = extraer_pais_valor(data.get(key))
+        if parsed:
+            return parsed
+    bands = data.get("bands") or data.get("band")
+    if isinstance(bands, dict):
+        return extraer_pais_desde_data(bands, band_id=band_id, band_name=band_name)
+    if isinstance(bands, list):
+        for band in bands:
+            if not isinstance(band, dict):
+                continue
+            if band_id and band.get("bandId") and str(band.get("bandId")) != str(band_id):
+                continue
+            if band_name and band.get("name") and normalize_name(band.get("name")) != normalize_name(band_name):
+                continue
+            parsed = extraer_pais_desde_data(band)
+            if parsed:
+                return parsed
+    return None
+
+
 def obtener_band_id(post, band_name):
     bands = post.get("bands", [])
     for band in bands:
@@ -906,6 +949,71 @@ def normalize_slot(dt):
     return dt.replace(second=0, microsecond=0)
 
 
+def format_rfc3339(dt):
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
+def max_videos_por_dia(gap_hours):
+    if gap_hours <= 0:
+        return 0
+    return max(1, int(24 // gap_hours))
+
+
+def build_batch_schedule_for_date(date_value, count, gap_hours, taken_slots, tz_local):
+    if count <= 0:
+        return []
+    gap_minutes = max(1, int(gap_hours)) * 60
+    max_span = gap_minutes * (count - 1)
+    if max_span >= 24 * 60:
+        return []
+
+    max_offset = 24 * 60 - max_span - 1
+    day_start = datetime.combine(date_value, dtime(0, 0), tzinfo=tz_local)
+    attempts = min(60, max_offset + 1)
+
+    for _ in range(attempts):
+        offset = random.randint(0, max_offset)
+        slots = [normalize_slot(day_start + timedelta(minutes=offset + gap_minutes * idx))
+                 for idx in range(count)]
+        if any(slot in taken_slots for slot in slots):
+            continue
+        return slots
+
+    for offset in range(max_offset + 1):
+        slots = [normalize_slot(day_start + timedelta(minutes=offset + gap_minutes * idx))
+                 for idx in range(count)]
+        if any(slot in taken_slots for slot in slots):
+            continue
+        return slots
+
+    return slots
+
+
+def find_next_batch_schedule(start_date, count, gap_hours, taken_slots, counts_by_date, tz_local, max_days=365):
+    max_per_day = max_videos_por_dia(gap_hours)
+    current_date = start_date
+    for _ in range(max_days):
+        existing = counts_by_date.get(current_date, 0)
+        if existing + count > max_per_day:
+            current_date += timedelta(days=1)
+            continue
+        slots = build_batch_schedule_for_date(
+            current_date,
+            count,
+            gap_hours,
+            taken_slots,
+            tz_local,
+        )
+        if slots and len(slots) == count:
+            return current_date, slots
+        current_date += timedelta(days=1)
+    return None, []
+
+
 def parse_schedule_hours():
     raw = os.environ.get("YOUTUBE_SCHEDULE_HOURS")
     if raw:
@@ -991,6 +1099,19 @@ def fetch_scheduled_publish_times(youtube, max_items=200):
             break
 
     return scheduled, counts_by_date
+
+
+def fetch_scheduled_publish_times_safe(youtube, max_items=200, retries=3):
+    for attempt in range(1, retries + 1):
+        try:
+            return fetch_scheduled_publish_times(youtube, max_items=max_items)
+        except (HttpError, OSError) as exc:
+            if attempt >= retries:
+                print(f"No se pudo consultar videos programados: {exc}. Se continua sin evitar choques.")
+                return set(), {}
+            wait_time = min(30, 2 ** attempt)
+            print(f"Error consultando programados ({exc}). Reintentando en {wait_time}s...")
+            time.sleep(wait_time)
 
 
 def build_daily_slot(date_value, hour, tz_local, taken_slots):
@@ -1194,14 +1315,22 @@ def clean_url(url):
     return url.split("?")[0].split("#")[0]
 
 
-def extraer_links_band_api(session, band_id):
+def extraer_links_band_api(session, band_id, band_data=None):
     links = {"stream": {}, "follow": {}}
     if DEATHGRIND_DISABLED:
         return links
     if not session or not band_id:
         return links
 
-    for endpoint in (f"/bands/{band_id}", f"/bands/{band_id}/links", f"/bands/{band_id}/discography"):
+    if band_data:
+        links = merge_links(links, extraer_links_desde_data(band_data))
+
+    endpoints = []
+    if not band_data:
+        endpoints.append(f"/bands/{band_id}")
+    endpoints.extend((f"/bands/{band_id}/links", f"/bands/{band_id}/discography"))
+
+    for endpoint in endpoints:
         data = api_get(session, endpoint)
         if not data:
             continue
@@ -1367,9 +1496,11 @@ def verificacion_manual(folder_path, repertorio):
     return False
 
 
-def construir_descripcion(genre, year, links, tracklist):
+def construir_descripcion(genre, year, links, tracklist, country=None):
     lines = []
     lines.append(f"Genre: {format_genre_text(genre)}")
+    if country:
+        lines.append(f"Country: {country}")
     lines.append(f"Year: {year or 'Unknown'}")
     lines.append("")
     stream_links = [f"{SERVICE_LABELS[key]}: {links.get('stream', {}).get(key)}"
@@ -1539,6 +1670,7 @@ def procesar_carpeta(
     genre_text = None
     post_id = None
     band_id = None
+    post_detail = None
 
     if post:
         release_tipo = elegir_tipo(post.get("type") or post.get("type_id"))
@@ -1568,6 +1700,16 @@ def procesar_carpeta(
     tipo_full = formatear_tipo_full(release_tipo)
     title = f"{band} - {album} ({tipo_full})"
 
+    band_data = None
+    if session and band_id:
+        band_data = api_get(session, f"/bands/{band_id}")
+
+    pais = None
+    if band_data:
+        pais = extraer_pais_desde_data(band_data, band_id=band_id, band_name=band)
+    if not pais:
+        pais = extraer_pais_desde_data(post_detail or post, band_id=band_id, band_name=band)
+
     links = {"stream": {}, "follow": {}}
     if session and post_id:
         links = extraer_links_deathgrind(session, post_id)
@@ -1577,8 +1719,8 @@ def procesar_carpeta(
             links = merge_links(links, html_links)
 
     tiene_links = any(links["stream"].values()) or any(links["follow"].values())
-    if session and band_id and not tiene_links:
-        band_links = extraer_links_band_api(session, band_id)
+    if session and band_id:
+        band_links = extraer_links_band_api(session, band_id, band_data=band_data)
         links = merge_links(links, band_links)
         tiene_links = any(links["stream"].values()) or any(links["follow"].values())
         if not tiene_links:
@@ -1594,13 +1736,14 @@ def procesar_carpeta(
             print(f"No se encontro tracklist en la API para {folder_path.name}, usando audio.")
 
     tracklist = build_tracklist(tracks, track_titles if track_titles else None)
-    description = construir_descripcion(genre_text, release_year, links, tracklist)
+    description = construir_descripcion(genre_text, release_year, links, tracklist, country=pais)
     genres_list = split_genres(genre_text)
 
     return {
         "title": title,
         "description": description,
         "band": band,
+        "country": pais,
         "genres": genres_list,
     }
 
@@ -1617,6 +1760,9 @@ def main():
     parser.add_argument("--sin-verificacion", action="store_true", help="No abrir verificacion manual en YouTube")
     parser.add_argument("--privacidad", choices=["public", "private", "unlisted"], default="public")
     parser.add_argument("--publicar-ahora", action="store_true", help="(Deprecated) Ya se publica al momento")
+    parser.add_argument("--modo-inmediato", action="store_true", help="Subir videos sin programar en lote")
+    parser.add_argument("--cantidad-lote", type=int, help="Cantidad de videos para programar en lote (default: 12)")
+    parser.add_argument("--gap-horas", type=int, help="Horas de diferencia entre publicaciones (default: 2)")
     args = parser.parse_args()
 
     cargar_env()
@@ -1656,6 +1802,15 @@ def main():
     allow_genre_fallback = args.con_generos
     max_uploads = None if args.todo else args.limite
     scan_interval = int(os.environ.get("UPLOAD_SCAN_INTERVAL", "30"))
+    batch_mode = not args.modo_inmediato
+    batch_size = args.cantidad_lote if args.cantidad_lote else int(os.environ.get("YOUTUBE_BATCH_SIZE", "12"))
+    gap_hours = args.gap_horas if args.gap_horas else int(os.environ.get("YOUTUBE_BATCH_GAP_HOURS", "2"))
+    if batch_size <= 0:
+        batch_size = 1
+    if gap_hours <= 0:
+        gap_hours = 2
+    pending_items = []
+    queued_names = set()
 
     while True:
         if args.carpeta:
@@ -1671,6 +1826,104 @@ def main():
             print(f"No hay carpetas para subir. Esperando {scan_interval}s...")
             time.sleep(scan_interval)
             continue
+
+        if batch_mode:
+            for folder_path in folders:
+                if len(pending_items) >= batch_size:
+                    break
+                if folder_path.name in queued_names:
+                    continue
+                video_path = encontrar_video(folder_path)
+                if not video_path:
+                    print(f"No hay video .mp4 en {folder_path}, se omite.")
+                    continue
+                if not args.sin_verificacion:
+                    if verificacion_manual(folder_path, repertorio):
+                        continue
+                print(f"Preparando {folder_path.name} para programar...")
+                metadata = procesar_carpeta(
+                    folder_path,
+                    session,
+                    generos,
+                    generos_lookup,
+                    repertorio,
+                    allow_genre_fallback,
+                )
+                if not metadata:
+                    continue
+                pending_items.append({
+                    "folder": folder_path,
+                    "video": video_path,
+                    "metadata": metadata,
+                })
+                queued_names.add(folder_path.name)
+                print(f"En cola para programar: {folder_path.name} ({len(pending_items)}/{batch_size})")
+
+            if len(pending_items) < batch_size:
+                if args.carpeta:
+                    print(f"No se juntaron {batch_size} videos para programar.")
+                    break
+                faltan = batch_size - len(pending_items)
+                print(f"Aun faltan {faltan} videos para programar. Esperando {scan_interval}s...")
+                time.sleep(scan_interval)
+                continue
+
+            tz_local = datetime.now().astimezone().tzinfo
+            schedule_date = (datetime.now(tz_local) + timedelta(days=1)).date()
+            taken_slots, counts_by_date = fetch_scheduled_publish_times_safe(youtube)
+            max_per_day = max_videos_por_dia(gap_hours)
+            if batch_size > max_per_day:
+                print(f"No se puede programar {batch_size} videos con separacion de {gap_hours}h.")
+                break
+            schedule_date, slots = find_next_batch_schedule(
+                schedule_date,
+                batch_size,
+                gap_hours,
+                taken_slots,
+                counts_by_date,
+                tz_local,
+            )
+            if not slots or len(slots) < batch_size:
+                print("No se pudo generar el horario de programacion para el lote.")
+                break
+
+            existentes = counts_by_date.get(schedule_date, 0)
+            if existentes:
+                print(f"Ya hay {existentes} videos programados para {schedule_date.isoformat()}, se programa el lote ahi.")
+            random.shuffle(pending_items)
+            random.shuffle(slots)
+            print(f"Programando {batch_size} videos para {schedule_date.isoformat()} con separacion de {gap_hours}h.")
+            for item, slot in zip(pending_items, slots):
+                folder_path = item["folder"]
+                metadata = item["metadata"]
+                publish_at = format_rfc3339(slot)
+                try:
+                    response = subir_video(
+                        youtube,
+                        item["video"],
+                        metadata["title"],
+                        metadata["description"],
+                        privacy=args.privacidad,
+                        publish_at=publish_at,
+                        label=metadata.get("title"),
+                    )
+                    print(f"Video subido: {response.get('id')} (programado: {publish_at})")
+                    try:
+                        add_video_to_playlists(
+                            youtube,
+                            response.get("id"),
+                            metadata.get("band"),
+                            metadata.get("genres", []),
+                            playlist_cache,
+                        )
+                    except HttpError as exc:
+                        print(f"No se pudo agregar a playlists: {exc}")
+                    destino = mover_carpeta_subida(folder_path, DIR_YA_SUBIDOS)
+                    if destino:
+                        print(f"Carpeta movida a {destino}")
+                except HttpError as exc:
+                    print(f"Error YouTube API en {folder_path.name}: {exc}")
+            break
 
         uploaded = 0
         for folder_path in folders:
