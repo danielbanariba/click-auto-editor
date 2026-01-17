@@ -1,59 +1,94 @@
 <div align="center">
-  <h1 align="center">Algoritmos de edición automática</a></h1>
+  <h1 align="center">Algoritmos de edicion automatica</h1>
+  <p align="center">Pipeline para crear videos 4K de albums completos con estetica VHS y subirlos a YouTube.</p>
 </div>
 
-### :gear: Instalacion
+## Resumen
+- Render automatico de albums completos (intro + portada + tracklist + VHS).
+- Pipeline GPU con C++/CUDA (vhs_render) y fallback a FFmpeg.
+- Subidas por YouTube Data API con descripcion automatizada y playlists.
+- Automatizacion Playwright para impugnaciones y apelaciones en YouTube Studio.
+- Utilidades de limpieza y analisis de canal.
 
+## Estructura del repo
+- `config.py`: rutas y parametros del pipeline.
+- `content/`: intro y overlays (incluye `0000000000000000.mp4` y `vhs_noise.mp4`).
+- `5. ffmpeg_render.py`: render principal.
+- `9. subir_video_API.py`: subida y programacion por API.
+- `10. inpunar_video.py`: impugnaciones con Playwright.
+- `11. apelacion.py`: apelaciones con Playwright.
+- `12. mapear_playlists.py`: playlists por banda/genero.
+- `limpieza/`: utilidades para normalizar y limpiar carpetas.
+- `effects/`: utilidades de imagen (sombra de portada, etc.).
+- `subir_video/`: helpers de autenticacion y API de YouTube.
+- `cpp/`: renderer VHS GPU (C++/CUDA).
+- `vhs_effect/`: libreria VHS en Python (tests/examples).
+- `analisis_canal/`: pipeline de analisis (ver `analisis_canal/README.md`).
+- `selectores/`: JSON de selectores/acciones para Playwright.
+- `Comentarios/`: templates de texto legacy.
+
+## Flujo completo (de carpeta a YouTube)
+1. Preparacion de carpetas
+   - `config.py` define `BASE_DIR` y `DIR_AUDIO_SCRIPTS`.
+   - Cada album vive en una carpeta `Banda - Album/` con audios (`.mp3`, `.flac`, `.wav`, `.m4a`) y una portada `cover.*`.
+   - Si falta portada, el render intenta extraerla de los metadatos.
+   - Scripts de apoyo en `limpieza/` ayudan a normalizar nombres y remover basura.
+
+2. Renderizado (`5. ffmpeg_render.py`)
+   - Copia opcional a SSD (`USE_SSD_TEMP`) para evitar bottleneck de I/O.
+   - Crea la sombra de la portada (`effects/sombra.py`) y calcula colores para overlays.
+   - Genera tracklist overlay (opcional) usando DeathGrind API o nombres de archivos.
+   - Usa `content/0000000000000000.mp4` como intro y `content/vhs_noise.mp4` como overlay VHS.
+   - Pipeline principal:
+     - `USE_CPP_VHS=True`: `cpp/build/vhs_render` (CUDA + NVENC) y mezcla el audio con FFmpeg.
+     - Fallback: FFmpeg (NVENC si hay GPU, libx264 si no hay NVENC).
+   - Resultado: `Banda - Album.mp4` y la carpeta se mueve a `DIR_UPLOAD`.
+
+3. Subida a YouTube (`9. subir_video_API.py`)
+   - Usa YouTube Data API (OAuth) y sube desde `DIR_UPLOAD`.
+   - Arma titulo y descripcion (generos, year, tracklist, links).
+   - Enriquecimiento opcional con DeathGrind API y `generos_activos.txt`.
+   - Programa en lote por defecto (slots separados por horas) o sube inmediato.
+   - Crea playlists por banda y genero; al finalizar mueve la carpeta a `DIR_YA_SUBIDOS`.
+
+4. Post-publicacion y mantenimiento
+   - `12. mapear_playlists.py`: recorre videos publicos y agrega a playlists por banda/genero.
+   - `10. inpunar_video.py` y `11. apelacion.py`: automatizan reclamos en YouTube Studio con Playwright.
+   - `analisis_canal/`: extrae datos y genera reportes del canal.
+
+## Instalacion rapida
 ```sh
-.\pip_install.ps1
+pip install -r requirements.txt
+pip install -r vhs_effect/requirements.txt  # opcional (OpenCV/SciPy)
+playwright install chromium
+python config.py  # verifica entorno y crea carpetas
 ```
 
-## Explicacion de que hace cada script
+### Renderer C++/CUDA (opcional, recomendado)
+```sh
+cmake -S cpp -B cpp/build
+cmake --build cpp/build
+```
 
-#### 0. limipieza_impuerzas.py
+## Comandos rapidos
+```sh
+python "5. ffmpeg_render.py"                  # render paralelo (default)
+python "5. ffmpeg_render.py" --test           # prueba con 1 video
+python "5. ffmpeg_render.py" --parallel       # paralelo explicito
 
-Va a recorrer todas las carpetas que contenga el directorio en que esta y va a empezar a eliminar todo lo que no sea una imagen y un sonido, si existen mas de 2 imagenes le va a dar mas prioridad el que contenga la palabra reservada 'cover.'[formato de la imagen].
+python "9. subir_video_API.py" --limite 1
+python "9. subir_video_API.py" --todo --cantidad-lote 12 --gap-horas 2
+python "9. subir_video_API.py" --modo-inmediato --limite 1
 
-#### 1. juntar_audios
+python "10. inpunar_video.py" --aprender
+python "11. apelacion.py"
+python "12. mapear_playlists.py" --limite 200
+```
 
-Agarra todos los audios que contiene la carpeta y los va a unir en un solo audio, pero antes de hacer eso va hacer dos verificiaciones previas, verifica que existe una imagen, y si no existe va a extraer la imagen que contengan en los metadados del audio, va a generar un archivo **.txt** (que es la informacion de la descripcion del video) y la duracion de cada cancion los va a sumar para obtener la duracion de las canciones para de esa manera tener una predicion de la proxima cancion que sigue, y por ultimo va a extraer el anio de la cancion y el genero y si no tiene va a poner por defecto **"Unknown"**.
+## Credenciales y entorno
+- YouTube: `client_secrets.json` (o `YOUTUBE_CLIENT_SECRETS`) + `token.json`.
+- DeathGrind: crear `.env` con `DEATHGRIND_EMAIL` y `DEATHGRIND_PASSWORD` para metadatos.
+- Paths/IO: ajustar `BASE_DIR`, `USE_FAST_BASE`, `FAST_BASE_DIR` en `config.py`.
 
-#### 2. cambiar_nombre_imagen
-
-Cambia el nombre de la imagen para ponerlo en la ultima posicion del resultado de archivos, tambien va a rescalar la imagen, y la portada principal osea la de **2500x2500** va a llamar una funcion le aplica el efecto sombra y lo va a guardar en formato **.png**.
-
-#### 3. cantidad_de_archivos.py
-
-Va a recorre todas las carpetas y me a imprimir por pantalla la cantidad que contiene cada carpeta, eso se hace para que siempre tenga 3 archivos (1 audio y 2 imagenes)
-
-#### 4. verificacion_humana.py
-
-Comprobamos que los albumes que tengamos no esten subidos ya a Youtube, de forma manual, por si el primer algoritmo del otro proyecto no fue tan preciso.
-
-#### 5. auto_effects.py
-
-Abre Adobe After Effects y de manera automatica va a empezar a editar, va a ejecutar varios scripts en formato .jsx que son:
-
-1.  **imagen_movimiento.jsx** = le da el movimiento a la imagen de fondo, que tenga rotacion de manera aleatoria y la imagen va a reaccionar al ritmo de la musica,
-2.  **espectro_de_audio.jsx** = Agarra la imagen, va a examinar la imagen y obtendra el promedio en hexadecimal de los colores para aplicar dicho valor en el espectrum audio.
-    > [!CAUTION]
-    > Si algo se mueve ya minusculo pixel que sea, hay que generar ese cambio porque sino todo se va al carajo
-
-#### 6. auto_premier.py
-
-El programa va abrir premier pro, arrastra el trabajo que ya se hizo con el algoritmo anterior **(4. auto_effects.py)** lo junta con el intro que tengo guardado, le aplica una transicion sencilla y lo manda a renderizar al programa Adobe Media Encoder y el ciclo se repite.
-
-> [!IMPORTANT]
-> Se tiene que abrir Adobe Media Encoder antes de ejecutar el script.
-
-#### 7. mover_videos_terminados
-
-Una vez terminado de renderizas los videos, este algoritmo va a mover los archivos con extension .prproj y .aep a la carpeta donde contiene el video, esto se hace con el unico fin de poder liberar almacenamiento y tener un orden.
-
-#### 8. subir_video_coordenadas
-
-Todos los videos que se renderizaron y se movieron correctamente se va a subir al canal de youtube, va a poner una fecha y una hora random (24 horas con intervalo de 15 minutos).
-
-python "5. ffmpeg_render.py" # Secuencial (1 video + barra de progreso)
-python "5. ffmpeg_render.py" --test # Prueba con 1 solo video
-python "5. ffmpeg_render.py" --parallel # Paralelo (3 videos sin barra)
+## Legacy
+Los pasos antiguos 0-4 y la subida por coordenadas viven en `old/` como referencia.

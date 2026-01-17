@@ -2,11 +2,13 @@
 import argparse
 import ast
 import csv
+import errno
 import json
 import os
 import random
 import re
 import shutil
+import socket
 import ssl
 import sys
 import time
@@ -17,6 +19,7 @@ from datetime import datetime, timedelta, time as dtime, timezone
 from pathlib import Path
 
 import requests
+import httplib2
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from mutagen import File as MutagenFile
@@ -33,6 +36,8 @@ DELAY_BASE_429 = 30
 MAX_RETRIES_ERROR = 5
 MAX_RETRIES_429 = int(os.environ.get("DEATHGRIND_MAX_429", "1"))
 DEATHGRIND_DISABLED = False
+PYCOUNTRY_WARNED = False
+BABEL_WARNED = False
 
 DEFAULT_SCHEDULE_HOURS = [8, 12]
 DEFAULT_PLAYLIST_PRIVACY = os.environ.get("YOUTUBE_PLAYLIST_PRIVACY", "public")
@@ -70,6 +75,8 @@ FOLLOW_SERVICES = [
     "twitter",
     "metal_archives",
     "spirit_of_metal",
+    "discogs",
+    "vk",
 ]
 
 SERVICE_LABELS = {
@@ -86,6 +93,8 @@ SERVICE_LABELS = {
     "twitter": "X/Twitter",
     "metal_archives": "Metal Archives",
     "spirit_of_metal": "Spirit of Metal",
+    "discogs": "Discogs",
+    "vk": "VK",
 }
 
 SERVICE_MATCHERS = {
@@ -102,6 +111,8 @@ SERVICE_MATCHERS = {
     "twitter": ["twitter.com", "x.com"],
     "metal_archives": ["metal-archives.com"],
     "spirit_of_metal": ["spirit-of-metal.com"],
+    "discogs": ["discogs.com"],
+    "vk": ["vk.com"],
 }
 
 
@@ -147,6 +158,11 @@ def crear_sesion_autenticada():
     return session
 
 
+def deathgrind_block_on_429():
+    raw = os.environ.get("DEATHGRIND_BLOCK_ON_429", "1").strip().lower()
+    return raw not in {"0", "false", "no"}
+
+
 def api_get(session, endpoint, params=None, max_retries=MAX_RETRIES_ERROR):
     global DEATHGRIND_DISABLED
     if DEATHGRIND_DISABLED or session is None:
@@ -154,17 +170,22 @@ def api_get(session, endpoint, params=None, max_retries=MAX_RETRIES_ERROR):
     url = f"{API_URL}{endpoint}"
     retries_429 = 0
     retries_error = 0
+    block_on_429 = deathgrind_block_on_429()
 
     while True:
         try:
             response = session.get(url, params=params, timeout=30)
             if response.status_code == 429:
                 retries_429 += 1
+                wait_time = DELAY_BASE_429 * retries_429
+                if block_on_429:
+                    print(f"Rate limit DeathGrind, esperando {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
                 if MAX_RETRIES_429 is not None and retries_429 >= MAX_RETRIES_429:
                     DEATHGRIND_DISABLED = True
                     print("Rate limit DeathGrind, se desactiva la API en esta ejecucion.")
                     return None
-                wait_time = DELAY_BASE_429 * retries_429
                 print(f"Rate limit DeathGrind, esperando {wait_time}s...")
                 time.sleep(wait_time)
                 continue
@@ -226,21 +247,11 @@ def deathgrind_smoke_test(session, generos):
         return True
 
     genre_id, genre_name = generos[0]
-    try:
-        resp = session.get(
-            f"{API_URL}/posts/filter",
-            params={"genres": genre_id},
-            timeout=30,
-        )
-    except requests.RequestException as exc:
-        print(f"Prueba DeathGrind fallo: {exc}")
+    data = api_get(session, "/posts/filter", params={"genres": genre_id})
+    if not data:
+        print("Prueba DeathGrind fallo al consultar posts.")
         return False
-
-    print(f"Prueba DeathGrind /posts/filter?genres={genre_id} ({genre_name}) status: {resp.status_code}")
-    if resp.status_code != 200:
-        return False
-
-    data = resp.json()
+    print(f"Prueba DeathGrind /posts/filter?genres={genre_id} ({genre_name}) ok.")
     posts = data.get("posts") or []
     print(f"Prueba DeathGrind posts: {len(posts)} | hasMore: {data.get('hasMore')}")
     if not posts:
@@ -254,29 +265,23 @@ def deathgrind_smoke_test(session, generos):
         band_id = bands[0].get("bandId")
 
     if band_id:
-        try:
-            resp = session.get(f"{API_URL}/bands/{band_id}/discography", timeout=30)
-            print(f"Prueba DeathGrind /bands/{band_id}/discography status: {resp.status_code}")
-            if resp.status_code == 200:
-                discography = resp.json()
-                disc_posts = discography.get("posts") or []
-                print(f"Prueba DeathGrind discography posts: {len(disc_posts)}")
-        except requests.RequestException as exc:
-            print(f"Prueba DeathGrind /bands/{band_id}/discography fallo: {exc}")
+        discography = api_get(session, f"/bands/{band_id}/discography")
+        if discography is None:
+            print(f"Prueba DeathGrind /bands/{band_id}/discography fallo.")
             return False
+        disc_posts = discography.get("posts") or []
+        print(f"Prueba DeathGrind discography posts: {len(disc_posts)}")
     else:
         print("Prueba DeathGrind: no se encontro bandId en el primer post.")
 
     if post_id:
-        try:
-            resp = session.get(f"{API_URL}/posts/{post_id}/links", timeout=30)
-            print(f"Prueba DeathGrind /posts/{post_id}/links status: {resp.status_code}")
-            if resp.status_code == 200:
-                links = resp.json().get("links") or []
-                print(f"Prueba DeathGrind links: {len(links)}")
-        except requests.RequestException as exc:
-            print(f"Prueba DeathGrind /posts/{post_id}/links fallo: {exc}")
+        links_data = api_get(session, f"/posts/{post_id}/links")
+        if links_data is None:
+            print(f"Prueba DeathGrind /posts/{post_id}/links fallo.")
             return False
+        links = links_data.get("links") if isinstance(links_data, dict) else links_data
+        links = links or []
+        print(f"Prueba DeathGrind links: {len(links)}")
     else:
         print("Prueba DeathGrind: no se encontro postId en el primer post.")
 
@@ -422,6 +427,15 @@ def extraer_anio_de_texto(texto):
     return match.group(0) if match else None
 
 
+def unwrap_deathgrind_payload(data):
+    if isinstance(data, dict):
+        for key in ("post", "band"):
+            value = data.get(key)
+            if isinstance(value, dict):
+                return value
+    return data
+
+
 def extraer_pais_valor(value):
     if value is None:
         return None
@@ -442,6 +456,7 @@ def extraer_pais_valor(value):
 
 
 def extraer_pais_desde_data(data, band_id=None, band_name=None):
+    data = unwrap_deathgrind_payload(data)
     if not isinstance(data, dict):
         return None
     for key in ("country", "pais", "origin", "countryName", "country_name", "location"):
@@ -463,6 +478,55 @@ def extraer_pais_desde_data(data, band_id=None, band_name=None):
             if parsed:
                 return parsed
     return None
+
+
+def normalizar_pais(pais):
+    if not pais:
+        return None
+    text = str(pais).strip()
+    if not text:
+        return None
+    code = None
+    if len(text) == 2 and text.isalpha():
+        code = text.upper()
+    else:
+        try:
+            import pycountry
+            match = pycountry.countries.lookup(text)
+            if match and getattr(match, "alpha_2", None):
+                code = match.alpha_2
+        except Exception:
+            global PYCOUNTRY_WARNED
+            if not PYCOUNTRY_WARNED:
+                print("Instala pycountry para detectar el codigo del pais (pip install pycountry).")
+                PYCOUNTRY_WARNED = True
+
+    if code:
+        name_en = None
+        name_es = None
+        try:
+            from babel import Locale
+            name_en = Locale.parse("en").territories.get(code)
+            name_es = Locale.parse("es").territories.get(code)
+        except Exception:
+            global BABEL_WARNED
+            if not BABEL_WARNED:
+                print("Instala babel para mostrar el pais en ingles y espanol (pip install babel).")
+                BABEL_WARNED = True
+        if not name_en:
+            try:
+                import pycountry
+                country = pycountry.countries.get(alpha_2=code)
+                if country and country.name:
+                    name_en = country.name
+            except Exception:
+                pass
+        if name_en and name_es:
+            if name_en == name_es:
+                return name_en
+            return f"{name_en} / {name_es}"
+        return name_en or name_es or code
+    return text
 
 
 def obtener_band_id(post, band_name):
@@ -564,6 +628,20 @@ def buscar_release_en_csv(csv_path, band_name, album_name):
                 except ValueError:
                     year = None
 
+                country = None
+                country_raw = row.get("country")
+                if country_raw:
+                    try:
+                        parsed = ast.literal_eval(country_raw)
+                        if isinstance(parsed, (list, tuple)):
+                            country = parsed[0] if parsed else None
+                        elif isinstance(parsed, str):
+                            country = parsed
+                        else:
+                            country = str(parsed)
+                    except Exception:
+                        country = str(country_raw).strip() or None
+
                 return {
                     "band": bands[0] if bands else band_name,
                     "album": album or album_name,
@@ -572,6 +650,7 @@ def buscar_release_en_csv(csv_path, band_name, album_name):
                     "genres": genre_ids,
                     "year": year,
                     "post_url": row.get("post_url"),
+                    "country": country,
                 }
     except Exception:
         return None
@@ -627,16 +706,20 @@ def buscar_release_en_api(session, band_name, album_name, generos, allow_genre_f
 
 
 def iter_link_items(data):
+    if isinstance(data, dict):
+        if any(key in data for key in ("url", "link", "href", "value")):
+            yield data
+            return
     if isinstance(data, list):
         for item in data:
             yield item
         return
     if not isinstance(data, dict):
         return
-    for key in ("links", "stream", "download", "social", "socials", "follow"):
+    for key in ("links", "stream", "download", "social", "socials", "follow", "relatedLinks", "related_links"):
         value = data.get(key)
-        if isinstance(value, list):
-            for item in value:
+        if isinstance(value, (list, dict)):
+            for item in iter_link_items(value):
                 yield item
 
 
@@ -652,7 +735,7 @@ def normalizar_link(item):
     if not isinstance(item, dict):
         return None, None
     url = get_link_value(item, ["url", "link", "href", "value"])
-    name = get_link_value(item, ["name", "type", "title", "label"])
+    name = get_link_value(item, ["name", "type", "title", "label", "text"])
     if not url:
         return None, None
     url_lower = url.lower()
@@ -672,6 +755,7 @@ def normalizar_link(item):
 
 def extraer_links_desde_data(data):
     links = {"stream": {}, "follow": {}}
+    data = unwrap_deathgrind_payload(data)
     if not data:
         return links
     for item in iter_link_items(data):
@@ -963,6 +1047,17 @@ def max_videos_por_dia(gap_hours):
     return max(1, int(24 // gap_hours))
 
 
+def slots_respect_gap(slots, taken_slots, gap_minutes):
+    if gap_minutes <= 0 or not slots or not taken_slots:
+        return True
+    gap_seconds = gap_minutes * 60
+    for slot in slots:
+        for existing in taken_slots:
+            if abs((slot - existing).total_seconds()) < gap_seconds:
+                return False
+    return True
+
+
 def build_batch_schedule_for_date(date_value, count, gap_hours, taken_slots, tz_local):
     if count <= 0:
         return []
@@ -979,18 +1074,18 @@ def build_batch_schedule_for_date(date_value, count, gap_hours, taken_slots, tz_
         offset = random.randint(0, max_offset)
         slots = [normalize_slot(day_start + timedelta(minutes=offset + gap_minutes * idx))
                  for idx in range(count)]
-        if any(slot in taken_slots for slot in slots):
+        if not slots_respect_gap(slots, taken_slots, gap_minutes):
             continue
         return slots
 
     for offset in range(max_offset + 1):
         slots = [normalize_slot(day_start + timedelta(minutes=offset + gap_minutes * idx))
                  for idx in range(count)]
-        if any(slot in taken_slots for slot in slots):
+        if not slots_respect_gap(slots, taken_slots, gap_minutes):
             continue
         return slots
 
-    return slots
+    return []
 
 
 def find_next_batch_schedule(start_date, count, gap_hours, taken_slots, counts_by_date, tz_local, max_days=365):
@@ -1323,6 +1418,7 @@ def extraer_links_band_api(session, band_id, band_data=None):
         return links
 
     if band_data:
+        band_data = unwrap_deathgrind_payload(band_data)
         links = merge_links(links, extraer_links_desde_data(band_data))
 
     endpoints = []
@@ -1542,7 +1638,21 @@ RETRIABLE_EXCEPTIONS = (
     ConnectionAbortedError,
     TimeoutError,
     ssl.SSLError,
+    socket.gaierror,
+    httplib2.error.ServerNotFoundError,
 )
+RETRIABLE_ERRNOS = {
+    errno.ECONNABORTED,
+    errno.ECONNRESET,
+    errno.ECONNREFUSED,
+    errno.ENETDOWN,
+    errno.ENETUNREACH,
+    errno.EHOSTUNREACH,
+    errno.ETIMEDOUT,
+    errno.EPIPE,
+}
+if hasattr(socket, "EAI_AGAIN"):
+    RETRIABLE_ERRNOS.add(socket.EAI_AGAIN)
 
 
 def subir_video(
@@ -1579,7 +1689,8 @@ def subir_video(
     )
     response = None
     retry = 0
-    max_retries = int(os.environ.get("YOUTUBE_UPLOAD_RETRIES", "8"))
+    max_retries_env = int(os.environ.get("YOUTUBE_UPLOAD_RETRIES", "0"))
+    max_retries = None if max_retries_env <= 0 else max_retries_env
     last_percent = -1
     label_text = f"{label}: " if label else ""
 
@@ -1603,7 +1714,7 @@ def subir_video(
                 last_percent = -1
             if exc.resp is not None and exc.resp.status in RETRIABLE_STATUS_CODES:
                 retry += 1
-                if retry > max_retries:
+                if max_retries is not None and retry > max_retries:
                     raise
                 wait_time = min(60, 2 ** retry)
                 print(f"Error temporal al subir ({exc.resp.status}). Reintentando en {wait_time}s...")
@@ -1616,7 +1727,21 @@ def subir_video(
                 sys.stdout.flush()
                 last_percent = -1
             retry += 1
-            if retry > max_retries:
+            if max_retries is not None and retry > max_retries:
+                raise
+            wait_time = min(60, 2 ** retry)
+            print(f"Error de conexion al subir ({exc}). Reintentando en {wait_time}s...")
+            time.sleep(wait_time)
+            continue
+        except OSError as exc:
+            if exc.errno not in RETRIABLE_ERRNOS:
+                raise
+            if last_percent >= 0:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                last_percent = -1
+            retry += 1
+            if max_retries is not None and retry > max_retries:
                 raise
             wait_time = min(60, 2 ** retry)
             print(f"Error de conexion al subir ({exc}). Reintentando en {wait_time}s...")
@@ -1671,6 +1796,7 @@ def procesar_carpeta(
     post_id = None
     band_id = None
     post_detail = None
+    csv_country = None
 
     if post:
         release_tipo = elegir_tipo(post.get("type") or post.get("type_id"))
@@ -1678,9 +1804,11 @@ def procesar_carpeta(
         genre_text = extraer_genero(post, generos_lookup)
         post_id = post.get("postId") or post.get("post_id") or post.get("id")
         band_id = post.get("bandId") or post.get("band_id") or obtener_band_id(post, band)
+        csv_country = extraer_pais_desde_data(post, band_id=band_id, band_name=band)
 
     if session and post_id and (not band_id or not release_tipo or not release_year or not genre_text):
         post_detail = api_get(session, f"/posts/{post_id}")
+        post_detail = unwrap_deathgrind_payload(post_detail)
         if post_detail:
             if not band_id:
                 band_id = post_detail.get("bandId") or post_detail.get("band_id") or obtener_band_id(post_detail, band)
@@ -1703,12 +1831,16 @@ def procesar_carpeta(
     band_data = None
     if session and band_id:
         band_data = api_get(session, f"/bands/{band_id}")
+        band_data = unwrap_deathgrind_payload(band_data)
 
     pais = None
     if band_data:
         pais = extraer_pais_desde_data(band_data, band_id=band_id, band_name=band)
     if not pais:
         pais = extraer_pais_desde_data(post_detail or post, band_id=band_id, band_name=band)
+    if not pais and csv_country:
+        pais = csv_country
+    pais = normalizar_pais(pais)
 
     links = {"stream": {}, "follow": {}}
     if session and post_id:

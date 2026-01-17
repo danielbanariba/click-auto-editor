@@ -2,6 +2,7 @@
 Configuración centralizada para el proyecto de edición automatizada
 """
 
+import os
 from pathlib import Path
 
 # ============================================================================
@@ -9,7 +10,12 @@ from pathlib import Path
 # ============================================================================
 
 # Directorio raíz donde está montado el disco externo
-BASE_DIR = Path("/run/media/banar/Entretenimiento/01_edicion_automatizada")
+DEFAULT_BASE_DIR = Path("/run/media/banar/Entretenimiento/01_edicion_automatizada")
+# Opcional: usar un base_dir rápido (NVMe) con variables de entorno
+FAST_BASE_DIR = os.environ.get("FAST_BASE_DIR")
+USE_FAST_BASE = os.environ.get("USE_FAST_BASE", "0") == "1"
+
+BASE_DIR = Path(FAST_BASE_DIR) if USE_FAST_BASE and FAST_BASE_DIR else DEFAULT_BASE_DIR
 
 # Pipeline de procesamiento
 DIR_LIMPIEZA = BASE_DIR / "01_limpieza_de_impurezas"
@@ -60,7 +66,7 @@ INTRO_DURATION = 7.0  # Segundos del video de intro
 # i9-9900K tiene 16 threads - los filtros VHS son CPU-bound
 # RTX 3090 Ti puede manejar 3-5 streams NVENC simultáneos
 # Configuración óptima: 4 renders paralelos (4 threads por render ≈ 16 total)
-MAX_PARALLEL_RENDERS = 3  # 4K es pesado; ajusta si tu VRAM lo permite
+MAX_PARALLEL_RENDERS = 4  # 4K es pesado; ajusta si tu VRAM lo permite
 MAX_FOLDERS_TO_PROCESS = 150  # Límite de carpetas por ejecución
 
 # Video quality settings
@@ -104,7 +110,7 @@ AUDIO_SAMPLE_RATE = 48000
 # Usar el pipeline GPU en C++ para los efectos VHS (recomendado con 3090)
 USE_CPP_VHS = True
 VHS_CPP_BIN = PROJECT_ROOT / "cpp" / "build" / "vhs_render"
-VHS_CPP_INTENSITY = 0.85
+VHS_CPP_INTENSITY = 1.0
 VHS_CPP_OVERLAY = PROJECT_ROOT / "content" / "vhs_noise.mp4"
 # Si el render CUDA falla, usar FFmpeg como fallback para no perder el video
 ALLOW_FFMPEG_FALLBACK = True

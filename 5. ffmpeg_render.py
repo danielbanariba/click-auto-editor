@@ -10,7 +10,7 @@ import numpy as np
 import io
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import time
 import sys
 import re
@@ -77,6 +77,11 @@ TRACKLIST_LINE_SPACING = 0.12
 TRACKLIST_MIN_LIST_WIDTH_RATIO = 0.25
 TRACKLIST_COVER_SCALES = (0.85, 0.8, 0.75, 0.7)
 TRACKLIST_MAX_LINES_PER_TRACK = 2
+TRACKLIST_PAGE_SIZE = 12
+TRACKLIST_TEXT_SHADOW_OFFSET = 4
+TRACKLIST_TEXT_SHADOW_BLUR = 5
+TRACKLIST_TEXT_SHADOW_ALPHA = 200
+TRACKLIST_TEXT_SHADOW_ALPHA_HIGHLIGHT = 230
 
 CUDA_ERROR_FLAG = Path(__file__).parent / ".cuda_cpp_disabled"
 ENV_LOADED = False
@@ -120,7 +125,13 @@ def nvenc_available() -> bool:
             "null",
             "-",
         ]
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace"
+        )
         return result.returncode == 0
     except FileNotFoundError:
         return False
@@ -269,6 +280,22 @@ def extract_average_color(image_path):
         return (255, 255, 255)  # Blanco por defecto
 
 
+def is_valid_image(image_path: Path) -> bool:
+    """
+    Verifica si un archivo de imagen puede abrirse sin errores.
+    """
+    if not image_path:
+        return False
+    try:
+        if not Path(image_path).exists():
+            return False
+        with Image.open(image_path) as img:
+            img.verify()
+        return True
+    except Exception:
+        return False
+
+
 def find_base_cover_for_shadow(shadow_path: Path):
     """
     Si la portada es *_shadow.png, intenta encontrar la base sin sombra.
@@ -290,10 +317,23 @@ def ensure_shadow_cover(cover_path: Path, folder_path: Path, original_folder_pat
     Genera una portada con sombra si no existe y devuelve su ruta.
     """
     if cover_path.name.endswith("_shadow.png"):
-        return cover_path
+        if is_valid_image(cover_path):
+            return cover_path
+        base_cover = find_base_cover_for_shadow(cover_path)
+        if base_cover and is_valid_image(base_cover):
+            print(f"[COVER] Sombra corrupta en {cover_path.name}, regenerando...")
+            cover_path = base_cover
+        else:
+            print(f"[COVER] Sombra corrupta y sin base valida: {cover_path.name}")
+            return cover_path
 
     shadow_name = f"{cover_path.stem}_shadow.png"
     shadow_path = folder_path / shadow_name
+    if shadow_path.exists() and not is_valid_image(shadow_path):
+        try:
+            shadow_path.unlink()
+        except Exception:
+            pass
     if not shadow_path.exists():
         try:
             add_shadow(
@@ -742,27 +782,35 @@ def build_tracklist(audio_files, folder_name=None, api_titles=None):
     return tracks
 
 
-def find_font_path():
+def find_font_path(bold: bool = False):
     """
     Encuentra una fuente TTF disponible en el sistema.
     """
-    candidates = [
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    ]
+    if bold:
+        candidates = [
+            "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
+    else:
+        candidates = [
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        ]
     for path in candidates:
         if os.path.exists(path):
             return path
     return None
 
 
-def load_font(font_size: int) -> ImageFont.FreeTypeFont:
+def load_font(font_size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     """
     Carga una fuente con fallback al default de PIL.
     """
-    font_path = find_font_path()
+    font_path = find_font_path(bold=bold)
     if font_path:
         try:
             return ImageFont.truetype(font_path, font_size)
@@ -907,9 +955,13 @@ def generate_tracklist_overlays(
     if cover_height is None or list_width is None:
         return None, None
 
+    total_tracks = len(tracks)
+    page_size = TRACKLIST_PAGE_SIZE or total_tracks
+    page_size = max(1, min(page_size, total_tracks))
+
     max_font_size = min(TRACKLIST_MAX_FONT_SIZE, int(height * 0.05))
     available_height = height - top_margin - bottom_margin
-    raw_font_size = int(available_height / (len(tracks) * (1.0 + TRACKLIST_LINE_SPACING)))
+    raw_font_size = int(available_height / (page_size * (1.0 + TRACKLIST_LINE_SPACING)))
     font_size = min(max_font_size, raw_font_size)
     if font_size < TRACKLIST_MIN_FONT_SIZE:
         return None, None
@@ -921,12 +973,12 @@ def generate_tracklist_overlays(
     line_texts_by_track = None
     max_total_height = None
     while font_size >= TRACKLIST_MIN_FONT_SIZE:
-        base_font = load_font(font_size)
+        base_font = load_font(font_size, bold=True)
         highlight_size = int(round(font_size * 1.25))
         if highlight_size <= font_size:
             highlight_size = font_size + 6
         highlight_size = min(highlight_size, font_size + 18)
-        highlight_font = load_font(highlight_size)
+        highlight_font = load_font(highlight_size, bold=True)
         base_text_height = font_line_height(base_font, font_size)
         highlight_text_height = font_line_height(highlight_font, highlight_size)
 
@@ -959,7 +1011,17 @@ def generate_tracklist_overlays(
             font_size -= 1
             continue
 
-        base_total_height = total_lines * base_line_height
+        if page_size >= total_tracks:
+            max_page_lines = total_lines
+        else:
+            max_page_lines = 0
+            for start in range(0, total_tracks, page_size):
+                end = min(start + page_size, total_tracks)
+                page_lines = sum(len(line_texts_by_track[i]) for i in range(start, end))
+                if page_lines > max_page_lines:
+                    max_page_lines = page_lines
+
+        base_total_height = max_page_lines * base_line_height
         max_extra = (highlight_line_height - base_line_height) * max_lines_in_track
         max_total_height = base_total_height + max_extra
         if max_total_height <= available_height:
@@ -977,15 +1039,12 @@ def generate_tracklist_overlays(
     ):
         return None, None
 
-    start_y = max(top_margin, int((height - max_total_height) / 2))
-
     cover_resized = cover_image.resize((cover_width, cover_height), Image.LANCZOS)
     cover_y = int((height - cover_height) / 2)
 
     text_color = text_color or (255, 255, 255)
     base_luminance = 0.299 * text_color[0] + 0.587 * text_color[1] + 0.114 * text_color[2]
-    shadow_base = (20, 20, 20) if base_luminance > 128 else (240, 240, 240)
-    shadow_color = (shadow_base[0], shadow_base[1], shadow_base[2], 110)
+    shadow_rgb = (20, 20, 20) if base_luminance > 128 else (240, 240, 240)
     base_alpha = 200
     highlight_alpha = 255
 
@@ -993,32 +1052,66 @@ def generate_tracklist_overlays(
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for highlight_idx in range(len(tracks)):
+    page_line_counts = []
+    for start in range(0, total_tracks, page_size):
+        end = min(start + page_size, total_tracks)
+        page_line_counts.append(sum(len(line_texts_by_track[i]) for i in range(start, end)))
+
+    for highlight_idx in range(total_tracks):
+        page_index = highlight_idx // page_size
+        page_start = page_index * page_size
+        page_end = min(page_start + page_size, total_tracks)
+        page_lines = page_line_counts[page_index] if page_line_counts else 0
+        highlight_lines = len(line_texts_by_track[highlight_idx])
+        page_height = (
+            page_lines * base_line_height
+            + (highlight_line_height - base_line_height) * highlight_lines
+        )
+        start_y = max(top_margin, int((height - page_height) / 2))
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         overlay.paste(cover_resized, (left_margin, cover_y), cover_resized)
         draw = ImageDraw.Draw(overlay)
 
+        shadow_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        shadow_draw = ImageDraw.Draw(shadow_layer)
+
         y = start_y
-        for idx, lines in enumerate(line_texts_by_track):
+        for idx in range(page_start, page_end):
+            lines = line_texts_by_track[idx]
+            is_highlight = idx == highlight_idx
+            font_to_use = highlight_font if is_highlight else base_font
+            line_height = highlight_line_height if is_highlight else base_line_height
+            shadow_alpha = (
+                TRACKLIST_TEXT_SHADOW_ALPHA_HIGHLIGHT
+                if is_highlight
+                else TRACKLIST_TEXT_SHADOW_ALPHA
+            )
+            shadow_fill = (shadow_rgb[0], shadow_rgb[1], shadow_rgb[2], shadow_alpha)
+
+            for line_text in lines:
+                shadow_draw.text(
+                    (list_x + TRACKLIST_TEXT_SHADOW_OFFSET, y + TRACKLIST_TEXT_SHADOW_OFFSET),
+                    line_text,
+                    font=font_to_use,
+                    fill=shadow_fill,
+                )
+                y += line_height
+
+        if TRACKLIST_TEXT_SHADOW_BLUR > 0:
+            shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(TRACKLIST_TEXT_SHADOW_BLUR))
+        overlay = Image.alpha_composite(overlay, shadow_layer)
+        draw = ImageDraw.Draw(overlay)
+
+        y = start_y
+        for idx in range(page_start, page_end):
+            lines = line_texts_by_track[idx]
             is_highlight = idx == highlight_idx
             alpha = highlight_alpha if is_highlight else base_alpha
             fill = (text_color[0], text_color[1], text_color[2], alpha)
             font_to_use = highlight_font if is_highlight else base_font
             line_height = highlight_line_height if is_highlight else base_line_height
 
-            shadow_alpha = 110 if is_highlight else 80
-            shadow_fill = (shadow_color[0], shadow_color[1], shadow_color[2], shadow_alpha)
-            shadow_soft = (
-                shadow_color[0],
-                shadow_color[1],
-                shadow_color[2],
-                max(40, shadow_alpha - 30),
-            )
-
             for line_text in lines:
-                # Sombra ligera para lectura sobre el fondo
-                draw.text((list_x + 2, y + 2), line_text, font=font_to_use, fill=shadow_soft)
-                draw.text((list_x + 1, y + 1), line_text, font=font_to_use, fill=shadow_fill)
                 draw.text((list_x, y), line_text, font=font_to_use, fill=fill)
                 y += line_height
 
@@ -1130,7 +1223,13 @@ def analyze_audio_amplitude(audio_path, fps=30):
             '-'
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, stderr=subprocess.DEVNULL)
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            stderr=subprocess.DEVNULL
+        )
 
         # Parsear salida (simplificado - usaremos valores fijos para velocidad)
         # Para 3 videos diarios, pre-calcular audio es overhead innecesario
@@ -1164,7 +1263,7 @@ def get_audio_duration(audio_path):
             '-of', 'default=noprint_wrappers=1:nokey=1',
             str(audio_path)
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
         return float(result.stdout.strip())
     except Exception:
         return 0
@@ -1183,7 +1282,7 @@ def get_audio_bitrate_kbps(audio_path):
             '-of', 'default=noprint_wrappers=1:nokey=1',
             str(audio_path)
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
         bitrate_str = result.stdout.strip()
         if not bitrate_str:
             return 0
@@ -1255,6 +1354,7 @@ def run_ffmpeg_command(cmd, show_progress, total_duration, folder_name, start_ti
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            errors="replace",
             bufsize=1,
             universal_newlines=True
         )
@@ -1287,7 +1387,8 @@ def run_ffmpeg_command(cmd, show_progress, total_duration, folder_name, start_ti
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True
+        text=True,
+        errors="replace"
     )
     return result.returncode == 0, result.stderr
 
@@ -1303,7 +1404,14 @@ def run_cpp_command(cmd, show_progress, extra_env=None):
         result = subprocess.run(cmd, env=env)
         return result.returncode, ""
 
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        env=env
+    )
     return result.returncode, result.stderr
 
 
@@ -1633,6 +1741,10 @@ def render_video(folder_path, folder_name, show_progress=False):
         # Ordenar audios por nombre (01. xxx, 02. xxx, etc.)
         audio_files.sort(key=lambda x: x.name.lower())
 
+        if cover_file and not is_valid_image(cover_file):
+            print(f"[COVER] Portada dañada: {cover_file.name}, intentando otra...")
+            cover_file = None
+
         if not cover_file and audio_files:
             if show_progress:
                 print("[COVER] Portada no encontrada, buscando en metadata...")
@@ -1650,6 +1762,10 @@ def render_video(folder_path, folder_name, show_progress=False):
                 else:
                     print(f"[COVER] {folder_name} portada extraida: {cover_file.name}")
 
+        if cover_file and not is_valid_image(cover_file):
+            print(f"[COVER] Portada invalida: {cover_file.name}")
+            cover_file = None
+
         if not audio_files or not cover_file:
             print(f"[ERROR] Archivos faltantes en {folder_name} (audios: {len(audio_files)}, cover: {cover_file is not None})")
             return False
@@ -1666,7 +1782,7 @@ def render_video(folder_path, folder_name, show_progress=False):
                 cover_main = base_cover
                 cover_overlay = cover_file
 
-        if cover_overlay is None:
+        if cover_overlay is None or not is_valid_image(cover_overlay):
             cover_overlay = ensure_shadow_cover(
                 cover_main,
                 folder_path,
@@ -1833,7 +1949,7 @@ colorlevels=rimax=0.9:gimax=0.9:bimax=0.9:romin=0.05:gomin=0.05:bomin=0.05,
 colortemperature=temperature=5500[bg_base];
 [2:v]scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:flags=bilinear,fps={FPS},
 format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
-[bg_base][vhs_loop]blend=all_mode=softlight:all_opacity=0.35[bg];
+[bg_base][vhs_loop]blend=all_mode=softlight:all_opacity=0.55[bg];
 [1:v]scale=-1:{cover_height}:flags=lanczos,fps={FPS},format=yuva420p,unsharp=5:5:1.2:5:5:0.0[cover];
 [bg][cover]overlay=(W-w)/2:(H-h)/2[content];
 [intro][content]xfade=transition=fade:duration=1:offset={INTRO_DURATION-1}[outv];
@@ -1863,7 +1979,7 @@ colorlevels=rimax=0.9:gimax=0.9:bimax=0.9:romin=0.05:gomin=0.05:bomin=0.05,
 colortemperature=temperature=5500[bg_base];
 [2:v]scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:flags=bilinear,fps={FPS},
 format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
-[bg_base][vhs_loop]blend=all_mode=softlight:all_opacity=0.35[bg];
+[bg_base][vhs_loop]blend=all_mode=softlight:all_opacity=0.55[bg];
 [1:v]scale=-1:{cover_height}:flags=lanczos,fps={FPS},format=yuva420p,unsharp=5:5:1.2:5:5:0.0[cover];
 [bg][cover]overlay=(W-w)/2:(H-h)/2[content];
 [intro][content]xfade=transition=fade:duration=1:offset={INTRO_DURATION-1}[outv];
@@ -1955,6 +2071,7 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                errors="replace",
                 bufsize=1,
                 universal_newlines=True
             )
@@ -2016,7 +2133,8 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                errors="replace"
             )
 
             if result.returncode == 0:

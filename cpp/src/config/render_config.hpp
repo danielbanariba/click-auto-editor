@@ -82,7 +82,7 @@ namespace grading {
 }
 
 // VHS overlay blend
-constexpr float VHS_OVERLAY_OPACITY = 0.45f;
+constexpr float VHS_OVERLAY_OPACITY = 0.6f;
 constexpr float VHS_TRANSITION_TAPE_NOISE = 1.0f;      // 100%
 constexpr float VHS_TRANSITION_TAPE_DISTORTION = 1.0f; // 100%
 constexpr float VHS_TRANSITION_RANDOM_NOISE = 0.25f;   // 25%
