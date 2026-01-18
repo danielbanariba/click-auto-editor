@@ -43,6 +43,11 @@ from config import (
     NVENC_EXTRA_OPTS,
     SSD_TEMP_DIR,
     USE_SSD_TEMP,
+    DEFAULT_BASE_DIR,
+    STAGING_ENABLED,
+    STAGING_FAST_BASE_DIR,
+    STAGING_BATCH_SIZE,
+    STAGING_SHUFFLE,
     USE_CPP_VHS,
     VHS_CPP_BIN,
     VHS_CPP_INTENSITY,
@@ -99,6 +104,111 @@ MAX_RETRIES_429 = int(os.environ.get("DEATHGRIND_MAX_429", "1"))
 
 GPU_CHECKED = False
 GPU_AVAILABLE = False
+
+
+def resolve_rel_path(path: Path, base: Path) -> Path:
+    try:
+        return path.relative_to(base)
+    except ValueError:
+        return Path(path.name)
+
+
+def list_folders(path: Path):
+    if not path.exists():
+        return []
+    return [p for p in path.iterdir() if p.is_dir()]
+
+
+def stage_folders_to_fast(slow_audio: Path, fast_audio: Path, batch_size: int, shuffle: bool):
+    """
+    Mueve un lote de carpetas desde HDD a NVMe para render.
+    """
+    folders = list_folders(slow_audio)
+    if not folders:
+        return []
+
+    if shuffle:
+        random.shuffle(folders)
+    else:
+        folders.sort(key=lambda p: p.name.lower())
+
+    batch_size = max(1, batch_size)
+    batch = folders[:batch_size]
+
+    fast_audio.mkdir(parents=True, exist_ok=True)
+
+    staged = []
+    for folder in batch:
+        dest = fast_audio / folder.name
+        if dest.exists():
+            continue
+        try:
+            shutil.move(str(folder), str(dest))
+            staged.append(dest)
+        except Exception as exc:
+            print(f"[STAGING] Error moviendo {folder.name}: {exc}")
+    return staged
+
+
+def restore_staged_folder(fast_audio: Path, slow_audio: Path, folder_name: str):
+    src = fast_audio / folder_name
+    if not src.exists():
+        return False
+    destination = get_unique_destination(slow_audio, folder_name)
+    try:
+        shutil.move(str(src), str(destination))
+        return True
+    except Exception as exc:
+        print(f"[STAGING] Error devolviendo {folder_name}: {exc}")
+        return False
+
+
+def prepare_staging_batch():
+    """
+    Prepara el staging en NVMe y retorna (folders, staging_ctx) o (None, None) si no aplica.
+    """
+    if not STAGING_ENABLED:
+        return None, None
+
+    fast_base = Path(STAGING_FAST_BASE_DIR)
+    if not fast_base.exists():
+        try:
+            fast_base.mkdir(parents=True, exist_ok=True)
+            print(f"[STAGING] Carpeta NVMe creada: {fast_base}")
+        except PermissionError:
+            print(f"[STAGING] Sin permisos para crear {fast_base}. Se omite staging.")
+            return None, None
+        except Exception as exc:
+            print(f"[STAGING] Error creando {fast_base}: {exc}. Se omite staging.")
+            return None, None
+    elif not fast_base.is_dir():
+        print(f"[STAGING] La ruta NVMe no es carpeta: {fast_base}. Se omite staging.")
+        return None, None
+
+    audio_rel = resolve_rel_path(DIR_AUDIO_SCRIPTS, DEFAULT_BASE_DIR)
+    upload_rel = resolve_rel_path(DIR_UPLOAD, DEFAULT_BASE_DIR)
+
+    slow_audio = DEFAULT_BASE_DIR / audio_rel
+    fast_audio = fast_base / audio_rel
+    fast_upload = fast_base / upload_rel
+
+    if list_folders(fast_audio) or list_folders(fast_upload):
+        print("[STAGING] NVMe no está vacío. Limpia o mueve uploads antes de continuar.")
+        return None, None
+
+    batch_size = min(STAGING_BATCH_SIZE, MAX_FOLDERS_TO_PROCESS)
+    staged = stage_folders_to_fast(slow_audio, fast_audio, batch_size, STAGING_SHUFFLE)
+    if not staged:
+        print("[STAGING] No se movieron carpetas al NVMe.")
+        return None, None
+
+    folders = [(path, path.name) for path in staged]
+    staging_ctx = {
+        "fast_audio": fast_audio,
+        "slow_audio": slow_audio,
+        "staged_names": {path.name for path in staged},
+    }
+    return folders, staging_ctx
 
 
 def nvenc_available() -> bool:
@@ -2167,16 +2277,19 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
         return False
 
 
-def process_folders_parallel():
+def process_folders_parallel(folders_override=None, staging_ctx=None):
     """
     Procesa carpetas en paralelo (hasta MAX_PARALLEL_RENDERS simultáneos)
     """
-    # Recoger todas las carpetas
-    folders = [
-        (MAIN_DIR / folder_name, folder_name)
-        for folder_name in os.listdir(MAIN_DIR)
-        if (MAIN_DIR / folder_name).is_dir()
-    ]
+    if folders_override is not None:
+        folders = folders_override
+    else:
+        # Recoger todas las carpetas
+        folders = [
+            (MAIN_DIR / folder_name, folder_name)
+            for folder_name in os.listdir(MAIN_DIR)
+            if (MAIN_DIR / folder_name).is_dir()
+        ]
 
     # Mezclar aleatoriamente
     random.shuffle(folders)
@@ -2211,9 +2324,21 @@ def process_folders_parallel():
                     successful += 1
                 else:
                     failed += 1
+                    if staging_ctx:
+                        restore_staged_folder(
+                            staging_ctx["fast_audio"],
+                            staging_ctx["slow_audio"],
+                            folder_name
+                        )
             except Exception as e:
                 print(f"[EXCEPCIÓN] Error en {folder_name}: {e}")
                 failed += 1
+                if staging_ctx:
+                    restore_staged_folder(
+                        staging_ctx["fast_audio"],
+                        staging_ctx["slow_audio"],
+                        folder_name
+                    )
     except KeyboardInterrupt:
         cancelled = True
         print("\n\nRenderizado cancelado por el usuario.")
@@ -2240,6 +2365,13 @@ def process_folders_parallel():
                 pass
         else:
             cleanup_temp()
+            if staging_ctx:
+                for name in staging_ctx.get("staged_names", set()):
+                    restore_staged_folder(
+                        staging_ctx["fast_audio"],
+                        staging_ctx["slow_audio"],
+                        name
+                    )
 
     if cancelled:
         return
@@ -2401,8 +2533,9 @@ if __name__ == "__main__":
                 print(f"Argumento desconocido: {sys.argv[1]}")
                 print("Usa --help para ver opciones")
         else:
-            # Modo normal: renderizado paralelo
-            process_folders_parallel()
+            # Modo normal: renderizado paralelo (con staging opcional)
+            folders_override, staging_ctx = prepare_staging_batch()
+            process_folders_parallel(folders_override=folders_override, staging_ctx=staging_ctx)
 
     except KeyboardInterrupt:
         print("\n\nRenderizado cancelado por el usuario.")

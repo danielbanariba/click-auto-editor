@@ -1041,6 +1041,24 @@ def format_rfc3339(dt):
     return dt.isoformat()
 
 
+def format_local_datetime(dt):
+    if not dt:
+        return "N/A"
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
+def parse_user_date(value):
+    if not value:
+        return None
+    text = value.strip()
+    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def max_videos_por_dia(gap_hours):
     if gap_hours <= 0:
         return 0
@@ -1187,9 +1205,11 @@ def fetch_scheduled_publish_times(youtube, max_items=200):
                 counts_by_date[date_key] = counts_by_date.get(date_key, 0) + 1
 
         fetched += len(items)
-        if fetched >= max_items:
-            break
         page_token = resp.get("nextPageToken")
+        if max_items is not None and fetched >= max_items:
+            if page_token:
+                print("Aviso: se alcanzo el limite de escaneo de programados. Podrian faltar fechas.")
+            break
         if not page_token:
             break
 
@@ -1207,6 +1227,47 @@ def fetch_scheduled_publish_times_safe(youtube, max_items=200, retries=3):
             wait_time = min(30, 2 ** attempt)
             print(f"Error consultando programados ({exc}). Reintentando en {wait_time}s...")
             time.sleep(wait_time)
+
+
+def resolve_schedule_scan_limit(max_per_day, max_days):
+    raw = os.environ.get("YOUTUBE_SCHEDULE_SCAN")
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 0
+        if value <= 0:
+            return None
+        return value
+    if max_per_day <= 0 or max_days <= 0:
+        return None
+    return max(200, max_per_day * max_days)
+
+
+def prompt_confirm_schedule_date(schedule_date, latest_slot):
+    if not sys.stdin.isatty():
+        return schedule_date, False
+    if latest_slot:
+        print(f"Ultima programacion detectada: {format_local_datetime(latest_slot)}")
+    else:
+        print("No se detectaron videos programados para comparar.")
+    prompt = (
+        f"Fecha propuesta para el lote: {schedule_date.isoformat()} "
+        "¿Es correcta? [S/n] o escribe una fecha (YYYY-MM-DD): "
+    )
+    while True:
+        resp = input(prompt).strip()
+        if not resp or resp.lower() in ("s", "si", "sí", "y", "yes"):
+            return schedule_date, False
+        if resp.lower() in ("n", "no"):
+            resp = input("Indica fecha (YYYY-MM-DD): ").strip()
+            if not resp:
+                print("Fecha no ingresada. Se mantiene la fecha propuesta.")
+                return schedule_date, False
+        date_override = parse_user_date(resp)
+        if date_override:
+            return date_override, True
+        print("Formato invalido. Usa YYYY-MM-DD (ej: 2026-01-31).")
 
 
 def build_daily_slot(date_value, hour, tz_local, taken_slots):
@@ -2002,8 +2063,15 @@ def main():
 
             tz_local = datetime.now().astimezone().tzinfo
             schedule_date = (datetime.now(tz_local) + timedelta(days=1)).date()
-            taken_slots, counts_by_date = fetch_scheduled_publish_times_safe(youtube)
             max_per_day = max_videos_por_dia(gap_hours)
+            max_days = int(os.environ.get("YOUTUBE_BATCH_MAX_DAYS", "365"))
+            if max_days <= 0:
+                max_days = 365
+            scan_limit = resolve_schedule_scan_limit(max_per_day, max_days)
+            taken_slots, counts_by_date = fetch_scheduled_publish_times_safe(
+                youtube,
+                max_items=scan_limit,
+            )
             if batch_size > max_per_day:
                 print(f"No se puede programar {batch_size} videos con separacion de {gap_hours}h.")
                 break
@@ -2014,10 +2082,32 @@ def main():
                 taken_slots,
                 counts_by_date,
                 tz_local,
+                max_days=max_days,
             )
             if not slots or len(slots) < batch_size:
                 print("No se pudo generar el horario de programacion para el lote.")
                 break
+
+            latest_slot = max(taken_slots) if taken_slots else None
+            requested_date, override = prompt_confirm_schedule_date(schedule_date, latest_slot)
+            if override:
+                schedule_date, slots = find_next_batch_schedule(
+                    requested_date,
+                    batch_size,
+                    gap_hours,
+                    taken_slots,
+                    counts_by_date,
+                    tz_local,
+                    max_days=max_days,
+                )
+                if not slots or len(slots) < batch_size:
+                    print("No se pudo generar el horario de programacion para la fecha solicitada.")
+                    break
+                if schedule_date != requested_date:
+                    print(
+                        "No se pudo usar la fecha solicitada "
+                        f"({requested_date.isoformat()}); se programa para {schedule_date.isoformat()}."
+                    )
 
             existentes = counts_by_date.get(schedule_date, 0)
             if existentes:

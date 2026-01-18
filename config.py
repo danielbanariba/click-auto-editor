@@ -29,6 +29,13 @@ DIR_VERIFICACION = BASE_DIR / "verificacion"
 SSD_TEMP_DIR = Path("/home/banar/temp_render")
 USE_SSD_TEMP = True  # Copiar a SSD antes de renderizar
 
+# Staging por lotes en NVMe (opcional)
+# Mueve temporalmente carpetas al NVMe para renderizar y luego devuelve a upload en HDD.
+STAGING_ENABLED = True
+STAGING_FAST_BASE_DIR = Path("/var/tmp/01_edicion_automatizada")
+STAGING_BATCH_SIZE = 20
+STAGING_SHUFFLE = True
+
 # Directorios auxiliares
 DIR_VOLVER_A_BUSCAR = BASE_DIR / "03_volver_a_buscar"
 DIR_REGRESAR_AUDIO = BASE_DIR / "04_regresar_audio_scripts"
