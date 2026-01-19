@@ -1542,6 +1542,29 @@ def is_tracking_failure(stderr_text: str) -> bool:
     return "tracking_errors.cu" in lowered or "tracking errors" in lowered
 
 
+def cleanup_temp_render(temp_folder_path=None, temp_files=None, track_overlays_path=None):
+    """
+    Limpieza best-effort de temporales (evita llenar SSD si hay fallos).
+    """
+    if temp_files:
+        for temp_file in temp_files:
+            if temp_file and temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except Exception:
+                    pass
+    if track_overlays_path and Path(track_overlays_path).exists():
+        try:
+            shutil.rmtree(track_overlays_path)
+        except Exception:
+            pass
+    if USE_SSD_TEMP and temp_folder_path and temp_folder_path.exists():
+        try:
+            shutil.rmtree(temp_folder_path)
+        except Exception:
+            pass
+
+
 def render_video_with_cpp(
     folder_path,
     original_folder_path,
@@ -1562,17 +1585,27 @@ def render_video_with_cpp(
     Genera el video completo en C++/CUDA y deja el audio al final con FFmpeg.
     Retorna (success, error_kind) donde error_kind puede ser "cuda" u otro motivo.
     """
-    if audio_duration <= 0:
-        print(f"[ERROR] Duración de audio inválida en {folder_name}")
-        return False, "audio"
-
-    if not VHS_CPP_BIN.exists():
-        print(f"[ERROR] No se encontró el renderer C++ en {VHS_CPP_BIN}")
-        return False, "missing_bin"
-
     video_only = folder_path / f"{folder_name}__video.mp4"
     audio_only = folder_path / f"{folder_name}__audio.m4a"
     final_video = folder_path / f"{folder_name}.mp4"
+
+    def fail_cpp(reason):
+        # Si hay fallback FFmpeg, no borrar la carpeta temporal (se sigue usando).
+        if reason != "cuda" or not ALLOW_FFMPEG_FALLBACK:
+            cleanup_temp_render(
+                temp_folder_path=temp_folder_path,
+                temp_files=(video_only, audio_only),
+                track_overlays_path=track_overlays_path
+            )
+        return False, reason
+
+    if audio_duration <= 0:
+        print(f"[ERROR] Duración de audio inválida en {folder_name}")
+        return fail_cpp("audio")
+
+    if not VHS_CPP_BIN.exists():
+        print(f"[ERROR] No se encontró el renderer C++ en {VHS_CPP_BIN}")
+        return fail_cpp("missing_bin")
 
     num_audios = len(audio_files)
     if num_audios == 1:
@@ -1622,7 +1655,7 @@ def render_video_with_cpp(
     if not audio_success:
         print(f"\n[ERROR] FFmpeg falló generando audio en {folder_name}")
         print(f"STDERR: {audio_stderr[-500:]}")
-        return False, "audio"
+        return fail_cpp("audio")
 
     if show_progress:
         print("[VHS GPU] Generando video con CUDA...")
@@ -1664,7 +1697,7 @@ def render_video_with_cpp(
 
         # Reintento sin overlay si hay error CUDA
         if is_cuda_failure(cpp_stderr) and CUDA_FAIL_FAST:
-            return False, "cuda"
+            return fail_cpp("cuda")
         if is_cuda_failure(cpp_stderr) and VHS_CPP_OVERLAY.exists():
             print(f"[VHS GPU] {folder_name} reintentando sin overlay por error CUDA...")
             retry_code, retry_stderr = run_cpp_command(cpp_cmd_no_overlay, show_progress)
@@ -1676,11 +1709,11 @@ def render_video_with_cpp(
                 cpp_stderr = retry_stderr
                 cpp_returncode = retry_code
         else:
-            return False, "cpp"
+            return fail_cpp("cpp")
 
     if cpp_returncode != 0 and is_cuda_failure(cpp_stderr):
         if CUDA_FAIL_FAST:
-            return False, "cuda"
+            return fail_cpp("cuda")
         if not show_progress:
             if is_tracking_failure(cpp_stderr):
                 print(f"[VHS GPU] {folder_name} reintentando sin tracking errors por error CUDA...")
@@ -1700,7 +1733,7 @@ def render_video_with_cpp(
 
     if cpp_returncode != 0 and is_cuda_failure(cpp_stderr):
         if CUDA_FAIL_FAST:
-            return False, "cuda"
+            return fail_cpp("cuda")
         if not show_progress:
             print(f"[VHS GPU] {folder_name} reintentando con NVENC sin hwframes...")
         hwframes_env = {"VHS_NVENC_NO_HWFRAMES": "1"}
@@ -1717,7 +1750,7 @@ def render_video_with_cpp(
 
     if cpp_returncode != 0 and is_cuda_failure(cpp_stderr):
         if CUDA_FAIL_FAST:
-            return False, "cuda"
+            return fail_cpp("cuda")
         if not show_progress:
             print(f"[VHS GPU] {folder_name} reintentando en modo seguro (sin color bleeding/noise)...")
         safe_env = {"VHS_SAFE_MODE": "1"}
@@ -1729,7 +1762,7 @@ def render_video_with_cpp(
         else:
             if not show_progress and retry_stderr:
                 print(f"STDERR: {retry_stderr[-500:]}")
-            return False, "cuda"
+            return fail_cpp("cuda")
 
     if show_progress:
         print("[MUX] Pegando audio al video final...")
@@ -1756,7 +1789,7 @@ def render_video_with_cpp(
     if not mux_success:
         print(f"[ERROR] Mux de audio falló en {folder_name}")
         print(f"STDERR: {mux_stderr[-500:]}")
-        return False, "mux"
+        return fail_cpp("mux")
 
     if not USE_SSD_TEMP:
         for temp_file in (video_only, audio_only):

@@ -10,7 +10,7 @@ from config import DIR_LIMPIEZA, DIR_UPLOAD
 
 
 def cargar_modulo_subir_api():
-    script_path = Path(__file__).with_name("9. subir_video_API.py")
+    script_path = Path(__file__).with_name("3. subir_video_API.py")
     if not script_path.exists():
         print(f"No se encontro el script base: {script_path}")
         return None
