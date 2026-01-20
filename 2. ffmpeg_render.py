@@ -119,6 +119,99 @@ def list_folders(path: Path):
     return [p for p in path.iterdir() if p.is_dir()]
 
 
+YEAR_CACHE = {}
+YEAR_REGEX = re.compile(r"(?:19|20)\d{2}")
+AUDIO_EXTS_FOR_YEAR = (".mp3", ".flac", ".wav", ".m4a")
+
+
+def extract_year_from_text(text):
+    if not text:
+        return None
+    matches = YEAR_REGEX.findall(str(text))
+    if not matches:
+        return None
+    try:
+        return max(int(value) for value in matches)
+    except ValueError:
+        return None
+
+
+def extract_year_from_audio_tags(audio_path: Path):
+    try:
+        audio_easy = MutagenFile(str(audio_path), easy=True)
+    except Exception:
+        return None
+    if not audio_easy or not getattr(audio_easy, "tags", None):
+        return None
+    tags = audio_easy.tags or {}
+    for key in ("date", "year", "originaldate"):
+        value = tags.get(key)
+        if isinstance(value, (list, tuple)):
+            value = value[0] if value else None
+        if not value:
+            continue
+        year = extract_year_from_text(value)
+        if year:
+            return year
+    return None
+
+
+def guess_folder_release_year(folder_path: Path):
+    cache_key = str(folder_path)
+    if cache_key in YEAR_CACHE:
+        return YEAR_CACHE[cache_key]
+
+    year = extract_year_from_text(folder_path.name)
+    if year is None:
+        try:
+            for entry in folder_path.iterdir():
+                if not entry.is_file():
+                    continue
+                if entry.suffix.lower() not in AUDIO_EXTS_FOR_YEAR:
+                    continue
+                year = extract_year_from_audio_tags(entry)
+                if year is None:
+                    year = extract_year_from_text(entry.name)
+                if year is not None:
+                    break
+        except Exception:
+            year = None
+
+    YEAR_CACHE[cache_key] = year
+    return year
+
+
+def order_folders_by_year(entries, shuffle_within_year=True):
+    if not entries:
+        return entries
+
+    buckets = {}
+    for entry in entries:
+        if isinstance(entry, tuple) and len(entry) >= 2:
+            path = entry[0]
+            name = entry[1]
+        else:
+            path = entry
+            name = entry.name
+        year = guess_folder_release_year(path)
+        buckets.setdefault(year, []).append((entry, name))
+
+    years = sorted([y for y in buckets.keys() if y is not None], reverse=True)
+    if None in buckets:
+        years.append(None)
+
+    ordered = []
+    for year in years:
+        items = buckets[year]
+        if shuffle_within_year:
+            random.shuffle(items)
+        else:
+            items.sort(key=lambda item: item[1].lower())
+        ordered.extend([entry for entry, _ in items])
+
+    return ordered
+
+
 def stage_folders_to_fast(slow_audio: Path, fast_audio: Path, batch_size: int, shuffle: bool):
     """
     Mueve un lote de carpetas desde HDD a NVMe para render.
@@ -127,10 +220,7 @@ def stage_folders_to_fast(slow_audio: Path, fast_audio: Path, batch_size: int, s
     if not folders:
         return []
 
-    if shuffle:
-        random.shuffle(folders)
-    else:
-        folders.sort(key=lambda p: p.name.lower())
+    folders = order_folders_by_year(folders, shuffle_within_year=shuffle)
 
     batch_size = max(1, batch_size)
     batch = folders[:batch_size]
@@ -163,6 +253,27 @@ def restore_staged_folder(fast_audio: Path, slow_audio: Path, folder_name: str):
         return False
 
 
+def restore_all_staged_folders(fast_dir: Path, slow_dir: Path, label: str) -> bool:
+    """
+    Devuelve todas las carpetas desde fast_dir hacia slow_dir.
+    """
+    folders = list_folders(fast_dir)
+    if not folders:
+        return True
+
+    slow_dir.mkdir(parents=True, exist_ok=True)
+    ok = True
+    for folder in folders:
+        destination = get_unique_destination(slow_dir, folder.name)
+        try:
+            shutil.move(str(folder), str(destination))
+            print(f"[STAGING] {label} devuelta: {folder.name} -> {destination}")
+        except Exception as exc:
+            ok = False
+            print(f"[STAGING] Error devolviendo {label} {folder.name}: {exc}")
+    return ok
+
+
 def prepare_staging_batch():
     """
     Prepara el staging en NVMe y retorna (folders, staging_ctx) o (None, None) si no aplica.
@@ -191,10 +302,18 @@ def prepare_staging_batch():
     slow_audio = DEFAULT_BASE_DIR / audio_rel
     fast_audio = fast_base / audio_rel
     fast_upload = fast_base / upload_rel
+    slow_upload = DEFAULT_BASE_DIR / upload_rel
 
     if list_folders(fast_audio) or list_folders(fast_upload):
-        print("[STAGING] NVMe no está vacío. Limpia o mueve uploads antes de continuar.")
-        return None, None
+        print("[STAGING] NVMe no está vacío. Intentando devolver carpetas al HDD...")
+        ok_audio = restore_all_staged_folders(fast_audio, slow_audio, "audio")
+        ok_upload = restore_all_staged_folders(fast_upload, slow_upload, "upload")
+        if not (ok_audio and ok_upload):
+            print("[STAGING] No se pudo limpiar el NVMe completamente. Revisa manualmente.")
+            return None, None
+        if list_folders(fast_audio) or list_folders(fast_upload):
+            print("[STAGING] NVMe sigue con carpetas. Revisa manualmente.")
+            return None, None
 
     batch_size = min(STAGING_BATCH_SIZE, MAX_FOLDERS_TO_PROCESS)
     staged = stage_folders_to_fast(slow_audio, fast_audio, batch_size, STAGING_SHUFFLE)
@@ -2324,8 +2443,8 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
             if (MAIN_DIR / folder_name).is_dir()
         ]
 
-    # Mezclar aleatoriamente
-    random.shuffle(folders)
+    # Prioridad por año (más reciente primero), con mezcla opcional dentro del mismo año
+    folders = order_folders_by_year(folders, shuffle_within_year=STAGING_SHUFFLE)
 
     # Limitar cantidad
     folders = folders[:MAX_FOLDERS_TO_PROCESS]
@@ -2427,8 +2546,8 @@ def process_folders_sequential():
         if (MAIN_DIR / folder_name).is_dir()
     ]
 
-    # Mezclar aleatoriamente
-    random.shuffle(folders)
+    # Prioridad por año (más reciente primero), con mezcla opcional dentro del mismo año
+    folders = order_folders_by_year(folders, shuffle_within_year=STAGING_SHUFFLE)
 
     # Limitar cantidad
     folders = folders[:MAX_FOLDERS_TO_PROCESS]
