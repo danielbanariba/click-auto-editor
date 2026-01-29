@@ -77,7 +77,7 @@ python "5. ffmpeg_render.py" --test           # prueba con 1 video
 python "5. ffmpeg_render.py" --parallel       # paralelo explicito
 
 python "9. subir_video_API.py" --limite 1
-python "9. subir_video_API.py" --todo --cantidad-lote 12 --gap-horas 2
+python "9. subir_video_API.py" --todo --cantidad-lote 24 --gap-horas 1
 python "9. subir_video_API.py" --modo-inmediato --limite 1
 
 python "10. inpunar_video.py" --aprender

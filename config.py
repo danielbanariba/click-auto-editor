@@ -33,7 +33,7 @@ USE_SSD_TEMP = True  # Copiar a SSD antes de renderizar
 # Mueve temporalmente carpetas al NVMe para renderizar y luego devuelve a upload en HDD.
 STAGING_ENABLED = True
 STAGING_FAST_BASE_DIR = Path("/var/tmp/01_edicion_automatizada")
-STAGING_BATCH_SIZE = 20
+STAGING_BATCH_SIZE = 150
 STAGING_SHUFFLE = True
 
 # Directorios auxiliares

@@ -34,10 +34,11 @@ INTRO_SECONDS = 8
 DELAY_ENTRE_PAGINAS = 1.0
 DELAY_BASE_429 = 30
 MAX_RETRIES_ERROR = 5
-MAX_RETRIES_429 = int(os.environ.get("DEATHGRIND_MAX_429", "1"))
 DEATHGRIND_DISABLED = False
 PYCOUNTRY_WARNED = False
 BABEL_WARNED = False
+DEATHGRIND_API_CACHE = {}
+DEATHGRIND_LAST_REQUEST_TS = 0.0
 
 DEFAULT_SCHEDULE_HOURS = [8, 12]
 DEFAULT_PLAYLIST_PRIVACY = os.environ.get("YOUTUBE_PLAYLIST_PRIVACY", "public")
@@ -163,28 +164,103 @@ def deathgrind_block_on_429():
     return raw not in {"0", "false", "no"}
 
 
+def deathgrind_max_retries_429():
+    raw = os.environ.get("DEATHGRIND_MAX_429", "3").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return 3
+    return value if value > 0 else None
+
+
+def deathgrind_search_page_limit():
+    raw = os.environ.get("DEATHGRIND_SEARCH_PAGES", "3").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return 3
+    return value if value > 0 else None
+
+
+def deathgrind_genre_page_limit():
+    raw = os.environ.get("DEATHGRIND_GENRE_PAGES", "2").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return 2
+    return value if value > 0 else None
+
+
+def deathgrind_min_interval():
+    raw = os.environ.get("DEATHGRIND_MIN_INTERVAL", "0").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 0.0
+    return max(0.0, value)
+
+
+def deathgrind_cache_enabled():
+    raw = os.environ.get("DEATHGRIND_CACHE", "1").strip().lower()
+    return raw not in {"0", "false", "no"}
+
+
+def deathgrind_cache_limit():
+    raw = os.environ.get("DEATHGRIND_CACHE_MAX", "2000").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return 2000
+    return value if value > 0 else None
+
+
+def make_deathgrind_cache_key(endpoint, params):
+    if not params:
+        return (endpoint, ())
+    items = []
+    for key in sorted(params):
+        value = params[key]
+        if isinstance(value, (list, tuple)):
+            value = tuple(str(v) for v in value)
+        else:
+            value = str(value)
+        items.append((key, value))
+    return (endpoint, tuple(items))
+
+
 def api_get(session, endpoint, params=None, max_retries=MAX_RETRIES_ERROR):
-    global DEATHGRIND_DISABLED
+    global DEATHGRIND_DISABLED, DEATHGRIND_LAST_REQUEST_TS
     if DEATHGRIND_DISABLED or session is None:
         return None
     url = f"{API_URL}{endpoint}"
     retries_429 = 0
     retries_error = 0
     block_on_429 = deathgrind_block_on_429()
+    max_retries_429 = deathgrind_max_retries_429()
+    min_interval = deathgrind_min_interval()
+    cache_key = None
+    if deathgrind_cache_enabled():
+        cache_key = make_deathgrind_cache_key(endpoint, params)
+        if cache_key in DEATHGRIND_API_CACHE:
+            return DEATHGRIND_API_CACHE[cache_key]
 
     while True:
         try:
+            if min_interval > 0:
+                elapsed = time.time() - DEATHGRIND_LAST_REQUEST_TS
+                if elapsed < min_interval:
+                    time.sleep(min_interval - elapsed)
+            DEATHGRIND_LAST_REQUEST_TS = time.time()
             response = session.get(url, params=params, timeout=30)
             if response.status_code == 429:
                 retries_429 += 1
                 wait_time = DELAY_BASE_429 * retries_429
-                if block_on_429:
-                    print(f"Rate limit DeathGrind, esperando {wait_time}s...")
-                    time.sleep(wait_time)
-                    continue
-                if MAX_RETRIES_429 is not None and retries_429 >= MAX_RETRIES_429:
+                if max_retries_429 is not None and retries_429 >= max_retries_429:
                     DEATHGRIND_DISABLED = True
                     print("Rate limit DeathGrind, se desactiva la API en esta ejecucion.")
+                    return None
+                if not block_on_429:
+                    print("Rate limit DeathGrind, se omite la llamada por esta ejecucion.")
                     return None
                 print(f"Rate limit DeathGrind, esperando {wait_time}s...")
                 time.sleep(wait_time)
@@ -195,7 +271,13 @@ def api_get(session, endpoint, params=None, max_retries=MAX_RETRIES_ERROR):
                     return None
                 time.sleep(5)
                 continue
-            return response.json()
+            data = response.json()
+            if cache_key is not None:
+                cache_limit = deathgrind_cache_limit()
+                if cache_limit is not None and len(DEATHGRIND_API_CACHE) >= cache_limit:
+                    DEATHGRIND_API_CACHE.pop(next(iter(DEATHGRIND_API_CACHE)))
+                DEATHGRIND_API_CACHE[cache_key] = data
+            return data
         except requests.RequestException:
             retries_error += 1
             if retries_error >= max_retries:
@@ -662,18 +744,28 @@ def buscar_release_en_api(session, band_name, album_name, generos, allow_genre_f
         return None
     album_search = strip_album_suffix(album_name)
     query = f"{band_name} {album_search}".strip()
+    max_pages = deathgrind_search_page_limit()
+    page_count = 0
     data = api_get(session, "/posts/filter", params={"search": query})
     if data:
+        page_count += 1
         posts = data.get("posts", [])
         for post in posts:
             if match_post(post, band_name, album_name):
                 return post
 
         offset = data.get("offset")
+        seen_offsets = set()
         while data.get("hasMore") and offset is not None:
+            if max_pages is not None and page_count >= max_pages:
+                break
+            if offset in seen_offsets:
+                break
+            seen_offsets.add(offset)
             data = api_get(session, "/posts/filter", params={"search": query, "offset": offset})
             if not data:
                 break
+            page_count += 1
             posts = data.get("posts", [])
             for post in posts:
                 if match_post(post, band_name, album_name):
@@ -683,15 +775,21 @@ def buscar_release_en_api(session, band_name, album_name, generos, allow_genre_f
     if not allow_genre_fallback or not generos:
         return None
 
+    max_genre_pages = deathgrind_genre_page_limit()
     for genre_id, _genre_name in generos:
         offset = None
+        page_count = 0
+        seen_offsets = set()
         while True:
+            if max_genre_pages is not None and page_count >= max_genre_pages:
+                break
             params = {"genres": genre_id}
             if offset is not None:
                 params["offset"] = offset
             data = api_get(session, "/posts/filter", params=params)
             if not data:
                 break
+            page_count += 1
             posts = data.get("posts", [])
             for post in posts:
                 if match_post(post, band_name, album_name):
@@ -699,8 +797,9 @@ def buscar_release_en_api(session, band_name, album_name, generos, allow_genre_f
             if not data.get("hasMore"):
                 break
             offset = data.get("offset")
-            if offset is None:
+            if offset is None or offset in seen_offsets:
                 break
+            seen_offsets.add(offset)
             time.sleep(DELAY_ENTRE_PAGINAS)
     return None
 
@@ -738,6 +837,7 @@ def normalizar_link(item):
     name = get_link_value(item, ["name", "type", "title", "label", "text"])
     if not url:
         return None, None
+    url = str(url).strip()
     url_lower = url.lower()
     service_key = None
     for key, patterns in SERVICE_MATCHERS.items():
@@ -748,7 +848,9 @@ def normalizar_link(item):
         name_lower = name.lower()
         for key in SERVICE_MATCHERS.keys():
             if key.replace("_", " ") in name_lower:
-                service_key = key
+                # Evitar etiquetas incorrectas (ej: Bandcamp apuntando a Mega).
+                if any(pattern in url_lower for pattern in SERVICE_MATCHERS.get(key, [])):
+                    service_key = key
                 break
     return service_key, url
 
@@ -809,6 +911,56 @@ def parse_track_number(value):
 def limpiar_titulo(nombre):
     titulo = re.sub(r"^\s*\d{1,3}\s*[-._)\]]*\s*", "", nombre).strip()
     return titulo if titulo else nombre
+
+
+TITLE_MAX_CHARS = 100
+DESCRIPTION_MAX_BYTES = 5000
+FULL_ALBUM_MARKER = "full album"
+
+
+def truncar_titulo(title, max_len=TITLE_MAX_CHARS, marker=FULL_ALBUM_MARKER):
+    if not title:
+        return title
+    texto = re.sub(r"\s+", " ", str(title)).strip()
+    if len(texto) <= max_len:
+        return texto
+
+    marker = (marker or "").lower().strip()
+    lower = texto.lower()
+    ellipsis = "..."
+
+    if marker and marker in lower:
+        idx = lower.rfind(marker)
+        suffix = texto[idx:]
+        if len(suffix) >= max_len:
+            phrase = texto[idx: idx + len(marker)]
+            return phrase[:max_len]
+        available = max_len - len(suffix)
+        if available <= len(ellipsis):
+            return suffix[-max_len:]
+        prefix = texto[: available - len(ellipsis)].rstrip()
+        if not prefix:
+            return suffix[-max_len:]
+        return f"{prefix}{ellipsis}{suffix}"
+
+    if max_len <= len(ellipsis):
+        return texto[:max_len]
+    return texto[: max_len - len(ellipsis)].rstrip() + ellipsis
+
+
+def truncar_descripcion(texto, max_bytes=DESCRIPTION_MAX_BYTES, suffix="..."):
+    if texto is None:
+        return ""
+    texto = str(texto).strip()
+    raw = texto.encode("utf-8")
+    if len(raw) <= max_bytes:
+        return texto
+    suffix_bytes = suffix.encode("utf-8")
+    if len(suffix_bytes) >= max_bytes:
+        return raw[:max_bytes].decode("utf-8", errors="ignore")
+    limit = max_bytes - len(suffix_bytes)
+    truncated = raw[:limit].decode("utf-8", errors="ignore").rstrip()
+    return truncated + suffix
 
 
 def extraer_audio_metadata(audio_path):
@@ -1316,143 +1468,6 @@ def find_next_publish_slot(start_dt, taken_slots, counts_by_date, hours):
         current_date += timedelta(days=1)
 
 
-def list_playlists(youtube):
-    playlists = {}
-    page_token = None
-    while True:
-        resp = youtube.playlists().list(
-            part="snippet",
-            mine=True,
-            maxResults=50,
-            pageToken=page_token,
-        ).execute()
-        for item in resp.get("items", []):
-            title = item.get("snippet", {}).get("title")
-            if not title:
-                continue
-            playlists[title.lower()] = item.get("id")
-        page_token = resp.get("nextPageToken")
-        if not page_token:
-            break
-    return playlists
-
-
-def is_playlist_not_found(exc):
-    if not isinstance(exc, HttpError):
-        return False
-    if getattr(exc, "resp", None) and exc.resp.status == 404:
-        return True
-    try:
-        data = json.loads(exc.content.decode("utf-8"))
-        for err in data.get("error", {}).get("errors", []):
-            if err.get("reason") == "playlistNotFound":
-                return True
-    except Exception:
-        pass
-    return False
-
-
-def refresh_playlist(youtube, title, cache, privacy=DEFAULT_PLAYLIST_PRIVACY):
-    key = title.lower().strip()
-    cache.pop(key, None)
-    return get_or_create_playlist(youtube, title, cache, privacy=privacy)
-
-
-def get_or_create_playlist(youtube, title, cache, privacy=DEFAULT_PLAYLIST_PRIVACY):
-    if not title:
-        return None
-    key = title.lower().strip()
-    if not key:
-        return None
-    playlist_id = cache.get(key)
-    if playlist_id:
-        return playlist_id
-
-    body = {
-        "snippet": {"title": title},
-        "status": {"privacyStatus": privacy},
-    }
-    resp = youtube.playlists().insert(part="snippet,status", body=body).execute()
-    playlist_id = resp.get("id")
-    if playlist_id:
-        cache[key] = playlist_id
-    return playlist_id
-
-
-def is_video_in_playlist(youtube, playlist_id, video_id, max_items=200):
-    page_token = None
-    fetched = 0
-    while True:
-        resp = youtube.playlistItems().list(
-            part="snippet",
-            playlistId=playlist_id,
-            maxResults=50,
-            pageToken=page_token,
-        ).execute()
-        items = resp.get("items", [])
-        for item in items:
-            resource = item.get("snippet", {}).get("resourceId", {})
-            if resource.get("videoId") == video_id:
-                return True
-        fetched += len(items)
-        if fetched >= max_items:
-            return False
-        page_token = resp.get("nextPageToken")
-        if not page_token:
-            break
-    return False
-
-
-def add_video_to_playlist(youtube, playlist_id, video_id):
-    body = {
-        "snippet": {
-            "playlistId": playlist_id,
-            "resourceId": {
-                "kind": "youtube#video",
-                "videoId": video_id,
-            },
-        }
-    }
-    youtube.playlistItems().insert(part="snippet", body=body).execute()
-
-
-def add_video_to_playlists(youtube, video_id, band_name, genres, playlist_cache):
-    if not video_id:
-        return
-    max_scan = int(os.environ.get("YOUTUBE_PLAYLIST_SCAN", "200"))
-    playlist_titles = []
-    if band_name and band_name.lower() != "unknown":
-        playlist_titles.append(band_name)
-    playlist_titles.extend(genres)
-
-    for title in playlist_titles:
-        if not title:
-            continue
-        playlist_id = get_or_create_playlist(youtube, title, playlist_cache)
-        if not playlist_id:
-            continue
-        try:
-            in_playlist = is_video_in_playlist(youtube, playlist_id, video_id, max_items=max_scan)
-        except HttpError as exc:
-            if is_playlist_not_found(exc):
-                playlist_id = refresh_playlist(youtube, title, playlist_cache)
-                in_playlist = False
-            else:
-                raise
-        if not playlist_id:
-            continue
-        if not in_playlist:
-            try:
-                add_video_to_playlist(youtube, playlist_id, video_id)
-            except HttpError as exc:
-                if is_playlist_not_found(exc):
-                    playlist_id = refresh_playlist(youtube, title, playlist_cache)
-                    if playlist_id:
-                        add_video_to_playlist(youtube, playlist_id, video_id)
-                else:
-                    raise
-
-
 def clean_url(url):
     if not url:
         return None
@@ -1481,17 +1496,20 @@ def extraer_links_band_api(session, band_id, band_data=None):
     if band_data:
         band_data = unwrap_deathgrind_payload(band_data)
         links = merge_links(links, extraer_links_desde_data(band_data))
-
-    endpoints = []
     if not band_data:
-        endpoints.append(f"/bands/{band_id}")
-    endpoints.extend((f"/bands/{band_id}/links", f"/bands/{band_id}/discography"))
+        data = api_get(session, f"/bands/{band_id}")
+        if data:
+            links = merge_links(links, extraer_links_desde_data(data))
 
-    for endpoint in endpoints:
-        data = api_get(session, endpoint)
-        if not data:
-            continue
+    data = api_get(session, f"/bands/{band_id}/links")
+    if data:
         links = merge_links(links, extraer_links_desde_data(data))
+
+    tiene_links = any(links["stream"].values()) or any(links["follow"].values())
+    if not tiene_links:
+        data = api_get(session, f"/bands/{band_id}/discography")
+        if data:
+            links = merge_links(links, extraer_links_desde_data(data))
     return links
 
 
@@ -1930,6 +1948,8 @@ def procesar_carpeta(
 
     tracklist = build_tracklist(tracks, track_titles if track_titles else None)
     description = construir_descripcion(genre_text, release_year, links, tracklist, country=pais)
+    title = truncar_titulo(title)
+    description = truncar_descripcion(description)
     genres_list = split_genres(genre_text)
 
     return {
@@ -1954,8 +1974,8 @@ def main():
     parser.add_argument("--privacidad", choices=["public", "private", "unlisted"], default="public")
     parser.add_argument("--publicar-ahora", action="store_true", help="(Deprecated) Ya se publica al momento")
     parser.add_argument("--modo-inmediato", action="store_true", help="Subir videos sin programar en lote")
-    parser.add_argument("--cantidad-lote", type=int, help="Cantidad de videos para programar en lote (default: 12)")
-    parser.add_argument("--gap-horas", type=int, help="Horas de diferencia entre publicaciones (default: 2)")
+    parser.add_argument("--cantidad-lote", type=int, help="Cantidad de videos para programar en lote (default: 24)")
+    parser.add_argument("--gap-horas", type=int, help="Horas de diferencia entre publicaciones (default: 1)")
     args = parser.parse_args()
 
     cargar_env()
@@ -1970,11 +1990,6 @@ def main():
     repertorio = cargar_repertorio()
 
     youtube = authenticate()
-    playlist_cache = {}
-    try:
-        playlist_cache = list_playlists(youtube)
-    except HttpError as exc:
-        print(f"No se pudo leer playlists existentes: {exc}")
     if session and not args.sin_deathgrind:
         ok = deathgrind_smoke_test(session, generos)
         if not ok:
@@ -1996,8 +2011,8 @@ def main():
     max_uploads = None if args.todo else args.limite
     scan_interval = int(os.environ.get("UPLOAD_SCAN_INTERVAL", "30"))
     batch_mode = not args.modo_inmediato
-    batch_size = args.cantidad_lote if args.cantidad_lote else int(os.environ.get("YOUTUBE_BATCH_SIZE", "12"))
-    gap_hours = args.gap_horas if args.gap_horas else int(os.environ.get("YOUTUBE_BATCH_GAP_HOURS", "2"))
+    batch_size = args.cantidad_lote if args.cantidad_lote else int(os.environ.get("YOUTUBE_BATCH_SIZE", "24"))
+    gap_hours = args.gap_horas if args.gap_horas else int(os.environ.get("YOUTUBE_BATCH_GAP_HOURS", "1"))
     if batch_size <= 0:
         batch_size = 1
     if gap_hours <= 0:
@@ -2130,16 +2145,6 @@ def main():
                         label=metadata.get("title"),
                     )
                     print(f"Video subido: {response.get('id')} (programado: {publish_at})")
-                    try:
-                        add_video_to_playlists(
-                            youtube,
-                            response.get("id"),
-                            metadata.get("band"),
-                            metadata.get("genres", []),
-                            playlist_cache,
-                        )
-                    except HttpError as exc:
-                        print(f"No se pudo agregar a playlists: {exc}")
                     destino = mover_carpeta_subida(folder_path, DIR_YA_SUBIDOS)
                     if destino:
                         print(f"Carpeta movida a {destino}")
@@ -2181,16 +2186,6 @@ def main():
                 )
                 print(f"Video subido: {response.get('id')}")
                 uploaded += 1
-                try:
-                    add_video_to_playlists(
-                        youtube,
-                        response.get("id"),
-                        metadata.get("band"),
-                        metadata.get("genres", []),
-                        playlist_cache,
-                    )
-                except HttpError as exc:
-                    print(f"No se pudo agregar a playlists: {exc}")
                 destino = mover_carpeta_subida(folder_path, DIR_YA_SUBIDOS)
                 if destino:
                     print(f"Carpeta movida a {destino}")

@@ -1,0 +1,74 @@
+
+============================================================
+INICIANDO RENDERIZADO PARALELO
+Carpetas a procesar: 150
+Renders paralelos: 4
+============================================================
+
+[INICIO] Procesando: Defacement - Duality (2024)
+[INICIO] Procesando: Blackened Entrails - Manifesto Sepulcral (2024)
+[INICIO] Procesando: Gutfuck - Piranha Blowjob (2024)
+[INICIO] Procesando: Incipient Chaos - Incipient Chaos (2024)
+[TRACKLIST] Blackened Entrails - Manifesto Sepulcral (2024) titulos obtenidos desde DeathGrind.
+[TRACKLIST] Defacement - Duality (2024) titulos obtenidos desde DeathGrind.
+[TRACKLIST] Incipient Chaos - Incipient Chaos (2024) titulos obtenidos desde DeathGrind.
+[TRACKLIST] Gutfuck - Piranha Blowjob (2024) titulos obtenidos desde DeathGrind.
+[AUDIO] Blackened Entrails - Manifesto Sepulcral (2024) generando mezcla...
+[AUDIO] Incipient Chaos - Incipient Chaos (2024) generando mezcla...
+[AUDIO] Defacement - Duality (2024) generando mezcla...
+[AUDIO] Gutfuck - Piranha Blowjob (2024) generando mezcla...
+[VHS GPU] Blackened Entrails - Manifesto Sepulcral (2024) generando video con CUDA...
+[VHS GPU] Gutfuck - Piranha Blowjob (2024) generando video con CUDA...
+[VHS GPU] Incipient Chaos - Incipient Chaos (2024) generando video con CUDA...
+[VHS GPU] Defacement - Duality (2024) generando video con CUDA...
+[MUX] Incipient Chaos - Incipient Chaos (2024) pegando audio al video final...
+[ERROR] Mux de audio falló en Incipient Chaos - Incipient Chaos (2024)
+STDERR:  1.100 / 62.  1.100
+  libavfilter    11.  4.100 / 11.  4.100
+  libswscale      9.  1.100 /  9.  1.100
+  libswresample   6.  1.100 /  6.  1.100
+[mov,mp4,m4a,3gp,3g2,mj2 @ 0x558d52da7f40] moov atom not found
+[in#0 @ 0x558d52da7c80] Error opening input: Invalid data found when processing input
+Error opening input file /dev/shm/auto_render/Incipient Chaos - Incipient Chaos (2024)/Incipient Chaos - Incipient Chaos (2024)__video.mp4.
+Error opening input files: Invalid data found when processing input
+
+[MUX] Defacement - Duality (2024) pegando audio al video final...
+[ERROR] Mux de audio falló en Defacement - Duality (2024)
+STDERR: .100
+  libavdevice    62.  1.100 / 62.  1.100
+  libavfilter    11.  4.100 / 11.  4.100
+  libswscale      9.  1.100 /  9.  1.100
+  libswresample   6.  1.100 /  6.  1.100
+[mov,mp4,m4a,3gp,3g2,mj2 @ 0x56209b8b3f40] moov atom not found
+[in#0 @ 0x56209b8b3c80] Error opening input: Invalid data found when processing input
+Error opening input file /dev/shm/auto_render/Defacement - Duality (2024)/Defacement - Duality (2024)__video.mp4.
+Error opening input files: Invalid data found when processing input
+
+[MUX] Gutfuck - Piranha Blowjob (2024) pegando audio al video final...
+[ERROR] Mux de audio falló en Gutfuck - Piranha Blowjob (2024)
+STDERR: avdevice    62.  1.100 / 62.  1.100
+  libavfilter    11.  4.100 / 11.  4.100
+  libswscale      9.  1.100 /  9.  1.100
+  libswresample   6.  1.100 /  6.  1.100
+[mov,mp4,m4a,3gp,3g2,mj2 @ 0x55a26e6bbf40] moov atom not found
+[in#0 @ 0x55a26e6bbc80] Error opening input: Invalid data found when processing input
+Error opening input file /dev/shm/auto_render/Gutfuck - Piranha Blowjob (2024)/Gutfuck - Piranha Blowjob (2024)__video.mp4.
+Error opening input files: Invalid data found when processing input
+
+[MUX] Blackened Entrails - Manifesto Sepulcral (2024) pegando audio al video final...
+[ERROR] Mux de audio falló en Blackened Entrails - Manifesto Sepulcral (2024)
+STDERR: 1.100
+  libavfilter    11.  4.100 / 11.  4.100
+  libswscale      9.  1.100 /  9.  1.100
+  libswresample   6.  1.100 /  6.  1.100
+[mov,mp4,m4a,3gp,3g2,mj2 @ 0x5603d67b5f40] moov atom not found
+[in#0 @ 0x5603d67b5c80] Error opening input: Invalid data found when processing input
+Error opening input file /dev/shm/auto_render/Blackened Entrails - Manifesto Sepulcral (2024)/Blackened Entrails - Manifesto Sepulcral (2024)__video.mp4.
+Error opening input files: Invalid data found when processing input
+
+[INICIO] Procesando: Pogrom - Ukupacha (2024)
+[INICIO] Procesando: PoonTickler - Incelocaust (2024)
+[INICIO] Procesando: Rogga Johansson - Otherworld (2024)
+[INICIO] Procesando: Vivisepulture - Dirty Slams 2 (2024)
+[ERROR] Archivos faltantes en Vivisepulture - Dirty Slams 2 (2024) (audios: 0, cover: False)
+[INICIO] Procesando: Sissourlet - Devoted To Doing You Harm (2024)
