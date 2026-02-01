@@ -509,6 +509,35 @@ def extraer_anio_de_texto(texto):
     return match.group(0) if match else None
 
 
+def ordenar_carpetas_por_anio(folders, shuffle_within_year=True):
+    if not folders:
+        return folders
+
+    buckets = {}
+    for folder in folders:
+        year = extraer_anio_de_texto(folder.name)
+        if year is not None:
+            try:
+                year = int(year)
+            except ValueError:
+                year = None
+        buckets.setdefault(year, []).append(folder)
+
+    years = sorted([y for y in buckets.keys() if y is not None], reverse=True)
+    if None in buckets:
+        years.append(None)
+
+    ordered = []
+    for year in years:
+        items = buckets[year]
+        if shuffle_within_year:
+            random.shuffle(items)
+        else:
+            items.sort(key=lambda item: item.name.lower())
+        ordered.extend(items)
+    return ordered
+
+
 def unwrap_deathgrind_payload(data):
     if isinstance(data, dict):
         for key in ("post", "band"):
@@ -1231,7 +1260,7 @@ def slots_respect_gap(slots, taken_slots, gap_minutes):
 def build_batch_schedule_for_date(date_value, count, gap_hours, taken_slots, tz_local):
     if count <= 0:
         return []
-    gap_minutes = max(1, int(gap_hours)) * 60
+    gap_minutes = max(1, int(round(gap_hours * 60)))
     max_span = gap_minutes * (count - 1)
     if max_span >= 24 * 60:
         return []
@@ -1974,8 +2003,8 @@ def main():
     parser.add_argument("--privacidad", choices=["public", "private", "unlisted"], default="public")
     parser.add_argument("--publicar-ahora", action="store_true", help="(Deprecated) Ya se publica al momento")
     parser.add_argument("--modo-inmediato", action="store_true", help="Subir videos sin programar en lote")
-    parser.add_argument("--cantidad-lote", type=int, help="Cantidad de videos para programar en lote (default: 24)")
-    parser.add_argument("--gap-horas", type=int, help="Horas de diferencia entre publicaciones (default: 1)")
+    parser.add_argument("--cantidad-lote", type=int, help="Cantidad de videos para programar en lote (default: 96)")
+    parser.add_argument("--gap-horas", type=float, help="Horas de diferencia entre publicaciones (default: 0.25)")
     args = parser.parse_args()
 
     cargar_env()
@@ -2011,12 +2040,12 @@ def main():
     max_uploads = None if args.todo else args.limite
     scan_interval = int(os.environ.get("UPLOAD_SCAN_INTERVAL", "30"))
     batch_mode = not args.modo_inmediato
-    batch_size = args.cantidad_lote if args.cantidad_lote else int(os.environ.get("YOUTUBE_BATCH_SIZE", "24"))
-    gap_hours = args.gap_horas if args.gap_horas else int(os.environ.get("YOUTUBE_BATCH_GAP_HOURS", "1"))
+    batch_size = args.cantidad_lote if args.cantidad_lote else int(os.environ.get("YOUTUBE_BATCH_SIZE", "96"))
+    gap_hours = args.gap_horas if args.gap_horas is not None else float(os.environ.get("YOUTUBE_BATCH_GAP_HOURS", "0.25"))
     if batch_size <= 0:
         batch_size = 1
     if gap_hours <= 0:
-        gap_hours = 2
+        gap_hours = 0.25
     pending_items = []
     queued_names = set()
 
@@ -2025,7 +2054,7 @@ def main():
             folders = [upload_dir] if upload_dir.exists() else []
         else:
             folders = [path for path in upload_dir.iterdir() if path.is_dir()]
-            random.shuffle(folders)
+            folders = ordenar_carpetas_por_anio(folders, shuffle_within_year=True)
 
         if not folders:
             if args.carpeta:
@@ -2130,10 +2159,13 @@ def main():
             random.shuffle(pending_items)
             random.shuffle(slots)
             print(f"Programando {batch_size} videos para {schedule_date.isoformat()} con separacion de {gap_hours}h.")
-            for item, slot in zip(pending_items, slots):
+            total_items = len(pending_items)
+            for idx, (item, slot) in enumerate(zip(pending_items, slots), start=1):
                 folder_path = item["folder"]
                 metadata = item["metadata"]
                 publish_at = format_rfc3339(slot)
+                restantes = total_items - idx
+                print(f"Subiendo {idx}/{total_items}. Faltan {restantes}.")
                 try:
                     response = subir_video(
                         youtube,

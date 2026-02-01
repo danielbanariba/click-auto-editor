@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import random
 import re
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
@@ -54,6 +53,38 @@ def verificacion_manual(folder_path, repertorio, helpers, base_dir):
     if normalizada and normalizada not in {"n", "no"}:
         print("Entrada no valida, se continua con la verificacion.")
     return False
+
+
+def extraer_anio_de_texto(texto):
+    if not texto:
+        return None
+    match = re.search(r"(19|20)\d{2}", str(texto))
+    if not match:
+        return None
+    try:
+        return int(match.group(0))
+    except ValueError:
+        return None
+
+
+def ordenar_carpetas_por_anio(folders):
+    if not folders:
+        return folders
+
+    buckets = {}
+    for folder in folders:
+        year = extraer_anio_de_texto(folder.name)
+        buckets.setdefault(year, []).append(folder)
+
+    years = sorted([y for y in buckets.keys() if y is not None], reverse=True)
+    if None in buckets:
+        years.append(None)
+
+    ordered = []
+    for year in years:
+        items = sorted(buckets[year], key=lambda item: item.name.lower())
+        ordered.extend(items)
+    return ordered
 
 
 def elegir_origen_interactivo():
@@ -121,7 +152,10 @@ def main():
         folders = [upload_dir]
     else:
         folders = [path for path in upload_dir.iterdir() if path.is_dir()]
-        random.shuffle(folders)
+        if hasattr(helpers, "ordenar_carpetas_por_anio"):
+            folders = helpers.ordenar_carpetas_por_anio(folders, shuffle_within_year=False)
+        else:
+            folders = ordenar_carpetas_por_anio(folders)
 
     if not folders:
         print("No hay carpetas para verificar.")
