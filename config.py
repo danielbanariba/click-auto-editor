@@ -48,6 +48,7 @@ DIR_RARO = BASE_DIR / "raro"
 DIR_NEED_CENSURED = BASE_DIR / "need_censured"
 DIR_CORREGIR_EDICION = BASE_DIR / "corregir_edicion"
 DIR_BANDAS_SUBIDAS = BASE_DIR / "bandas_que_supuestamente_ya_se_subieron"
+DIR_ERROR404 = BASE_DIR / "Error404"
 
 # ============================================================================
 # ARCHIVOS DEL PROYECTO
@@ -73,8 +74,8 @@ INTRO_DURATION = 7.0  # Segundos del video de intro
 # i9-9900K tiene 16 threads - los filtros VHS son CPU-bound
 # RTX 3090 Ti puede manejar 3-5 streams NVENC simultáneos
 # Configuración óptima: 4 renders paralelos (4 threads por render ≈ 16 total)
-MAX_PARALLEL_RENDERS = 4  # 4K es pesado; ajusta si tu VRAM lo permite
-MAX_FOLDERS_TO_PROCESS = 150  # Límite de carpetas por ejecución
+MAX_PARALLEL_RENDERS = 1  # 4K es pesado; ajusta si tu VRAM lo permite
+MAX_FOLDERS_TO_PROCESS = 10  # Límite de carpetas por ejecución
 
 # Video quality settings
 # GPU (NVENC) settings - Requiere GPU Nvidia con soporte NVENC

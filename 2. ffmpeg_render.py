@@ -54,7 +54,8 @@ from config import (
     VHS_CPP_OVERLAY,
     ALLOW_FFMPEG_FALLBACK,
     DISABLE_CPP_ON_CUDA,
-    CUDA_FAIL_FAST
+    CUDA_FAIL_FAST,
+    DIR_ERROR404
 )
 
 # ============================================================================
@@ -104,6 +105,16 @@ MAX_RETRIES_429 = int(os.environ.get("DEATHGRIND_MAX_429", "1"))
 
 GPU_CHECKED = False
 GPU_AVAILABLE = False
+CPP_SPEED_FACTOR = None
+CPP_SPEED_MIN = 0.5
+CPP_SPEED_MAX = 12.0
+CPP_SPEED_FALLBACK = 2.5
+MINIMAL_OUTPUT = True
+
+
+def log_verbose(message: str):
+    if not MINIMAL_OUTPUT:
+        print(message)
 
 
 def resolve_rel_path(path: Path, base: Path) -> Path:
@@ -236,7 +247,7 @@ def stage_folders_to_fast(slow_audio: Path, fast_audio: Path, batch_size: int, s
             shutil.move(str(folder), str(dest))
             staged.append(dest)
         except Exception as exc:
-            print(f"[STAGING] Error moviendo {folder.name}: {exc}")
+            log_verbose(f"[STAGING] Error moviendo {folder.name}: {exc}")
     return staged
 
 
@@ -249,7 +260,7 @@ def restore_staged_folder(fast_audio: Path, slow_audio: Path, folder_name: str):
         shutil.move(str(src), str(destination))
         return True
     except Exception as exc:
-        print(f"[STAGING] Error devolviendo {folder_name}: {exc}")
+        log_verbose(f"[STAGING] Error devolviendo {folder_name}: {exc}")
         return False
 
 
@@ -267,10 +278,10 @@ def restore_all_staged_folders(fast_dir: Path, slow_dir: Path, label: str) -> bo
         destination = get_unique_destination(slow_dir, folder.name)
         try:
             shutil.move(str(folder), str(destination))
-            print(f"[STAGING] {label} devuelta: {folder.name} -> {destination}")
+            log_verbose(f"[STAGING] {label} devuelta: {folder.name} -> {destination}")
         except Exception as exc:
             ok = False
-            print(f"[STAGING] Error devolviendo {label} {folder.name}: {exc}")
+            log_verbose(f"[STAGING] Error devolviendo {label} {folder.name}: {exc}")
     return ok
 
 
@@ -285,15 +296,15 @@ def prepare_staging_batch():
     if not fast_base.exists():
         try:
             fast_base.mkdir(parents=True, exist_ok=True)
-            print(f"[STAGING] Carpeta NVMe creada: {fast_base}")
+            log_verbose(f"[STAGING] Carpeta NVMe creada: {fast_base}")
         except PermissionError:
-            print(f"[STAGING] Sin permisos para crear {fast_base}. Se omite staging.")
+            log_verbose(f"[STAGING] Sin permisos para crear {fast_base}. Se omite staging.")
             return None, None
         except Exception as exc:
-            print(f"[STAGING] Error creando {fast_base}: {exc}. Se omite staging.")
+            log_verbose(f"[STAGING] Error creando {fast_base}: {exc}. Se omite staging.")
             return None, None
     elif not fast_base.is_dir():
-        print(f"[STAGING] La ruta NVMe no es carpeta: {fast_base}. Se omite staging.")
+        log_verbose(f"[STAGING] La ruta NVMe no es carpeta: {fast_base}. Se omite staging.")
         return None, None
 
     audio_rel = resolve_rel_path(DIR_AUDIO_SCRIPTS, DEFAULT_BASE_DIR)
@@ -305,20 +316,20 @@ def prepare_staging_batch():
     slow_upload = DEFAULT_BASE_DIR / upload_rel
 
     if list_folders(fast_audio) or list_folders(fast_upload):
-        print("[STAGING] NVMe no está vacío. Intentando devolver carpetas al HDD...")
+        log_verbose("[STAGING] NVMe no está vacío. Intentando devolver carpetas al HDD...")
         ok_audio = restore_all_staged_folders(fast_audio, slow_audio, "audio")
         ok_upload = restore_all_staged_folders(fast_upload, slow_upload, "upload")
         if not (ok_audio and ok_upload):
-            print("[STAGING] No se pudo limpiar el NVMe completamente. Revisa manualmente.")
+            log_verbose("[STAGING] No se pudo limpiar el NVMe completamente. Revisa manualmente.")
             return None, None
         if list_folders(fast_audio) or list_folders(fast_upload):
-            print("[STAGING] NVMe sigue con carpetas. Revisa manualmente.")
+            log_verbose("[STAGING] NVMe sigue con carpetas. Revisa manualmente.")
             return None, None
 
     batch_size = min(STAGING_BATCH_SIZE, MAX_FOLDERS_TO_PROCESS)
     staged = stage_folders_to_fast(slow_audio, fast_audio, batch_size, STAGING_SHUFFLE)
     if not staged:
-        print("[STAGING] No se movieron carpetas al NVMe.")
+        log_verbose("[STAGING] No se movieron carpetas al NVMe.")
         return None, None
 
     folders = [(path, path.name) for path in staged]
@@ -381,7 +392,7 @@ def resolve_gpu_usage() -> bool:
 
     GPU_AVAILABLE = nvenc_available()
     if not GPU_AVAILABLE:
-        print("[GPU] NVENC no disponible en este entorno. Usando CPU (libx264).")
+        log_verbose("[GPU] NVENC no disponible en este entorno. Usando CPU (libx264).")
     return USE_GPU and GPU_AVAILABLE
 
 
@@ -433,10 +444,30 @@ def move_folder_to_upload(source_folder: Path, folder_name: str, show_progress: 
     destination = get_unique_destination(DIR_UPLOAD, folder_name)
 
     if show_progress:
-        print(f"[UPLOAD] Moviendo carpeta a {destination}...")
+        log_verbose(f"[UPLOAD] Moviendo carpeta a {destination}...")
 
     shutil.move(str(source_folder), str(destination))
     return destination
+
+
+def move_folder_to_error(source_folder: Path, folder_name: str, reason=None):
+    """
+    Mueve la carpeta con error a Error404.
+    """
+    DIR_ERROR404.mkdir(parents=True, exist_ok=True)
+    if not source_folder.exists():
+        return None
+    destination = get_unique_destination(DIR_ERROR404, folder_name)
+    try:
+        shutil.move(str(source_folder), str(destination))
+        if reason:
+            print(f"[ERROR] {folder_name} movida a Error404 ({reason})")
+        else:
+            print(f"[ERROR] {folder_name} movida a Error404")
+        return destination
+    except Exception as exc:
+        print(f"[ERROR] No se pudo mover {folder_name} a Error404: {exc}")
+        return None
 
 
 def get_complementary_color(r, g, b):
@@ -505,7 +536,7 @@ def extract_average_color(image_path):
 
         return tuple(avg_color.astype(int))
     except Exception as e:
-        print(f"Error extrayendo color de {image_path}: {e}")
+        log_verbose(f"Error extrayendo color de {image_path}: {e}")
         return (255, 255, 255)  # Blanco por defecto
 
 
@@ -550,10 +581,10 @@ def ensure_shadow_cover(cover_path: Path, folder_path: Path, original_folder_pat
             return cover_path
         base_cover = find_base_cover_for_shadow(cover_path)
         if base_cover and is_valid_image(base_cover):
-            print(f"[COVER] Sombra corrupta en {cover_path.name}, regenerando...")
+            log_verbose(f"[COVER] Sombra corrupta en {cover_path.name}, regenerando...")
             cover_path = base_cover
         else:
-            print(f"[COVER] Sombra corrupta y sin base valida: {cover_path.name}")
+            log_verbose(f"[COVER] Sombra corrupta y sin base valida: {cover_path.name}")
             return cover_path
 
     shadow_name = f"{cover_path.stem}_shadow.png"
@@ -574,7 +605,7 @@ def ensure_shadow_cover(cover_path: Path, folder_path: Path, original_folder_pat
                 SHADOW_SOFTNESS
             )
         except Exception as e:
-            print(f"[COVER] Error creando sombra: {e}")
+            log_verbose(f"[COVER] Error creando sombra: {e}")
             return cover_path
 
     if original_folder_path and original_folder_path != folder_path:
@@ -677,7 +708,7 @@ def crear_sesion_autenticada():
     email = os.environ.get("DEATHGRIND_EMAIL")
     password = os.environ.get("DEATHGRIND_PASSWORD")
     if not email or not password:
-        print("[TRACKLIST] Credenciales DeathGrind no encontradas, se usa audio local.")
+        log_verbose("[TRACKLIST] Credenciales DeathGrind no encontradas, se usa audio local.")
         return None
 
     session = requests.Session()
@@ -697,11 +728,11 @@ def crear_sesion_autenticada():
             timeout=30,
         )
     except requests.RequestException as exc:
-        print(f"[TRACKLIST] Error de conexion DeathGrind: {exc}")
+        log_verbose(f"[TRACKLIST] Error de conexion DeathGrind: {exc}")
         return None
 
     if response.status_code not in (200, 202):
-        print(f"[TRACKLIST] Error login DeathGrind: {response.status_code}")
+        log_verbose(f"[TRACKLIST] Error login DeathGrind: {response.status_code}")
         return None
 
     csrf_token = session.cookies.get("csrfToken", "")
@@ -723,10 +754,10 @@ def api_get(session, endpoint, params=None, max_retries=5):
             if response.status_code == 429:
                 retries_429 += 1
                 if MAX_RETRIES_429 is not None and retries_429 >= MAX_RETRIES_429:
-                    print("[TRACKLIST] Rate limit DeathGrind, se omite API.")
+                    log_verbose("[TRACKLIST] Rate limit DeathGrind, se omite API.")
                     return None
                 wait_time = DELAY_BASE_429 * retries_429
-                print(f"[TRACKLIST] Rate limit DeathGrind, esperando {wait_time}s...")
+                log_verbose(f"[TRACKLIST] Rate limit DeathGrind, esperando {wait_time}s...")
                 time.sleep(wait_time)
                 continue
             if response.status_code != 200:
@@ -1410,7 +1441,7 @@ def save_cover_bytes(image_bytes: bytes, output_path: Path) -> bool:
         img.save(output_path, format="JPEG", quality=95)
         return True
     except Exception as e:
-        print(f"[COVER] Error guardando portada embebida: {e}")
+        log_verbose(f"[COVER] Error guardando portada embebida: {e}")
         return False
 
 
@@ -1466,7 +1497,7 @@ def analyze_audio_amplitude(audio_path, fps=30):
         return None
 
     except Exception as e:
-        print(f"Error analizando audio {audio_path}: {e}")
+        log_verbose(f"Error analizando audio {audio_path}: {e}")
         return None
 
 
@@ -1622,7 +1653,20 @@ def run_ffmpeg_command(cmd, show_progress, total_duration, folder_name, start_ti
     return result.returncode == 0, result.stderr
 
 
-def run_cpp_command(cmd, show_progress, extra_env=None):
+def update_cpp_speed(total_duration, elapsed_seconds):
+    global CPP_SPEED_FACTOR
+    if total_duration <= 0 or elapsed_seconds <= 0:
+        return
+    speed = total_duration / elapsed_seconds
+    speed = max(CPP_SPEED_MIN, min(CPP_SPEED_MAX, speed))
+    if CPP_SPEED_FACTOR is None:
+        CPP_SPEED_FACTOR = speed
+    else:
+        # Promedio móvil suave para estabilizar la ETA
+        CPP_SPEED_FACTOR = (CPP_SPEED_FACTOR * 0.7) + (speed * 0.3)
+
+
+def run_cpp_command(cmd, show_progress, extra_env=None, total_duration=None, folder_name=None):
     """
     Ejecuta el render C++ y retorna (returncode, stderr_text).
     """
@@ -1630,8 +1674,35 @@ def run_cpp_command(cmd, show_progress, extra_env=None):
     if extra_env:
         env.update(extra_env)
     if show_progress:
-        result = subprocess.run(cmd, env=env)
-        return result.returncode, ""
+        start_time = time.time()
+        process = subprocess.Popen(
+            cmd,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        speed_factor = CPP_SPEED_FACTOR or CPP_SPEED_FALLBACK
+        try:
+            while True:
+                if process.poll() is not None:
+                    break
+                if total_duration and folder_name:
+                    elapsed = time.time() - start_time
+                    current_time = min(total_duration * 0.99, elapsed * speed_factor)
+                    print_progress_bar(current_time, total_duration, elapsed, folder_name)
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            process.terminate()
+            raise
+
+        returncode = process.wait()
+        elapsed = time.time() - start_time
+        if total_duration and folder_name:
+            print_progress_bar(total_duration, total_duration, elapsed, folder_name)
+            print()
+        if returncode == 0 and total_duration and elapsed > 0:
+            update_cpp_speed(total_duration, elapsed)
+        return returncode, ""
 
     result = subprocess.run(
         cmd,
@@ -1738,9 +1809,9 @@ def render_video_with_cpp(
         audio_inputs_args.extend(['-i', str(audio_file)])
 
     if show_progress:
-        print("[AUDIO] Generando mezcla...")
+        log_verbose("[AUDIO] Generando mezcla...")
     else:
-        print(f"[AUDIO] {folder_name} generando mezcla...")
+        log_verbose(f"[AUDIO] {folder_name} generando mezcla...")
 
     audio_filter = f"""
 {audio_concat_line};
@@ -1773,13 +1844,13 @@ def render_video_with_cpp(
     )
     if not audio_success:
         print(f"\n[ERROR] FFmpeg falló generando audio en {folder_name}")
-        print(f"STDERR: {audio_stderr[-500:]}")
+        log_verbose(f"STDERR: {audio_stderr[-500:]}")
         return fail_cpp("audio")
 
     if show_progress:
-        print("[VHS GPU] Generando video con CUDA...")
+        log_verbose("[VHS GPU] Generando video con CUDA...")
     else:
-        print(f"[VHS GPU] {folder_name} generando video con CUDA...")
+        log_verbose(f"[VHS GPU] {folder_name} generando video con CUDA...")
 
     base_cpp_cmd = [
         str(VHS_CPP_BIN),
@@ -1803,28 +1874,38 @@ def render_video_with_cpp(
     if VHS_CPP_OVERLAY.exists():
         cpp_cmd.extend(['--vhs-overlay', str(VHS_CPP_OVERLAY)])
     else:
-        print(f"[VHS GPU] Overlay no encontrado: {VHS_CPP_OVERLAY}")
+        log_verbose(f"[VHS GPU] Overlay no encontrado: {VHS_CPP_OVERLAY}")
 
-    cpp_returncode, cpp_stderr = run_cpp_command(cpp_cmd, show_progress)
+    cpp_returncode, cpp_stderr = run_cpp_command(
+        cpp_cmd,
+        show_progress,
+        total_duration=audio_duration,
+        folder_name=folder_name
+    )
     cpp_cmd_no_overlay = base_cpp_cmd.copy()
 
     if cpp_returncode != 0:
         if not show_progress:
             print(f"[ERROR] VHS GPU falló en {folder_name}")
             if cpp_stderr:
-                print(f"STDERR: {cpp_stderr[-500:]}")
+                log_verbose(f"STDERR: {cpp_stderr[-500:]}")
 
         # Reintento sin overlay si hay error CUDA
         if is_cuda_failure(cpp_stderr) and CUDA_FAIL_FAST:
             return fail_cpp("cuda")
         if is_cuda_failure(cpp_stderr) and VHS_CPP_OVERLAY.exists():
-            print(f"[VHS GPU] {folder_name} reintentando sin overlay por error CUDA...")
-            retry_code, retry_stderr = run_cpp_command(cpp_cmd_no_overlay, show_progress)
+            log_verbose(f"[VHS GPU] {folder_name} reintentando sin overlay por error CUDA...")
+            retry_code, retry_stderr = run_cpp_command(
+                cpp_cmd_no_overlay,
+                show_progress,
+                total_duration=audio_duration,
+                folder_name=folder_name
+            )
             if retry_code == 0:
-                print(f"[VHS GPU] {folder_name} renderizado sin overlay")
+                log_verbose(f"[VHS GPU] {folder_name} renderizado sin overlay")
             else:
                 if not show_progress and retry_stderr:
-                    print(f"STDERR: {retry_stderr[-500:]}")
+                    log_verbose(f"STDERR: {retry_stderr[-500:]}")
                 cpp_stderr = retry_stderr
                 cpp_returncode = retry_code
         else:
@@ -1835,18 +1916,24 @@ def render_video_with_cpp(
             return fail_cpp("cuda")
         if not show_progress:
             if is_tracking_failure(cpp_stderr):
-                print(f"[VHS GPU] {folder_name} reintentando sin tracking errors por error CUDA...")
+                log_verbose(f"[VHS GPU] {folder_name} reintentando sin tracking errors por error CUDA...")
             else:
-                print(f"[VHS GPU] {folder_name} reintentando en modo seguro (sin tracking errors)...")
+                log_verbose(f"[VHS GPU] {folder_name} reintentando en modo seguro (sin tracking errors)...")
         tracking_env = {"VHS_DISABLE_TRACKING_ERRORS": "1"}
         retry_cmd = cpp_cmd_no_overlay if VHS_CPP_OVERLAY.exists() else cpp_cmd
-        retry_code, retry_stderr = run_cpp_command(retry_cmd, show_progress, tracking_env)
+        retry_code, retry_stderr = run_cpp_command(
+            retry_cmd,
+            show_progress,
+            tracking_env,
+            total_duration=audio_duration,
+            folder_name=folder_name
+        )
         if retry_code == 0:
             if not show_progress:
-                print(f"[VHS GPU] {folder_name} renderizado sin tracking errors")
+                log_verbose(f"[VHS GPU] {folder_name} renderizado sin tracking errors")
         else:
             if not show_progress and retry_stderr:
-                print(f"STDERR: {retry_stderr[-500:]}")
+                log_verbose(f"STDERR: {retry_stderr[-500:]}")
             cpp_stderr = retry_stderr
             cpp_returncode = retry_code
 
@@ -1854,16 +1941,22 @@ def render_video_with_cpp(
         if CUDA_FAIL_FAST:
             return fail_cpp("cuda")
         if not show_progress:
-            print(f"[VHS GPU] {folder_name} reintentando con NVENC sin hwframes...")
+            log_verbose(f"[VHS GPU] {folder_name} reintentando con NVENC sin hwframes...")
         hwframes_env = {"VHS_NVENC_NO_HWFRAMES": "1"}
         retry_cmd = cpp_cmd_no_overlay if VHS_CPP_OVERLAY.exists() else cpp_cmd
-        retry_code, retry_stderr = run_cpp_command(retry_cmd, show_progress, hwframes_env)
+        retry_code, retry_stderr = run_cpp_command(
+            retry_cmd,
+            show_progress,
+            hwframes_env,
+            total_duration=audio_duration,
+            folder_name=folder_name
+        )
         if retry_code == 0:
             if not show_progress:
-                print(f"[VHS GPU] {folder_name} renderizado sin hwframes")
+                log_verbose(f"[VHS GPU] {folder_name} renderizado sin hwframes")
         else:
             if not show_progress and retry_stderr:
-                print(f"STDERR: {retry_stderr[-500:]}")
+                log_verbose(f"STDERR: {retry_stderr[-500:]}")
             cpp_stderr = retry_stderr
             cpp_returncode = retry_code
 
@@ -1871,22 +1964,28 @@ def render_video_with_cpp(
         if CUDA_FAIL_FAST:
             return fail_cpp("cuda")
         if not show_progress:
-            print(f"[VHS GPU] {folder_name} reintentando en modo seguro (sin color bleeding/noise)...")
+            log_verbose(f"[VHS GPU] {folder_name} reintentando en modo seguro (sin color bleeding/noise)...")
         safe_env = {"VHS_SAFE_MODE": "1"}
         retry_cmd = cpp_cmd_no_overlay if VHS_CPP_OVERLAY.exists() else cpp_cmd
-        retry_code, retry_stderr = run_cpp_command(retry_cmd, show_progress, safe_env)
+        retry_code, retry_stderr = run_cpp_command(
+            retry_cmd,
+            show_progress,
+            safe_env,
+            total_duration=audio_duration,
+            folder_name=folder_name
+        )
         if retry_code == 0:
             if not show_progress:
-                print(f"[VHS GPU] {folder_name} renderizado en modo seguro")
+                log_verbose(f"[VHS GPU] {folder_name} renderizado en modo seguro")
         else:
             if not show_progress and retry_stderr:
-                print(f"STDERR: {retry_stderr[-500:]}")
+                log_verbose(f"STDERR: {retry_stderr[-500:]}")
             return fail_cpp("cuda")
 
     if show_progress:
-        print("[MUX] Pegando audio al video final...")
+        log_verbose("[MUX] Pegando audio al video final...")
     else:
-        print(f"[MUX] {folder_name} pegando audio al video final...")
+        log_verbose(f"[MUX] {folder_name} pegando audio al video final...")
 
     mux_cmd = [
         'ffmpeg',
@@ -1907,7 +2006,7 @@ def render_video_with_cpp(
     )
     if not mux_success:
         print(f"[ERROR] Mux de audio falló en {folder_name}")
-        print(f"STDERR: {mux_stderr[-500:]}")
+        log_verbose(f"STDERR: {mux_stderr[-500:]}")
         return fail_cpp("mux")
 
     if not USE_SSD_TEMP:
@@ -1920,7 +2019,7 @@ def render_video_with_cpp(
         final_dest = original_folder_path / f"{folder_name}.mp4"
         if output_video.exists():
             if show_progress:
-                print("[SSD] Moviendo video final al disco destino...")
+                log_verbose("[SSD] Moviendo video final al disco destino...")
             shutil.move(str(output_video), str(final_dest))
         if temp_folder_path.exists():
             shutil.rmtree(temp_folder_path)
@@ -1934,11 +2033,11 @@ def render_video_with_cpp(
     destination_folder = move_folder_to_upload(original_folder_path, folder_name, show_progress)
     elapsed = time.time() - start_time
     if show_progress:
-        print(f"\n[ÉXITO] {folder_name} renderizado en {format_time(elapsed)}")
-        print(f"[UPLOAD] Carpeta movida a: {destination_folder}")
+        log_verbose(f"\n[ÉXITO] {folder_name} renderizado en {format_time(elapsed)}")
+        log_verbose(f"[UPLOAD] Carpeta movida a: {destination_folder}")
     else:
-        print(f"[ÉXITO] {folder_name} renderizado en {elapsed:.1f}s")
-        print(f"[UPLOAD] Carpeta movida a: {destination_folder}")
+        log_verbose(f"[ÉXITO] {folder_name} renderizado en {elapsed:.1f}s")
+        log_verbose(f"[UPLOAD] Carpeta movida a: {destination_folder}")
 
     return True, None
 
@@ -1954,7 +2053,7 @@ def render_video(folder_path, folder_name, show_progress=False):
 
     try:
         if not show_progress:
-            print(f"[INICIO] Procesando: {folder_name}")
+            log_verbose(f"[INICIO] Procesando: {folder_name}")
         start_time = time.time()
 
         # ================================================================
@@ -1965,7 +2064,7 @@ def render_video(folder_path, folder_name, show_progress=False):
             temp_folder_path = SSD_TEMP_DIR / folder_name
 
             if show_progress:
-                print(f"[SSD] Copiando a SSD local...")
+                log_verbose("[SSD] Copiando a SSD local...")
 
             # Copiar solo archivos necesarios (no el video si ya existe)
             if temp_folder_path.exists():
@@ -1980,7 +2079,7 @@ def render_video(folder_path, folder_name, show_progress=False):
             folder_path = temp_folder_path
 
             if show_progress:
-                print(f"[SSD] Listo - renderizando desde NVMe")
+                log_verbose("[SSD] Listo - renderizando desde NVMe")
 
         # ================================================================
         # PASO 2: Buscar archivos necesarios
@@ -2004,14 +2103,14 @@ def render_video(folder_path, folder_name, show_progress=False):
         audio_files.sort(key=lambda x: x.name.lower())
 
         if cover_file and not is_valid_image(cover_file):
-            print(f"[COVER] Portada dañada: {cover_file.name}, intentando otra...")
+            log_verbose(f"[COVER] Portada dañada: {cover_file.name}, intentando otra...")
             cover_file = None
 
         if not cover_file and audio_files:
             if show_progress:
-                print("[COVER] Portada no encontrada, buscando en metadata...")
+                log_verbose("[COVER] Portada no encontrada, buscando en metadata...")
             else:
-                print(f"[COVER] {folder_name} portada no encontrada, buscando en metadata...")
+                log_verbose(f"[COVER] {folder_name} portada no encontrada, buscando en metadata...")
 
             cover_file = extract_cover_from_audio_files(
                 audio_files,
@@ -2020,20 +2119,21 @@ def render_video(folder_path, folder_name, show_progress=False):
             )
             if cover_file:
                 if show_progress:
-                    print(f"[COVER] Portada extraida: {cover_file.name}")
+                    log_verbose(f"[COVER] Portada extraida: {cover_file.name}")
                 else:
-                    print(f"[COVER] {folder_name} portada extraida: {cover_file.name}")
+                    log_verbose(f"[COVER] {folder_name} portada extraida: {cover_file.name}")
 
         if cover_file and not is_valid_image(cover_file):
-            print(f"[COVER] Portada invalida: {cover_file.name}")
+            log_verbose(f"[COVER] Portada invalida: {cover_file.name}")
             cover_file = None
 
         if not audio_files or not cover_file:
-            print(f"[ERROR] Archivos faltantes en {folder_name} (audios: {len(audio_files)}, cover: {cover_file is not None})")
+            if USE_SSD_TEMP and temp_folder_path and temp_folder_path.exists():
+                shutil.rmtree(temp_folder_path)
             return False
 
         if show_progress and len(audio_files) > 1:
-            print(f"[INFO] {len(audio_files)} pistas de audio encontradas, concatenando en orden...")
+            log_verbose(f"[INFO] {len(audio_files)} pistas de audio encontradas, concatenando en orden...")
 
         cover_main = cover_file
         cover_overlay = None
@@ -2064,9 +2164,9 @@ def render_video(folder_path, folder_name, show_progress=False):
         if USE_CPP_VHS:
             api_titles = obtener_tracklist_deathgrind(folder_name, len(audio_files))
             if api_titles:
-                print(f"[TRACKLIST] {folder_name} titulos obtenidos desde DeathGrind.")
+                log_verbose(f"[TRACKLIST] {folder_name} titulos obtenidos desde DeathGrind.")
             else:
-                print(f"[TRACKLIST] {folder_name} usando titulos de audio local.")
+                log_verbose(f"[TRACKLIST] {folder_name} usando titulos de audio local.")
             tracks = build_tracklist(audio_files, folder_name=folder_name, api_titles=api_titles)
             if tracks and cover_overlay:
                 overlays_dir = folder_path / "_track_overlays"
@@ -2086,16 +2186,16 @@ def render_video(folder_path, folder_name, show_progress=False):
         output_audio_bitrate = pick_output_audio_bitrate(audio_files)
 
         if show_progress:
-            print(f"\n[RENDERIZANDO] {folder_name}")
-            print(f"Duración estimada: {format_time(total_duration)}")
-            print("")
+            log_verbose(f"\n[RENDERIZANDO] {folder_name}")
+            log_verbose(f"Duración estimada: {format_time(total_duration)}")
+            log_verbose("")
 
         if USE_CPP_VHS:
             if DISABLE_CPP_ON_CUDA and CUDA_ERROR_FLAG.exists():
                 if show_progress:
-                    print("[COVER] C++ desactivado por error CUDA previo, usando FFmpeg...")
+                    log_verbose("[COVER] C++ desactivado por error CUDA previo, usando FFmpeg...")
                 else:
-                    print(f"[COVER] {folder_name} usando FFmpeg por error CUDA previo...")
+                    log_verbose(f"[COVER] {folder_name} usando FFmpeg por error CUDA previo...")
             else:
                 cpp_success, cpp_error = render_video_with_cpp(
                     folder_path=folder_path,
@@ -2123,9 +2223,9 @@ def render_video(folder_path, folder_name, show_progress=False):
                 if cpp_error != "cuda" or not ALLOW_FFMPEG_FALLBACK:
                     return False
                 if show_progress:
-                    print("[FALLBACK] CUDA falló, usando FFmpeg para este álbum...")
+                    log_verbose("[FALLBACK] CUDA falló, usando FFmpeg para este álbum...")
                 else:
-                    print(f"[FALLBACK] {folder_name} usando FFmpeg por error CUDA...")
+                    log_verbose(f"[FALLBACK] {folder_name} usando FFmpeg por error CUDA...")
                 for suffix in ("__video.mp4", "__audio.m4a"):
                     tmp_file = folder_path / f"{folder_name}{suffix}"
                     if tmp_file.exists():
@@ -2371,23 +2471,23 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                     final_video = original_folder_path / f"{folder_name}.mp4"
                     if output_video.exists():
                         if show_progress:
-                            print(f"[SSD] Moviendo video a disco destino...")
+                            log_verbose("[SSD] Moviendo video a disco destino...")
                         shutil.move(str(output_video), str(final_video))
                         shutil.rmtree(temp_folder_path)  # Limpiar temporal
                         if show_progress:
-                            print(f"[SSD] Limpieza completada")
+                            log_verbose("[SSD] Limpieza completada")
 
                 elapsed = time.time() - start_time
                 destination_folder = move_folder_to_upload(original_folder_path, folder_name, show_progress)
-                print(f"\n[ÉXITO] {folder_name} renderizado en {format_time(elapsed)}")
-                print(f"[UPLOAD] Carpeta movida a: {destination_folder}")
+                log_verbose(f"\n[ÉXITO] {folder_name} renderizado en {format_time(elapsed)}")
+                log_verbose(f"[UPLOAD] Carpeta movida a: {destination_folder}")
                 return True
             else:
                 # Limpiar temporales en caso de error
                 if USE_SSD_TEMP and temp_folder_path and temp_folder_path.exists():
                     shutil.rmtree(temp_folder_path)
                 print(f"\n[ERROR] FFmpeg falló en {folder_name}")
-                print(f"STDERR: {stderr_output[-500:]}")
+                log_verbose(f"STDERR: {stderr_output[-500:]}")
                 return False
         else:
             # Modo sin progreso (para renderizado paralelo)
@@ -2410,15 +2510,15 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
 
                 elapsed = time.time() - start_time
                 destination_folder = move_folder_to_upload(original_folder_path, folder_name, show_progress)
-                print(f"[ÉXITO] {folder_name} renderizado en {elapsed:.1f}s")
-                print(f"[UPLOAD] Carpeta movida a: {destination_folder}")
+                log_verbose(f"[ÉXITO] {folder_name} renderizado en {elapsed:.1f}s")
+                log_verbose(f"[UPLOAD] Carpeta movida a: {destination_folder}")
                 return True
             else:
                 # Limpiar temporales en caso de error
                 if USE_SSD_TEMP and temp_folder_path and temp_folder_path.exists():
                     shutil.rmtree(temp_folder_path)
                 print(f"[ERROR] FFmpeg falló en {folder_name}")
-                print(f"STDERR: {result.stderr[-500:]}")
+                log_verbose(f"STDERR: {result.stderr[-500:]}")
                 return False
 
     except Exception as e:
@@ -2449,11 +2549,11 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
     # Limitar cantidad
     folders = folders[:MAX_FOLDERS_TO_PROCESS]
 
-    print(f"\n{'='*60}")
-    print(f"INICIANDO RENDERIZADO PARALELO")
-    print(f"Carpetas a procesar: {len(folders)}")
-    print(f"Renders paralelos: {MAX_PARALLEL_RENDERS}")
-    print(f"{'='*60}\n")
+    log_verbose(f"\n{'='*60}")
+    log_verbose("INICIANDO RENDERIZADO PARALELO")
+    log_verbose(f"Carpetas a procesar: {len(folders)}")
+    log_verbose(f"Renders paralelos: {MAX_PARALLEL_RENDERS}")
+    log_verbose(f"{'='*60}\n")
 
     # Procesar en paralelo
     successful = 0
@@ -2461,7 +2561,7 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
 
     executor = ProcessPoolExecutor(max_workers=MAX_PARALLEL_RENDERS)
     future_to_folder = {
-        executor.submit(render_video, folder_path, folder_name): folder_name
+        executor.submit(render_video, folder_path, folder_name): (folder_path, folder_name)
         for folder_path, folder_name in folders
     }
 
@@ -2469,28 +2569,18 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
     try:
         # Procesar conforme terminan
         for future in as_completed(future_to_folder):
-            folder_name = future_to_folder[future]
+            folder_path, folder_name = future_to_folder[future]
             try:
                 success = future.result()
                 if success:
                     successful += 1
                 else:
                     failed += 1
-                    if staging_ctx:
-                        restore_staged_folder(
-                            staging_ctx["fast_audio"],
-                            staging_ctx["slow_audio"],
-                            folder_name
-                        )
+                    move_folder_to_error(folder_path, folder_name)
             except Exception as e:
                 print(f"[EXCEPCIÓN] Error en {folder_name}: {e}")
                 failed += 1
-                if staging_ctx:
-                    restore_staged_folder(
-                        staging_ctx["fast_audio"],
-                        staging_ctx["slow_audio"],
-                        folder_name
-                    )
+                move_folder_to_error(folder_path, folder_name)
     except KeyboardInterrupt:
         cancelled = True
         print("\n\nRenderizado cancelado por el usuario.")
@@ -2528,67 +2618,82 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
     if cancelled:
         return
 
-    print(f"\n{'='*60}")
-    print(f"RENDERIZADO COMPLETADO")
-    print(f"Exitosos: {successful}")
-    print(f"Fallidos: {failed}")
-    print(f"{'='*60}\n")
+    log_verbose(f"\n{'='*60}")
+    log_verbose("RENDERIZADO COMPLETADO")
+    log_verbose(f"Exitosos: {successful}")
+    log_verbose(f"Fallidos: {failed}")
+    log_verbose(f"{'='*60}\n")
 
 
-def process_folders_sequential():
+def process_folders_sequential(folders_override=None, staging_ctx=None):
     """
     Procesa carpetas secuencialmente (1 a la vez) con barra de progreso
     """
-    # Recoger todas las carpetas
-    folders = [
-        (MAIN_DIR / folder_name, folder_name)
-        for folder_name in os.listdir(MAIN_DIR)
-        if (MAIN_DIR / folder_name).is_dir()
-    ]
+    if folders_override is not None:
+        folders = folders_override
+    else:
+        # Recoger todas las carpetas
+        folders = [
+            (MAIN_DIR / folder_name, folder_name)
+            for folder_name in os.listdir(MAIN_DIR)
+            if (MAIN_DIR / folder_name).is_dir()
+        ]
 
     # Prioridad por año (más reciente primero), con mezcla opcional dentro del mismo año
     folders = order_folders_by_year(folders, shuffle_within_year=STAGING_SHUFFLE)
 
     # Limitar cantidad
     folders = folders[:MAX_FOLDERS_TO_PROCESS]
+    total = len(folders)
+    if total == 0:
+        print("ERROR: No hay carpetas para procesar")
+        return
 
     print(f"\n{'='*60}")
     print(f"INICIANDO RENDERIZADO SECUENCIAL")
-    print(f"Carpetas a procesar: {len(folders)}")
+    print(f"Carpetas a procesar: {total}")
+    print(f"[PROGRESO] Completados: 0/{total} | Faltan: {total}")
     print(f"{'='*60}")
 
     # Procesar secuencialmente
     successful = 0
     failed = 0
     total_start_time = time.time()
+    cancelled = False
 
-    for i, (folder_path, folder_name) in enumerate(folders, 1):
-        print(f"\n[{i}/{len(folders)}] ", end="")
-        success = render_video(folder_path, folder_name, show_progress=True)
+    try:
+        for i, (folder_path, folder_name) in enumerate(folders, 1):
+            print(f"\n[INICIO] ({i}/{total}) Procesando: {folder_name}")
+            success = render_video(folder_path, folder_name, show_progress=True)
 
-        if success:
-            successful += 1
-        else:
-            failed += 1
+            if success:
+                successful += 1
+            else:
+                failed += 1
+                move_folder_to_error(folder_path, folder_name)
 
-        # Mostrar estadísticas parciales
-        total_elapsed = time.time() - total_start_time
-        avg_time = total_elapsed / i
-        remaining = len(folders) - i
-        eta_total = remaining * avg_time
+            # Mostrar estadísticas parciales
+            remaining = total - i
 
-        print(f"\nProgreso total: {i}/{len(folders)} videos")
-        print(f"Exitosos: {successful} | Fallidos: {failed}")
-        print(f"Tiempo promedio por video: {format_time(avg_time)}")
-        print(f"ETA para completar todos: {format_time(eta_total)}")
-        print(f"{'='*60}")
+            print(f"\n[PROGRESO] Completados: {i}/{total} | Faltan: {remaining}")
+    except KeyboardInterrupt:
+        cancelled = True
+        print("\n\nRenderizado cancelado por el usuario.")
 
-    total_elapsed = time.time() - total_start_time
+    if cancelled:
+        cleanup_temp()
+        if staging_ctx:
+            for name in staging_ctx.get("staged_names", set()):
+                restore_staged_folder(
+                    staging_ctx["fast_audio"],
+                    staging_ctx["slow_audio"],
+                    name
+                )
+        return
+
     print(f"\n{'='*60}")
-    print(f"RENDERIZADO COMPLETADO")
-    print(f"Tiempo total: {format_time(total_elapsed)}")
-    print(f"Exitosos: {successful}")
-    print(f"Fallidos: {failed}")
+    print("RENDERIZADO COMPLETADO")
+    print(f"[PROGRESO] Completados: {total}/{total} | Faltan: 0")
     print(f"{'='*60}\n")
 
 
@@ -2629,9 +2734,10 @@ def render_single_video(specific_folder=None):
     print(f"\n{'='*60}")
     if success:
         print(f"PRUEBA COMPLETADA EXITOSAMENTE")
-        print(f"Carpeta final: {DIR_UPLOAD} (revisa [UPLOAD] para el nombre final)")
+        log_verbose(f"Carpeta final: {DIR_UPLOAD} (revisa [UPLOAD] para el nombre final)")
     else:
         print(f"PRUEBA FALLIDA")
+        move_folder_to_error(folder_path, folder_name)
     print(f"{'='*60}\n")
 
 
@@ -2674,7 +2780,7 @@ if __name__ == "__main__":
                 process_folders_parallel()
             elif sys.argv[1] == "--help" or sys.argv[1] == "-h":
                 print("\nUso:")
-                print(f"  python '{Path(__file__).name}'                        # Renderizado paralelo ({MAX_PARALLEL_RENDERS} videos simultáneos)")
+                print(f"  python '{Path(__file__).name}'                        # Renderizado secuencial (1 video a la vez)")
                 print(f"  python '{Path(__file__).name}' --test                 # Prueba con 1 video aleatorio + barra de progreso")
                 print(f"  python '{Path(__file__).name}' --test /ruta/carpeta   # Prueba con carpeta específica")
                 print(f"  python '{Path(__file__).name}' -t                     # Igual que --test")
@@ -2685,9 +2791,9 @@ if __name__ == "__main__":
                 print(f"Argumento desconocido: {sys.argv[1]}")
                 print("Usa --help para ver opciones")
         else:
-            # Modo normal: renderizado paralelo (con staging opcional)
+            # Modo normal: renderizado secuencial (con staging opcional)
             folders_override, staging_ctx = prepare_staging_batch()
-            process_folders_parallel(folders_override=folders_override, staging_ctx=staging_ctx)
+            process_folders_sequential(folders_override=folders_override, staging_ctx=staging_ctx)
 
     except KeyboardInterrupt:
         print("\n\nRenderizado cancelado por el usuario.")
