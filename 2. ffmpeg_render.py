@@ -17,6 +17,7 @@ import re
 import shutil
 from mutagen import File as MutagenFile
 from effects.sombra import add_shadow
+from limpieza.censura import censor_profanity
 
 # Importar configuración
 sys.path.append(str(Path(__file__).parent))
@@ -26,6 +27,7 @@ from config import (
     INTRO_VIDEO,
     MAX_PARALLEL_RENDERS,
     MAX_FOLDERS_TO_PROCESS,
+    MIN_FREE_SPACE_GB,
     VIDEO_WIDTH,
     VIDEO_HEIGHT,
     FPS,
@@ -55,7 +57,10 @@ from config import (
     ALLOW_FFMPEG_FALLBACK,
     DISABLE_CPP_ON_CUDA,
     CUDA_FAIL_FAST,
-    DIR_ERROR404
+    DIR_ERROR404,
+    USE_RAMDISK,
+    RAMDISK_SIZE_GB,
+    RAMDISK_PATH,
 )
 
 # ============================================================================
@@ -98,6 +103,10 @@ API_URL = f"{BASE_URL}/api"
 DELAY_BASE_429 = 30
 MAX_RETRIES_429 = int(os.environ.get("DEATHGRIND_MAX_429", "1"))
 
+CENSORED_DIR = Path(
+    "/run/media/banar/Entretenimiento/01_edicion_automatizada/Censurado"
+)
+
 
 # ============================================================================
 # FUNCIONES AUXILIARES
@@ -115,6 +124,179 @@ MINIMAL_OUTPUT = True
 def log_verbose(message: str):
     if not MINIMAL_OUTPUT:
         print(message)
+
+
+def get_free_space_gb(path: Path) -> float:
+    """
+    Obtiene el espacio libre en GB del disco donde está ubicado el path.
+    """
+    try:
+        stat = shutil.disk_usage(path)
+        return stat.free / (1024**3)
+    except Exception:
+        # Si no se puede obtener, asumimos que hay espacio suficiente
+        return float("inf")
+
+
+def has_enough_disk_space(min_gb: float = None) -> bool:
+    """
+    Verifica si hay suficiente espacio libre en DIR_UPLOAD.
+    Retorna True si hay >= min_gb libres, False si hay menos.
+    """
+    if min_gb is None:
+        min_gb = MIN_FREE_SPACE_GB
+    free_gb = get_free_space_gb(DIR_UPLOAD)
+    return free_gb >= min_gb
+
+
+def format_size_gb(gb: float) -> str:
+    """
+    Formatea un tamaño en GB de manera legible.
+    """
+    if gb >= 1000:
+        return f"{gb / 1000:.1f} TB"
+    return f"{gb:.1f} GB"
+
+
+# ============================================================================
+# RAMDISK (TMPFS) - Máxima velocidad de I/O
+# ============================================================================
+
+RAMDISK_MOUNTED = False
+
+
+def is_ramdisk_mounted() -> bool:
+    """
+    Verifica si el ramdisk ya está montado.
+    """
+    if not RAMDISK_PATH.exists():
+        return False
+    try:
+        result = subprocess.run(
+            ["mountpoint", "-q", str(RAMDISK_PATH)],
+            capture_output=True,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def mount_ramdisk() -> bool:
+    """
+    Monta el ramdisk (tmpfs) automáticamente.
+    Requiere que sudo funcione sin password para mount.
+    """
+    global RAMDISK_MOUNTED
+
+    if not USE_RAMDISK:
+        return False
+
+    if is_ramdisk_mounted():
+        RAMDISK_MOUNTED = True
+        log_verbose(f"[RAMDISK] Ya montado en {RAMDISK_PATH}")
+        return True
+
+    try:
+        # Crear directorio si no existe
+        RAMDISK_PATH.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        # Intentar con sudo
+        result = subprocess.run(
+            ["sudo", "mkdir", "-p", str(RAMDISK_PATH)],
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            print(f"[RAMDISK] Error creando directorio: {result.stderr.decode()}")
+            return False
+
+    # Montar tmpfs
+    size_arg = f"size={RAMDISK_SIZE_GB}G"
+    result = subprocess.run(
+        ["sudo", "mount", "-t", "tmpfs", "-o", size_arg, "tmpfs", str(RAMDISK_PATH)],
+        capture_output=True,
+    )
+
+    if result.returncode != 0:
+        stderr = result.stderr.decode().strip()
+        print(f"[RAMDISK] Error montando: {stderr}")
+        print("[RAMDISK] Asegúrate de que sudo funcione sin password o ejecuta:")
+        print(f"  sudo mount -t tmpfs -o {size_arg} tmpfs {RAMDISK_PATH}")
+        return False
+
+    # Cambiar permisos para que el usuario pueda escribir
+    subprocess.run(
+        ["sudo", "chown", f"{os.getuid()}:{os.getgid()}", str(RAMDISK_PATH)],
+        capture_output=True,
+    )
+
+    RAMDISK_MOUNTED = True
+    print(f"[RAMDISK] Montado: {RAMDISK_PATH} ({RAMDISK_SIZE_GB} GB)")
+    return True
+
+
+def unmount_ramdisk() -> bool:
+    """
+    Desmonta el ramdisk de forma segura.
+    """
+    global RAMDISK_MOUNTED
+
+    if not RAMDISK_MOUNTED and not is_ramdisk_mounted():
+        return True
+
+    # Limpiar contenido primero
+    try:
+        for item in RAMDISK_PATH.iterdir():
+            if item.is_dir():
+                shutil.rmtree(item)
+            else:
+                item.unlink()
+    except Exception:
+        pass
+
+    result = subprocess.run(
+        ["sudo", "umount", str(RAMDISK_PATH)],
+        capture_output=True,
+    )
+
+    if result.returncode != 0:
+        stderr = result.stderr.decode().strip()
+        # Si ya no está montado, no es error
+        if "not mounted" in stderr.lower():
+            RAMDISK_MOUNTED = False
+            return True
+        print(f"[RAMDISK] Error desmontando: {stderr}")
+        return False
+
+    RAMDISK_MOUNTED = False
+    log_verbose(f"[RAMDISK] Desmontado: {RAMDISK_PATH}")
+    return True
+
+
+def get_temp_dir() -> Path:
+    """
+    Retorna el directorio temporal a usar (ramdisk > SSD).
+    """
+    if USE_RAMDISK and RAMDISK_MOUNTED:
+        return RAMDISK_PATH
+    return SSD_TEMP_DIR
+
+
+def ensure_fast_storage() -> bool:
+    """
+    Asegura que el almacenamiento rápido esté disponible.
+    Intenta ramdisk primero, luego SSD.
+    """
+    if USE_RAMDISK:
+        if mount_ramdisk():
+            return True
+        print("[RAMDISK] Fallback a SSD...")
+
+    # Fallback a SSD
+    if USE_SSD_TEMP:
+        SSD_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        return True
+
+    return False
 
 
 def resolve_rel_path(path: Path, base: Path) -> Path:
@@ -192,12 +374,16 @@ def guess_folder_release_year(folder_path: Path):
     return year
 
 
-def order_folders_by_year(entries, shuffle_within_year=True):
+def order_folders_by_year(entries, shuffle_within_year=True, show_progress=False):
     if not entries:
         return entries
 
     buckets = {}
-    for entry in entries:
+    total = len(entries)
+    if show_progress and total > 20:
+        print(f"[ORDEN] Analizando años de {total} carpetas...")
+
+    for i, entry in enumerate(entries, 1):
         if isinstance(entry, tuple) and len(entry) >= 2:
             path = entry[0]
             name = entry[1]
@@ -206,6 +392,13 @@ def order_folders_by_year(entries, shuffle_within_year=True):
             name = entry.name
         year = guess_folder_release_year(path)
         buckets.setdefault(year, []).append((entry, name))
+
+        if show_progress and total > 20 and (i % 50 == 0 or i == total):
+            sys.stdout.write(f"\r[ORDEN] Progreso: {i}/{total} carpetas analizadas")
+            sys.stdout.flush()
+
+    if show_progress and total > 20:
+        print()
 
     years = sorted([y for y in buckets.keys() if y is not None], reverse=True)
     if None in buckets:
@@ -223,7 +416,9 @@ def order_folders_by_year(entries, shuffle_within_year=True):
     return ordered
 
 
-def stage_folders_to_fast(slow_audio: Path, fast_audio: Path, batch_size: int, shuffle: bool):
+def stage_folders_to_fast(
+    slow_audio: Path, fast_audio: Path, batch_size: int, shuffle: bool
+):
     """
     Mueve un lote de carpetas desde HDD a NVMe para render.
     """
@@ -231,7 +426,9 @@ def stage_folders_to_fast(slow_audio: Path, fast_audio: Path, batch_size: int, s
     if not folders:
         return []
 
-    folders = order_folders_by_year(folders, shuffle_within_year=shuffle)
+    folders = order_folders_by_year(
+        folders, shuffle_within_year=shuffle, show_progress=True
+    )
 
     batch_size = max(1, batch_size)
     batch = folders[:batch_size]
@@ -239,15 +436,22 @@ def stage_folders_to_fast(slow_audio: Path, fast_audio: Path, batch_size: int, s
     fast_audio.mkdir(parents=True, exist_ok=True)
 
     staged = []
-    for folder in batch:
+    total = len(batch)
+    print(f"[STAGING] Moviendo {total} carpetas de HDD a NVMe...")
+    for i, folder in enumerate(batch, 1):
         dest = fast_audio / folder.name
         if dest.exists():
             continue
         try:
             shutil.move(str(folder), str(dest))
             staged.append(dest)
+            # Mostrar progreso cada 10 carpetas o al final
+            if i % 10 == 0 or i == total:
+                sys.stdout.write(f"\r[STAGING] Progreso: {i}/{total} carpetas")
+                sys.stdout.flush()
         except Exception as exc:
-            log_verbose(f"[STAGING] Error moviendo {folder.name}: {exc}")
+            log_verbose(f"\n[STAGING] Error moviendo {folder.name}: {exc}")
+    print(f"\n[STAGING] Listo: {len(staged)} carpetas movidas")
     return staged
 
 
@@ -298,13 +502,19 @@ def prepare_staging_batch():
             fast_base.mkdir(parents=True, exist_ok=True)
             log_verbose(f"[STAGING] Carpeta NVMe creada: {fast_base}")
         except PermissionError:
-            log_verbose(f"[STAGING] Sin permisos para crear {fast_base}. Se omite staging.")
+            log_verbose(
+                f"[STAGING] Sin permisos para crear {fast_base}. Se omite staging."
+            )
             return None, None
         except Exception as exc:
-            log_verbose(f"[STAGING] Error creando {fast_base}: {exc}. Se omite staging.")
+            log_verbose(
+                f"[STAGING] Error creando {fast_base}: {exc}. Se omite staging."
+            )
             return None, None
     elif not fast_base.is_dir():
-        log_verbose(f"[STAGING] La ruta NVMe no es carpeta: {fast_base}. Se omite staging.")
+        log_verbose(
+            f"[STAGING] La ruta NVMe no es carpeta: {fast_base}. Se omite staging."
+        )
         return None, None
 
     audio_rel = resolve_rel_path(DIR_AUDIO_SCRIPTS, DEFAULT_BASE_DIR)
@@ -316,11 +526,15 @@ def prepare_staging_batch():
     slow_upload = DEFAULT_BASE_DIR / upload_rel
 
     if list_folders(fast_audio) or list_folders(fast_upload):
-        log_verbose("[STAGING] NVMe no está vacío. Intentando devolver carpetas al HDD...")
+        log_verbose(
+            "[STAGING] NVMe no está vacío. Intentando devolver carpetas al HDD..."
+        )
         ok_audio = restore_all_staged_folders(fast_audio, slow_audio, "audio")
         ok_upload = restore_all_staged_folders(fast_upload, slow_upload, "upload")
         if not (ok_audio and ok_upload):
-            log_verbose("[STAGING] No se pudo limpiar el NVMe completamente. Revisa manualmente.")
+            log_verbose(
+                "[STAGING] No se pudo limpiar el NVMe completamente. Revisa manualmente."
+            )
             return None, None
         if list_folders(fast_audio) or list_folders(fast_upload):
             log_verbose("[STAGING] NVMe sigue con carpetas. Revisa manualmente.")
@@ -370,7 +584,7 @@ def nvenc_available() -> bool:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            errors="replace"
+            errors="replace",
         )
         return result.returncode == 0
     except FileNotFoundError:
@@ -430,7 +644,9 @@ def get_unique_file_path(base_dir: Path, filename: str) -> Path:
         counter += 1
 
 
-def move_folder_to_upload(source_folder: Path, folder_name: str, show_progress: bool) -> Path:
+def move_folder_to_upload(
+    source_folder: Path, folder_name: str, show_progress: bool
+) -> Path:
     """
     Mueve la carpeta renderizada a la carpeta de subida.
     """
@@ -470,12 +686,27 @@ def move_folder_to_error(source_folder: Path, folder_name: str, reason=None):
         return None
 
 
+def move_folder_to_censored(source_folder: Path, folder_name: str, reason=None):
+    CENSORED_DIR.mkdir(parents=True, exist_ok=True)
+    if not source_folder.exists():
+        return None
+    destination = get_unique_destination(CENSORED_DIR, folder_name)
+    try:
+        shutil.move(str(source_folder), str(destination))
+        label = f" ({reason})" if reason else ""
+        print(f"[CENSURA] {folder_name} movido a revision{label}")
+        return destination
+    except Exception as exc:
+        print(f"[CENSURA] No se pudo mover {folder_name} a revision: {exc}")
+        return None
+
+
 def get_complementary_color(r, g, b):
     """
     Calcula el color complementario de un RGB dado
     (mismo algoritmo que en auto_effects.py)
     """
-    r, g, b = r/255.0, g/255.0, b/255.0
+    r, g, b = r / 255.0, g / 255.0, b / 255.0
     mx = max(r, g, b)
     mn = min(r, g, b)
     diff = mx - mn
@@ -483,13 +714,13 @@ def get_complementary_color(r, g, b):
     if mx == mn:
         h = 0
     elif mx == r:
-        h = (60 * ((g-b)/diff) + 360) % 360
+        h = (60 * ((g - b) / diff) + 360) % 360
     elif mx == g:
-        h = (60 * ((b-r)/diff) + 120) % 360
+        h = (60 * ((b - r) / diff) + 120) % 360
     else:
-        h = (60 * ((r-g)/diff) + 240) % 360
+        h = (60 * ((r - g) / diff) + 240) % 360
 
-    s = 0 if mx == 0 else (diff/mx)
+    s = 0 if mx == 0 else (diff / mx)
     v = mx
 
     # Calcular el color complementario (rotar 180°)
@@ -527,8 +758,8 @@ def extract_average_color(image_path):
     try:
         img = Image.open(image_path)
         # Convertir a RGB si es necesario
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
+        if img.mode != "RGB":
+            img = img.convert("RGB")
 
         # Calcular color promedio
         data = np.array(img)
@@ -572,7 +803,9 @@ def find_base_cover_for_shadow(shadow_path: Path):
     return None
 
 
-def ensure_shadow_cover(cover_path: Path, folder_path: Path, original_folder_path: Path):
+def ensure_shadow_cover(
+    cover_path: Path, folder_path: Path, original_folder_path: Path
+):
     """
     Genera una portada con sombra si no existe y devuelve su ruta.
     """
@@ -602,7 +835,7 @@ def ensure_shadow_cover(cover_path: Path, folder_path: Path, original_folder_pat
                 SHADOW_OPACITY,
                 SHADOW_DIRECTION,
                 SHADOW_DISTANCE,
-                SHADOW_SOFTNESS
+                SHADOW_SOFTNESS,
             )
         except Exception as e:
             log_verbose(f"[COVER] Error creando sombra: {e}")
@@ -668,11 +901,19 @@ def clean_track_title(title: str, band_name, album_name, fallback_title: str) ->
             cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
 
     if band:
-        cleaned = re.sub(rf"^\s*{re.escape(band)}\s*[-–:|]+\s*", "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(rf"\s*[-–:|]+\s*{re.escape(band)}\s*$", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(
+            rf"^\s*{re.escape(band)}\s*[-–:|]+\s*", "", cleaned, flags=re.IGNORECASE
+        )
+        cleaned = re.sub(
+            rf"\s*[-–:|]+\s*{re.escape(band)}\s*$", "", cleaned, flags=re.IGNORECASE
+        )
     if album:
-        cleaned = re.sub(rf"^\s*{re.escape(album)}\s*[-–:|]+\s*", "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(rf"\s*[-–:|]+\s*{re.escape(album)}\s*$", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(
+            rf"^\s*{re.escape(album)}\s*[-–:|]+\s*", "", cleaned, flags=re.IGNORECASE
+        )
+        cleaned = re.sub(
+            rf"\s*[-–:|]+\s*{re.escape(album)}\s*$", "", cleaned, flags=re.IGNORECASE
+        )
 
     cleaned = cleaned.strip()
     if not cleaned:
@@ -681,7 +922,12 @@ def clean_track_title(title: str, band_name, album_name, fallback_title: str) ->
     band_norm = normalize_compare(band) if band else ""
     album_norm = normalize_compare(album) if album else ""
     title_norm = normalize_compare(cleaned)
-    if title_norm in {band_norm, album_norm, f"{band_norm} {album_norm}", f"{album_norm} {band_norm}"}:
+    if title_norm in {
+        band_norm,
+        album_norm,
+        f"{band_norm} {album_norm}",
+        f"{album_norm} {band_norm}",
+    }:
         cleaned = normalize_track_title(fallback_title) or fallback_title
     return cleaned
 
@@ -708,14 +954,18 @@ def crear_sesion_autenticada():
     email = os.environ.get("DEATHGRIND_EMAIL")
     password = os.environ.get("DEATHGRIND_PASSWORD")
     if not email or not password:
-        log_verbose("[TRACKLIST] Credenciales DeathGrind no encontradas, se usa audio local.")
+        log_verbose(
+            "[TRACKLIST] Credenciales DeathGrind no encontradas, se usa audio local."
+        )
         return None
 
     session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/131.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-    })
+    session.headers.update(
+        {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+        }
+    )
 
     try:
         session.get(f"{BASE_URL}/auth/sign-in", timeout=30)
@@ -757,7 +1007,9 @@ def api_get(session, endpoint, params=None, max_retries=5):
                     log_verbose("[TRACKLIST] Rate limit DeathGrind, se omite API.")
                     return None
                 wait_time = DELAY_BASE_429 * retries_429
-                log_verbose(f"[TRACKLIST] Rate limit DeathGrind, esperando {wait_time}s...")
+                log_verbose(
+                    f"[TRACKLIST] Rate limit DeathGrind, esperando {wait_time}s..."
+                )
                 time.sleep(wait_time)
                 continue
             if response.status_code != 200:
@@ -786,7 +1038,9 @@ def get_repertorio_csv_path():
     csv_path = os.environ.get("DEATHGRIND_REPERTORIO_CSV")
     if csv_path:
         return csv_path
-    default_csv = Path("/home/banar/Desktop/scrapper-deathgrind/data/bandas_completo.csv")
+    default_csv = Path(
+        "/home/banar/Desktop/scrapper-deathgrind/data/bandas_completo.csv"
+    )
     if default_csv.exists():
         return str(default_csv)
     return None
@@ -817,7 +1071,9 @@ def buscar_post_id_en_csv(csv_path, band_name, album_name):
                 except Exception:
                     bands = [bands_raw]
                 bands = [band for band in bands if band]
-                if bands and not any(normalize_name(band) == norm_band for band in bands):
+                if bands and not any(
+                    normalize_name(band) == norm_band for band in bands
+                ):
                     continue
                 post_id = row.get("post_id")
                 if post_id:
@@ -859,7 +1115,9 @@ def buscar_post_id_en_api(session, band_name, album_name):
 
     offset = data.get("offset")
     while data.get("hasMore") and offset is not None:
-        data = api_get(session, "/posts/filter", params={"search": query, "offset": offset})
+        data = api_get(
+            session, "/posts/filter", params={"search": query, "offset": offset}
+        )
         if not data:
             break
         posts = data.get("posts", [])
@@ -928,7 +1186,14 @@ def parse_track_title_item(item):
 
 def parse_track_number_item(item):
     if isinstance(item, dict):
-        for key in ("trackNumber", "track_number", "track", "position", "index", "number"):
+        for key in (
+            "trackNumber",
+            "track_number",
+            "track",
+            "position",
+            "index",
+            "number",
+        ):
             value = item.get(key)
             track_number = parse_track_number(value)
             if track_number is not None:
@@ -967,7 +1232,9 @@ def parse_tracklist_raw(raw):
         return []
 
     if any(track_number is not None for track_number, _idx, _title in entries):
-        entries.sort(key=lambda item: (item[0] if item[0] is not None else 9999, item[1]))
+        entries.sort(
+            key=lambda item: (item[0] if item[0] is not None else 9999, item[1])
+        )
     return [title for _track_number, _idx, title in entries]
 
 
@@ -1030,14 +1297,17 @@ def build_tracklist(audio_files, folder_name=None, api_titles=None):
             title = clean_track_title(audio_file.stem, band_name, album_name, fallback)
         if not title:
             title = normalize_track_title(fallback) or fallback
+        title = censor_profanity(title)
         start = current
         end = current + duration
-        tracks.append({
-            "index": idx,
-            "title": title,
-            "start": start,
-            "end": end,
-        })
+        tracks.append(
+            {
+                "index": idx,
+                "title": title,
+                "start": start,
+                "end": end,
+            }
+        )
         current = end
     return tracks
 
@@ -1119,7 +1389,9 @@ def font_line_height(font, fallback_size: int) -> int:
         return fallback_size
 
 
-def wrap_text_lines(draw: ImageDraw.ImageDraw, text: str, font, max_width: int, max_lines: int):
+def wrap_text_lines(
+    draw: ImageDraw.ImageDraw, text: str, font, max_width: int, max_lines: int
+):
     """
     Divide un texto en varias lineas sin exceder el ancho.
     """
@@ -1176,7 +1448,7 @@ def generate_tracklist_overlays(
     tracks,
     output_dir: Path,
     width: int,
-    height: int
+    height: int,
 ):
     """
     Genera overlays PNG con portada izquierda y lista de canciones.
@@ -1243,7 +1515,9 @@ def generate_tracklist_overlays(
         highlight_text_height = font_line_height(highlight_font, highlight_size)
 
         base_line_height = int(base_text_height * (1.0 + TRACKLIST_LINE_SPACING))
-        highlight_line_height = int(highlight_text_height * (1.0 + TRACKLIST_LINE_SPACING))
+        highlight_line_height = int(
+            highlight_text_height * (1.0 + TRACKLIST_LINE_SPACING)
+        )
 
         dummy = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(dummy)
@@ -1303,7 +1577,9 @@ def generate_tracklist_overlays(
     cover_y = int((height - cover_height) / 2)
 
     text_color = text_color or (255, 255, 255)
-    base_luminance = 0.299 * text_color[0] + 0.587 * text_color[1] + 0.114 * text_color[2]
+    base_luminance = (
+        0.299 * text_color[0] + 0.587 * text_color[1] + 0.114 * text_color[2]
+    )
     shadow_rgb = (20, 20, 20) if base_luminance > 128 else (240, 240, 240)
     base_alpha = 200
     highlight_alpha = 255
@@ -1315,7 +1591,9 @@ def generate_tracklist_overlays(
     page_line_counts = []
     for start in range(0, total_tracks, page_size):
         end = min(start + page_size, total_tracks)
-        page_line_counts.append(sum(len(line_texts_by_track[i]) for i in range(start, end)))
+        page_line_counts.append(
+            sum(len(line_texts_by_track[i]) for i in range(start, end))
+        )
 
     for highlight_idx in range(total_tracks):
         page_index = highlight_idx // page_size
@@ -1350,7 +1628,10 @@ def generate_tracklist_overlays(
 
             for line_text in lines:
                 shadow_draw.text(
-                    (list_x + TRACKLIST_TEXT_SHADOW_OFFSET, y + TRACKLIST_TEXT_SHADOW_OFFSET),
+                    (
+                        list_x + TRACKLIST_TEXT_SHADOW_OFFSET,
+                        y + TRACKLIST_TEXT_SHADOW_OFFSET,
+                    ),
                     line_text,
                     font=font_to_use,
                     fill=shadow_fill,
@@ -1358,7 +1639,9 @@ def generate_tracklist_overlays(
                 y += line_height
 
         if TRACKLIST_TEXT_SHADOW_BLUR > 0:
-            shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(TRACKLIST_TEXT_SHADOW_BLUR))
+            shadow_layer = shadow_layer.filter(
+                ImageFilter.GaussianBlur(TRACKLIST_TEXT_SHADOW_BLUR)
+            )
         overlay = Image.alpha_composite(overlay, shadow_layer)
         draw = ImageDraw.Draw(overlay)
 
@@ -1381,7 +1664,9 @@ def generate_tracklist_overlays(
     tracklist_path = output_dir / "tracklist.tsv"
     with open(tracklist_path, "w", encoding="utf-8") as f:
         for idx, track in enumerate(tracks):
-            f.write(f"{idx}\t{track['start']:.3f}\t{track['end']:.3f}\t{track['title']}\n")
+            f.write(
+                f"{idx}\t{track['start']:.3f}\t{track['end']:.3f}\t{track['title']}\n"
+            )
 
     return tracklist_path, output_dir
 
@@ -1476,11 +1761,14 @@ def analyze_audio_amplitude(audio_path, fps=30):
         # Usar FFmpeg para extraer volumen RMS
         # Esto es MÁS RÁPIDO que librosa y ya tienes FFmpeg instalado
         cmd = [
-            'ffmpeg',
-            '-i', str(audio_path),
-            '-af', f'astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-',
-            '-f', 'null',
-            '-'
+            "ffmpeg",
+            "-i",
+            str(audio_path),
+            "-af",
+            f"astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
+            "-f",
+            "null",
+            "-",
         ]
 
         result = subprocess.run(
@@ -1488,7 +1776,7 @@ def analyze_audio_amplitude(audio_path, fps=30):
             capture_output=True,
             text=True,
             errors="replace",
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
         )
 
         # Parsear salida (simplificado - usaremos valores fijos para velocidad)
@@ -1517,11 +1805,14 @@ def get_audio_duration(audio_path):
     """
     try:
         cmd = [
-            'ffprobe',
-            '-v', 'error',
-            '-show_entries', 'format=duration',
-            '-of', 'default=noprint_wrappers=1:nokey=1',
-            str(audio_path)
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(audio_path),
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
         return float(result.stdout.strip())
@@ -1535,12 +1826,16 @@ def get_audio_bitrate_kbps(audio_path):
     """
     try:
         cmd = [
-            'ffprobe',
-            '-v', 'error',
-            '-select_streams', 'a:0',
-            '-show_entries', 'stream=bit_rate',
-            '-of', 'default=noprint_wrappers=1:nokey=1',
-            str(audio_path)
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=bit_rate",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(audio_path),
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
         bitrate_str = result.stdout.strip()
@@ -1578,7 +1873,9 @@ def format_time(seconds):
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
-def print_progress_bar(current_time, total_duration, elapsed_time, folder_name, bar_width=25):
+def print_progress_bar(
+    current_time, total_duration, elapsed_time, folder_name, bar_width=25
+):
     """
     Imprime una barra de progreso que se actualiza en la misma línea
     """
@@ -1587,7 +1884,7 @@ def print_progress_bar(current_time, total_duration, elapsed_time, folder_name, 
 
     percentage = min(100, (current_time / total_duration) * 100)
     filled = int(bar_width * percentage / 100)
-    bar = '█' * filled + '░' * (bar_width - filled)
+    bar = "█" * filled + "░" * (bar_width - filled)
 
     # Calcular tiempo restante estimado
     if current_time > 0 and elapsed_time > 0:
@@ -1600,7 +1897,9 @@ def print_progress_bar(current_time, total_duration, elapsed_time, folder_name, 
     eta_str = format_time(eta_seconds)
 
     # \033[K limpia el resto de la línea para evitar basura
-    sys.stdout.write(f'\r\033[K{folder_name[:35]} | {bar} {percentage:5.1f}% | ETA: {eta_str}')
+    sys.stdout.write(
+        f"\r\033[K{folder_name[:35]} | {bar} {percentage:5.1f}% | ETA: {eta_str}"
+    )
     sys.stdout.flush()
 
 
@@ -1616,11 +1915,11 @@ def run_ffmpeg_command(cmd, show_progress, total_duration, folder_name, start_ti
             text=True,
             errors="replace",
             bufsize=1,
-            universal_newlines=True
+            universal_newlines=True,
         )
 
         stderr_output = ""
-        time_pattern = re.compile(r'time=(\d+):(\d+):(\d+\.?\d*)')
+        time_pattern = re.compile(r"time=(\d+):(\d+):(\d+\.?\d*)")
 
         while True:
             line = process.stderr.readline()
@@ -1644,11 +1943,7 @@ def run_ffmpeg_command(cmd, show_progress, total_duration, folder_name, start_ti
         return process.returncode == 0, stderr_output
 
     result = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        errors="replace"
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace"
     )
     return result.returncode == 0, result.stderr
 
@@ -1666,7 +1961,9 @@ def update_cpp_speed(total_duration, elapsed_seconds):
         CPP_SPEED_FACTOR = (CPP_SPEED_FACTOR * 0.7) + (speed * 0.3)
 
 
-def run_cpp_command(cmd, show_progress, extra_env=None, total_duration=None, folder_name=None):
+def run_cpp_command(
+    cmd, show_progress, extra_env=None, total_duration=None, folder_name=None
+):
     """
     Ejecuta el render C++ y retorna (returncode, stderr_text).
     """
@@ -1676,10 +1973,7 @@ def run_cpp_command(cmd, show_progress, extra_env=None, total_duration=None, fol
     if show_progress:
         start_time = time.time()
         process = subprocess.Popen(
-            cmd,
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         speed_factor = CPP_SPEED_FACTOR or CPP_SPEED_FALLBACK
         try:
@@ -1689,7 +1983,9 @@ def run_cpp_command(cmd, show_progress, extra_env=None, total_duration=None, fol
                 if total_duration and folder_name:
                     elapsed = time.time() - start_time
                     current_time = min(total_duration * 0.99, elapsed * speed_factor)
-                    print_progress_bar(current_time, total_duration, elapsed, folder_name)
+                    print_progress_bar(
+                        current_time, total_duration, elapsed, folder_name
+                    )
                 time.sleep(0.5)
         except KeyboardInterrupt:
             process.terminate()
@@ -1710,7 +2006,7 @@ def run_cpp_command(cmd, show_progress, extra_env=None, total_duration=None, fol
         stderr=subprocess.PIPE,
         text=True,
         errors="replace",
-        env=env
+        env=env,
     )
     return result.returncode, result.stderr
 
@@ -1725,6 +2021,7 @@ def is_cuda_failure(stderr_text: str) -> bool:
     )
     return any(pat in stderr_text for pat in patterns)
 
+
 def is_tracking_failure(stderr_text: str) -> bool:
     if not stderr_text:
         return False
@@ -1732,7 +2029,9 @@ def is_tracking_failure(stderr_text: str) -> bool:
     return "tracking_errors.cu" in lowered or "tracking errors" in lowered
 
 
-def cleanup_temp_render(temp_folder_path=None, temp_files=None, track_overlays_path=None):
+def cleanup_temp_render(
+    temp_folder_path=None, temp_files=None, track_overlays_path=None
+):
     """
     Limpieza best-effort de temporales (evita llenar SSD si hay fallos).
     """
@@ -1769,7 +2068,7 @@ def render_video_with_cpp(
     show_progress,
     start_time,
     temp_folder_path,
-    use_gpu
+    use_gpu,
 ):
     """
     Genera el video completo en C++/CUDA y deja el audio al final con FFmpeg.
@@ -1785,7 +2084,7 @@ def render_video_with_cpp(
             cleanup_temp_render(
                 temp_folder_path=temp_folder_path,
                 temp_files=(video_only, audio_only),
-                track_overlays_path=track_overlays_path
+                track_overlays_path=track_overlays_path,
             )
         return False, reason
 
@@ -1801,12 +2100,12 @@ def render_video_with_cpp(
     if num_audios == 1:
         audio_concat_line = "[1:a]acopy[all_music]"
     else:
-        audio_inputs = "".join([f"[{i+1}:a]" for i in range(num_audios)])
+        audio_inputs = "".join([f"[{i + 1}:a]" for i in range(num_audios)])
         audio_concat_line = f"{audio_inputs}concat=n={num_audios}:v=0:a=1[all_music]"
 
     audio_inputs_args = []
     for audio_file in audio_files:
-        audio_inputs_args.extend(['-i', str(audio_file)])
+        audio_inputs_args.extend(["-i", str(audio_file)])
 
     if show_progress:
         log_verbose("[AUDIO] Generando mezcla...")
@@ -1816,27 +2115,37 @@ def render_video_with_cpp(
     audio_filter = f"""
 {audio_concat_line};
 [0:a]atrim=0:{INTRO_DURATION}[intro_audio];
-[all_music]adelay=delays={int(INTRO_DURATION*1000)}:all=1[music_delayed];
+[all_music]adelay=delays={int(INTRO_DURATION * 1000)}:all=1[music_delayed];
 [intro_audio][music_delayed]amix=inputs=2:duration=longest[outa]
 """.strip()
 
     output_audio_bitrate = pick_output_audio_bitrate(audio_files)
 
     audio_cmd = [
-        'ffmpeg',
-        '-y',
-        '-threads', '0',
-        '-i', str(INTRO_VIDEO),
+        "ffmpeg",
+        "-y",
+        "-threads",
+        "0",
+        "-i",
+        str(INTRO_VIDEO),
         *audio_inputs_args,
-        '-filter_complex', audio_filter,
-        '-map', '[outa]',
-        '-c:a', 'aac',
-        '-profile:a', 'aac_low',
-        '-b:a', output_audio_bitrate,
-        '-ar', str(AUDIO_SAMPLE_RATE),
-        '-ac', '2',
-        '-movflags', '+faststart',
-        str(audio_only)
+        "-filter_complex",
+        audio_filter,
+        "-map",
+        "[outa]",
+        "-c:a",
+        "aac",
+        "-profile:a",
+        "aac_low",
+        "-b:a",
+        output_audio_bitrate,
+        "-ar",
+        str(AUDIO_SAMPLE_RATE),
+        "-ac",
+        "2",
+        "-movflags",
+        "+faststart",
+        str(audio_only),
     ]
 
     audio_success, audio_stderr = run_ffmpeg_command(
@@ -1854,33 +2163,37 @@ def render_video_with_cpp(
 
     base_cpp_cmd = [
         str(VHS_CPP_BIN),
-        '--intro', str(INTRO_VIDEO),
-        '--cover', str(cover_main),
-        '--duration', str(audio_duration),
-        '--output', str(video_only),
-        '--intensity', str(VHS_CPP_INTENSITY),
-        '--cq', str(VIDEO_CQ),
-        '--preset', VIDEO_PRESET_NVENC
+        "--intro",
+        str(INTRO_VIDEO),
+        "--cover",
+        str(cover_main),
+        "--duration",
+        str(audio_duration),
+        "--output",
+        str(video_only),
+        "--intensity",
+        str(VHS_CPP_INTENSITY),
+        "--cq",
+        str(VIDEO_CQ),
+        "--preset",
+        VIDEO_PRESET_NVENC,
     ]
 
     if cover_overlay and Path(cover_overlay).exists():
-        base_cpp_cmd.extend(['--cover-overlay', str(cover_overlay)])
+        base_cpp_cmd.extend(["--cover-overlay", str(cover_overlay)])
     if tracklist_path and track_overlays_path:
-        base_cpp_cmd.extend(['--tracklist', str(tracklist_path)])
-        base_cpp_cmd.extend(['--track-overlays', str(track_overlays_path)])
+        base_cpp_cmd.extend(["--tracklist", str(tracklist_path)])
+        base_cpp_cmd.extend(["--track-overlays", str(track_overlays_path)])
 
     cpp_cmd = base_cpp_cmd.copy()
 
     if VHS_CPP_OVERLAY.exists():
-        cpp_cmd.extend(['--vhs-overlay', str(VHS_CPP_OVERLAY)])
+        cpp_cmd.extend(["--vhs-overlay", str(VHS_CPP_OVERLAY)])
     else:
         log_verbose(f"[VHS GPU] Overlay no encontrado: {VHS_CPP_OVERLAY}")
 
     cpp_returncode, cpp_stderr = run_cpp_command(
-        cpp_cmd,
-        show_progress,
-        total_duration=audio_duration,
-        folder_name=folder_name
+        cpp_cmd, show_progress, total_duration=audio_duration, folder_name=folder_name
     )
     cpp_cmd_no_overlay = base_cpp_cmd.copy()
 
@@ -1894,12 +2207,14 @@ def render_video_with_cpp(
         if is_cuda_failure(cpp_stderr) and CUDA_FAIL_FAST:
             return fail_cpp("cuda")
         if is_cuda_failure(cpp_stderr) and VHS_CPP_OVERLAY.exists():
-            log_verbose(f"[VHS GPU] {folder_name} reintentando sin overlay por error CUDA...")
+            log_verbose(
+                f"[VHS GPU] {folder_name} reintentando sin overlay por error CUDA..."
+            )
             retry_code, retry_stderr = run_cpp_command(
                 cpp_cmd_no_overlay,
                 show_progress,
                 total_duration=audio_duration,
-                folder_name=folder_name
+                folder_name=folder_name,
             )
             if retry_code == 0:
                 log_verbose(f"[VHS GPU] {folder_name} renderizado sin overlay")
@@ -1916,9 +2231,13 @@ def render_video_with_cpp(
             return fail_cpp("cuda")
         if not show_progress:
             if is_tracking_failure(cpp_stderr):
-                log_verbose(f"[VHS GPU] {folder_name} reintentando sin tracking errors por error CUDA...")
+                log_verbose(
+                    f"[VHS GPU] {folder_name} reintentando sin tracking errors por error CUDA..."
+                )
             else:
-                log_verbose(f"[VHS GPU] {folder_name} reintentando en modo seguro (sin tracking errors)...")
+                log_verbose(
+                    f"[VHS GPU] {folder_name} reintentando en modo seguro (sin tracking errors)..."
+                )
         tracking_env = {"VHS_DISABLE_TRACKING_ERRORS": "1"}
         retry_cmd = cpp_cmd_no_overlay if VHS_CPP_OVERLAY.exists() else cpp_cmd
         retry_code, retry_stderr = run_cpp_command(
@@ -1926,7 +2245,7 @@ def render_video_with_cpp(
             show_progress,
             tracking_env,
             total_duration=audio_duration,
-            folder_name=folder_name
+            folder_name=folder_name,
         )
         if retry_code == 0:
             if not show_progress:
@@ -1941,7 +2260,9 @@ def render_video_with_cpp(
         if CUDA_FAIL_FAST:
             return fail_cpp("cuda")
         if not show_progress:
-            log_verbose(f"[VHS GPU] {folder_name} reintentando con NVENC sin hwframes...")
+            log_verbose(
+                f"[VHS GPU] {folder_name} reintentando con NVENC sin hwframes..."
+            )
         hwframes_env = {"VHS_NVENC_NO_HWFRAMES": "1"}
         retry_cmd = cpp_cmd_no_overlay if VHS_CPP_OVERLAY.exists() else cpp_cmd
         retry_code, retry_stderr = run_cpp_command(
@@ -1949,7 +2270,7 @@ def render_video_with_cpp(
             show_progress,
             hwframes_env,
             total_duration=audio_duration,
-            folder_name=folder_name
+            folder_name=folder_name,
         )
         if retry_code == 0:
             if not show_progress:
@@ -1964,7 +2285,9 @@ def render_video_with_cpp(
         if CUDA_FAIL_FAST:
             return fail_cpp("cuda")
         if not show_progress:
-            log_verbose(f"[VHS GPU] {folder_name} reintentando en modo seguro (sin color bleeding/noise)...")
+            log_verbose(
+                f"[VHS GPU] {folder_name} reintentando en modo seguro (sin color bleeding/noise)..."
+            )
         safe_env = {"VHS_SAFE_MODE": "1"}
         retry_cmd = cpp_cmd_no_overlay if VHS_CPP_OVERLAY.exists() else cpp_cmd
         retry_code, retry_stderr = run_cpp_command(
@@ -1972,7 +2295,7 @@ def render_video_with_cpp(
             show_progress,
             safe_env,
             total_duration=audio_duration,
-            folder_name=folder_name
+            folder_name=folder_name,
         )
         if retry_code == 0:
             if not show_progress:
@@ -1988,17 +2311,24 @@ def render_video_with_cpp(
         log_verbose(f"[MUX] {folder_name} pegando audio al video final...")
 
     mux_cmd = [
-        'ffmpeg',
-        '-y',
-        '-i', str(video_only),
-        '-i', str(audio_only),
-        '-map', '0:v:0',
-        '-map', '1:a:0',
-        '-c:v', 'copy',
-        '-c:a', 'copy',
-        '-movflags', '+faststart',
-        '-shortest',
-        str(final_video)
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(video_only),
+        "-i",
+        str(audio_only),
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "copy",
+        "-movflags",
+        "+faststart",
+        "-shortest",
+        str(final_video),
     ]
 
     mux_success, mux_stderr = run_ffmpeg_command(
@@ -2030,7 +2360,9 @@ def render_video_with_cpp(
         except Exception:
             pass
 
-    destination_folder = move_folder_to_upload(original_folder_path, folder_name, show_progress)
+    destination_folder = move_folder_to_upload(
+        original_folder_path, folder_name, show_progress
+    )
     elapsed = time.time() - start_time
     if show_progress:
         log_verbose(f"\n[ÉXITO] {folder_name} renderizado en {format_time(elapsed)}")
@@ -2057,14 +2389,16 @@ def render_video(folder_path, folder_name, show_progress=False):
         start_time = time.time()
 
         # ================================================================
-        # PASO 1: Copiar a SSD si está habilitado
+        # PASO 1: Copiar a almacenamiento rápido (RAM > SSD)
         # ================================================================
-        if USE_SSD_TEMP:
-            SSD_TEMP_DIR.mkdir(parents=True, exist_ok=True)
-            temp_folder_path = SSD_TEMP_DIR / folder_name
+        if USE_SSD_TEMP or USE_RAMDISK:
+            temp_dir = get_temp_dir()
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            temp_folder_path = temp_dir / folder_name
 
+            storage_type = "RAM" if (USE_RAMDISK and RAMDISK_MOUNTED) else "SSD"
             if show_progress:
-                log_verbose("[SSD] Copiando a SSD local...")
+                log_verbose(f"[{storage_type}] Copiando a {storage_type} local...")
 
             # Copiar solo archivos necesarios (no el video si ya existe)
             if temp_folder_path.exists():
@@ -2072,14 +2406,18 @@ def render_video(folder_path, folder_name, show_progress=False):
             temp_folder_path.mkdir(parents=True)
 
             for file in os.listdir(folder_path):
-                if file.lower().endswith(('.mp3', '.flac', '.wav', '.m4a', '.png', '.jpg', '.jpeg', '.txt')):
+                if file.lower().endswith(
+                    (".mp3", ".flac", ".wav", ".m4a", ".png", ".jpg", ".jpeg", ".txt")
+                ):
                     shutil.copy2(folder_path / file, temp_folder_path / file)
 
             # Usar la carpeta temporal para el renderizado
             folder_path = temp_folder_path
 
             if show_progress:
-                log_verbose("[SSD] Listo - renderizando desde NVMe")
+                log_verbose(
+                    f"[{storage_type}] Listo - renderizando desde {storage_type}"
+                )
 
         # ================================================================
         # PASO 2: Buscar archivos necesarios
@@ -2089,39 +2427,46 @@ def render_video(folder_path, folder_name, show_progress=False):
 
         for file in os.listdir(folder_path):
             file_lower = file.lower()
-            if file_lower.endswith(('.mp3', '.flac', '.wav', '.m4a')):
+            if file_lower.endswith((".mp3", ".flac", ".wav", ".m4a")):
                 audio_files.append(folder_path / file)
-            elif file_lower.endswith(('.png', '.jpg', '.jpeg')):
+            elif file_lower.endswith((".png", ".jpg", ".jpeg")):
                 # Priorizar: cover.* > *_shadow.png > cualquier imagen
-                if file_lower.startswith('cover.'):
+                if file_lower.startswith("cover."):
                     cover_file = folder_path / file
-                elif cover_file is None or (file.endswith('_shadow.png') and not str(cover_file).endswith('_shadow.png')):
-                    if cover_file is None or file.endswith('_shadow.png'):
+                elif cover_file is None or (
+                    file.endswith("_shadow.png")
+                    and not str(cover_file).endswith("_shadow.png")
+                ):
+                    if cover_file is None or file.endswith("_shadow.png"):
                         cover_file = folder_path / file
 
         # Ordenar audios por nombre (01. xxx, 02. xxx, etc.)
         audio_files.sort(key=lambda x: x.name.lower())
 
         if cover_file and not is_valid_image(cover_file):
-            log_verbose(f"[COVER] Portada dañada: {cover_file.name}, intentando otra...")
+            log_verbose(
+                f"[COVER] Portada dañada: {cover_file.name}, intentando otra..."
+            )
             cover_file = None
 
         if not cover_file and audio_files:
             if show_progress:
                 log_verbose("[COVER] Portada no encontrada, buscando en metadata...")
             else:
-                log_verbose(f"[COVER] {folder_name} portada no encontrada, buscando en metadata...")
+                log_verbose(
+                    f"[COVER] {folder_name} portada no encontrada, buscando en metadata..."
+                )
 
             cover_file = extract_cover_from_audio_files(
-                audio_files,
-                folder_path,
-                original_folder_path
+                audio_files, folder_path, original_folder_path
             )
             if cover_file:
                 if show_progress:
                     log_verbose(f"[COVER] Portada extraida: {cover_file.name}")
                 else:
-                    log_verbose(f"[COVER] {folder_name} portada extraida: {cover_file.name}")
+                    log_verbose(
+                        f"[COVER] {folder_name} portada extraida: {cover_file.name}"
+                    )
 
         if cover_file and not is_valid_image(cover_file):
             log_verbose(f"[COVER] Portada invalida: {cover_file.name}")
@@ -2133,7 +2478,9 @@ def render_video(folder_path, folder_name, show_progress=False):
             return False
 
         if show_progress and len(audio_files) > 1:
-            log_verbose(f"[INFO] {len(audio_files)} pistas de audio encontradas, concatenando en orden...")
+            log_verbose(
+                f"[INFO] {len(audio_files)} pistas de audio encontradas, concatenando en orden..."
+            )
 
         cover_main = cover_file
         cover_overlay = None
@@ -2146,9 +2493,7 @@ def render_video(folder_path, folder_name, show_progress=False):
 
         if cover_overlay is None or not is_valid_image(cover_overlay):
             cover_overlay = ensure_shadow_cover(
-                cover_main,
-                folder_path,
-                original_folder_path
+                cover_main, folder_path, original_folder_path
             )
 
         cover_bg = cover_main
@@ -2164,10 +2509,14 @@ def render_video(folder_path, folder_name, show_progress=False):
         if USE_CPP_VHS:
             api_titles = obtener_tracklist_deathgrind(folder_name, len(audio_files))
             if api_titles:
-                log_verbose(f"[TRACKLIST] {folder_name} titulos obtenidos desde DeathGrind.")
+                log_verbose(
+                    f"[TRACKLIST] {folder_name} titulos obtenidos desde DeathGrind."
+                )
             else:
                 log_verbose(f"[TRACKLIST] {folder_name} usando titulos de audio local.")
-            tracks = build_tracklist(audio_files, folder_name=folder_name, api_titles=api_titles)
+            tracks = build_tracklist(
+                audio_files, folder_name=folder_name, api_titles=api_titles
+            )
             if tracks and cover_overlay:
                 overlays_dir = folder_path / "_track_overlays"
                 tracklist_path, track_overlays_path = generate_tracklist_overlays(
@@ -2176,7 +2525,7 @@ def render_video(folder_path, folder_name, show_progress=False):
                     tracks=tracks,
                     output_dir=overlays_dir,
                     width=VIDEO_WIDTH,
-                    height=VIDEO_HEIGHT
+                    height=VIDEO_HEIGHT,
                 )
 
         # Obtener duración total de todos los audios (para la barra de progreso)
@@ -2193,9 +2542,13 @@ def render_video(folder_path, folder_name, show_progress=False):
         if USE_CPP_VHS:
             if DISABLE_CPP_ON_CUDA and CUDA_ERROR_FLAG.exists():
                 if show_progress:
-                    log_verbose("[COVER] C++ desactivado por error CUDA previo, usando FFmpeg...")
+                    log_verbose(
+                        "[COVER] C++ desactivado por error CUDA previo, usando FFmpeg..."
+                    )
                 else:
-                    log_verbose(f"[COVER] {folder_name} usando FFmpeg por error CUDA previo...")
+                    log_verbose(
+                        f"[COVER] {folder_name} usando FFmpeg por error CUDA previo..."
+                    )
             else:
                 cpp_success, cpp_error = render_video_with_cpp(
                     folder_path=folder_path,
@@ -2211,7 +2564,7 @@ def render_video(folder_path, folder_name, show_progress=False):
                     show_progress=show_progress,
                     start_time=start_time,
                     temp_folder_path=temp_folder_path,
-                    use_gpu=use_gpu
+                    use_gpu=use_gpu,
                 )
                 if cpp_success:
                     return True
@@ -2223,9 +2576,13 @@ def render_video(folder_path, folder_name, show_progress=False):
                 if cpp_error != "cuda" or not ALLOW_FFMPEG_FALLBACK:
                     return False
                 if show_progress:
-                    log_verbose("[FALLBACK] CUDA falló, usando FFmpeg para este álbum...")
+                    log_verbose(
+                        "[FALLBACK] CUDA falló, usando FFmpeg para este álbum..."
+                    )
                 else:
-                    log_verbose(f"[FALLBACK] {folder_name} usando FFmpeg por error CUDA...")
+                    log_verbose(
+                        f"[FALLBACK] {folder_name} usando FFmpeg por error CUDA..."
+                    )
                 for suffix in ("__video.mp4", "__audio.m4a"):
                     tmp_file = folder_path / f"{folder_name}{suffix}"
                     if tmp_file.exists():
@@ -2267,7 +2624,7 @@ def render_video(folder_path, folder_name, show_progress=False):
             audio_concat_output = "[all_music]"
             audio_concat_line = f"{audio_concat_filter}acopy{audio_concat_output}"
         else:
-            audio_inputs = "".join([f"[{i+3}:a]" for i in range(num_audios)])
+            audio_inputs = "".join([f"[{i + 3}:a]" for i in range(num_audios)])
             audio_concat_filter = f"{audio_inputs}concat=n={num_audios}:v=0:a=1"
             audio_concat_output = "[all_music]"
             audio_concat_line = f"{audio_concat_filter}{audio_concat_output}"
@@ -2296,7 +2653,7 @@ def render_video(folder_path, folder_name, show_progress=False):
             # ============================================================
             filter_complex = f"""
 [0:v]hwdownload,format=nv12,scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:flags=lanczos,fps={FPS}[intro];
-[1:v]scale={int(VIDEO_WIDTH*1.2)}:-1:flags=lanczos,crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},fps={FPS},
+[1:v]scale={int(VIDEO_WIDTH * 1.2)}:-1:flags=lanczos,crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},fps={FPS},
 format=yuv444p,
 split=3[luma][chroma1][chroma2];
 [luma]extractplanes=y[y];
@@ -2314,10 +2671,10 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
 [bg_base][vhs_loop]blend=all_mode=softlight:all_opacity=0.55[bg];
 [1:v]scale=-1:{cover_height}:flags=lanczos,fps={FPS},format=yuva420p,unsharp=5:5:1.2:5:5:0.0[cover];
 [bg][cover]overlay=(W-w)/2:(H-h)/2[content];
-[intro][content]xfade=transition=fade:duration=1:offset={INTRO_DURATION-1}[outv];
+[intro][content]xfade=transition=fade:duration=1:offset={INTRO_DURATION - 1}[outv];
 {audio_concat_line};
 [0:a]atrim=0:{INTRO_DURATION}[intro_audio];
-[all_music]adelay=delays={int(INTRO_DURATION*1000)}:all=1[music_delayed];
+[all_music]adelay=delays={int(INTRO_DURATION * 1000)}:all=1[music_delayed];
 [intro_audio][music_delayed]amix=inputs=2:duration=longest[outa]
 """.strip()
         else:
@@ -2326,7 +2683,7 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
             # ============================================================
             filter_complex = f"""
 [0:v]scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:flags=lanczos,fps={FPS}[intro];
-[1:v]scale={int(VIDEO_WIDTH*1.2)}:-1:flags=lanczos,crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},fps={FPS},
+[1:v]scale={int(VIDEO_WIDTH * 1.2)}:-1:flags=lanczos,crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},fps={FPS},
 format=yuv444p,
 split=3[luma][chroma1][chroma2];
 [luma]extractplanes=y[y];
@@ -2344,17 +2701,17 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
 [bg_base][vhs_loop]blend=all_mode=softlight:all_opacity=0.55[bg];
 [1:v]scale=-1:{cover_height}:flags=lanczos,fps={FPS},format=yuva420p,unsharp=5:5:1.2:5:5:0.0[cover];
 [bg][cover]overlay=(W-w)/2:(H-h)/2[content];
-[intro][content]xfade=transition=fade:duration=1:offset={INTRO_DURATION-1}[outv];
+[intro][content]xfade=transition=fade:duration=1:offset={INTRO_DURATION - 1}[outv];
 {audio_concat_line};
 [0:a]atrim=0:{INTRO_DURATION}[intro_audio];
-[all_music]adelay=delays={int(INTRO_DURATION*1000)}:all=1[music_delayed];
+[all_music]adelay=delays={int(INTRO_DURATION * 1000)}:all=1[music_delayed];
 [intro_audio][music_delayed]amix=inputs=2:duration=longest[outa]
 """.strip()
 
         # Construir lista de inputs de audio
         audio_inputs_args = []
         for audio_file in audio_files:
-            audio_inputs_args.extend(['-i', str(audio_file)])
+            audio_inputs_args.extend(["-i", str(audio_file)])
 
         # Comando FFmpeg con VHS overlay
         # Inputs:
@@ -2368,61 +2725,114 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
             # NVDEC (decode) → CUDA filters → NVENC (encode)
             # Mantiene frames en VRAM evitando transferencias PCIe
             cmd = [
-                'ffmpeg',
-                '-y',
-                '-hwaccel', 'cuda',                    # Usar NVDEC para decode
-                '-hwaccel_output_format', 'cuda',     # Mantener frames en GPU
-                '-threads', '0',
-                '-i', str(INTRO_VIDEO),               # [0] Intro (decode GPU)
-                '-loop', '1', '-t', '9999', '-i', str(cover_main),  # [1] Portada
-                '-stream_loop', '-1', '-i', str(vhs_noise_video),   # [2] VHS noise (decode CPU)
-                *audio_inputs_args,                   # [3+] Audio
-                '-filter_complex', filter_complex,
-                '-map', '[outv]',
-                '-map', '[outa]',
-                '-c:v', 'h264_nvenc',
-                '-preset', VIDEO_PRESET_NVENC,
-                '-tune', 'hq',
-                '-cq', str(VIDEO_CQ),
+                "ffmpeg",
+                "-y",
+                "-hwaccel",
+                "cuda",  # Usar NVDEC para decode
+                "-hwaccel_output_format",
+                "cuda",  # Mantener frames en GPU
+                "-threads",
+                "0",
+                "-i",
+                str(INTRO_VIDEO),  # [0] Intro (decode GPU)
+                "-loop",
+                "1",
+                "-t",
+                "9999",
+                "-i",
+                str(cover_main),  # [1] Portada
+                "-stream_loop",
+                "-1",
+                "-i",
+                str(vhs_noise_video),  # [2] VHS noise (decode CPU)
+                *audio_inputs_args,  # [3+] Audio
+                "-filter_complex",
+                filter_complex,
+                "-map",
+                "[outv]",
+                "-map",
+                "[outa]",
+                "-c:v",
+                "h264_nvenc",
+                "-preset",
+                VIDEO_PRESET_NVENC,
+                "-tune",
+                "hq",
+                "-cq",
+                str(VIDEO_CQ),
                 *NVENC_EXTRA_OPTS,
-                '-pix_fmt', 'yuv420p',
-                '-c:a', 'aac',
-                '-profile:a', 'aac_low',
-                '-b:a', output_audio_bitrate,
-                '-ar', str(AUDIO_SAMPLE_RATE),
-                '-ac', '2',
-                '-shortest',
-                str(output_file)
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-profile:a",
+                "aac_low",
+                "-b:a",
+                output_audio_bitrate,
+                "-ar",
+                str(AUDIO_SAMPLE_RATE),
+                "-ac",
+                "2",
+                "-shortest",
+                str(output_file),
             ]
         else:
             cmd = [
-                'ffmpeg',
-                '-y',
-                '-threads', '0',
-                '-i', str(INTRO_VIDEO),           # [0] Intro
-                '-loop', '1', '-t', '9999', '-i', str(cover_main),  # [1] Portada
-                '-stream_loop', '-1', '-i', str(vhs_noise_video),   # [2] VHS noise (loop infinito)
-                *audio_inputs_args,               # [3+] Audio
-                '-filter_complex', filter_complex,
-                '-map', '[outv]',
-                '-map', '[outa]',
-                '-c:v', 'libx264',
-                '-preset', VIDEO_PRESET_CPU,
-                '-crf', str(VIDEO_CRF),
-                '-tune', 'fastdecode',
-                '-profile:v', 'high',
-                '-bf', '2',
-                '-g', str(FPS // 2),
-                '-x264-params', 'open-gop=0',
-                '-pix_fmt', 'yuv420p',
-                '-c:a', 'aac',
-                '-profile:a', 'aac_low',
-                '-b:a', output_audio_bitrate,
-                '-ar', str(AUDIO_SAMPLE_RATE),
-                '-ac', '2',
-                '-movflags', '+faststart',
-                '-shortest',
-                str(output_file)
+                "ffmpeg",
+                "-y",
+                "-threads",
+                "0",
+                "-i",
+                str(INTRO_VIDEO),  # [0] Intro
+                "-loop",
+                "1",
+                "-t",
+                "9999",
+                "-i",
+                str(cover_main),  # [1] Portada
+                "-stream_loop",
+                "-1",
+                "-i",
+                str(vhs_noise_video),  # [2] VHS noise (loop infinito)
+                *audio_inputs_args,  # [3+] Audio
+                "-filter_complex",
+                filter_complex,
+                "-map",
+                "[outv]",
+                "-map",
+                "[outa]",
+                "-c:v",
+                "libx264",
+                "-preset",
+                VIDEO_PRESET_CPU,
+                "-crf",
+                str(VIDEO_CRF),
+                "-tune",
+                "fastdecode",
+                "-profile:v",
+                "high",
+                "-bf",
+                "2",
+                "-g",
+                str(FPS // 2),
+                "-x264-params",
+                "open-gop=0",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-profile:a",
+                "aac_low",
+                "-b:a",
+                output_audio_bitrate,
+                "-ar",
+                str(AUDIO_SAMPLE_RATE),
+                "-ac",
+                "2",
+                "-movflags",
+                "+faststart",
+                "-shortest",
+                str(output_file),
             ]
 
         # Ejecutar FFmpeg
@@ -2435,12 +2845,12 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                 text=True,
                 errors="replace",
                 bufsize=1,
-                universal_newlines=True
+                universal_newlines=True,
             )
 
             # Leer stderr en tiempo real para obtener progreso
             stderr_output = ""
-            time_pattern = re.compile(r'time=(\d+):(\d+):(\d+\.?\d*)')
+            time_pattern = re.compile(r"time=(\d+):(\d+):(\d+\.?\d*)")
 
             while True:
                 # Leer una línea del stderr
@@ -2459,7 +2869,9 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                     current_time = hours * 3600 + minutes * 60 + seconds
 
                     elapsed = time.time() - start_time
-                    print_progress_bar(current_time, total_duration, elapsed, folder_name)
+                    print_progress_bar(
+                        current_time, total_duration, elapsed, folder_name
+                    )
 
             process.wait()
             print()  # Nueva línea después de la barra de progreso
@@ -2478,8 +2890,12 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                             log_verbose("[SSD] Limpieza completada")
 
                 elapsed = time.time() - start_time
-                destination_folder = move_folder_to_upload(original_folder_path, folder_name, show_progress)
-                log_verbose(f"\n[ÉXITO] {folder_name} renderizado en {format_time(elapsed)}")
+                destination_folder = move_folder_to_upload(
+                    original_folder_path, folder_name, show_progress
+                )
+                log_verbose(
+                    f"\n[ÉXITO] {folder_name} renderizado en {format_time(elapsed)}"
+                )
                 log_verbose(f"[UPLOAD] Carpeta movida a: {destination_folder}")
                 return True
             else:
@@ -2496,7 +2912,7 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                errors="replace"
+                errors="replace",
             )
 
             if result.returncode == 0:
@@ -2509,7 +2925,9 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                         shutil.rmtree(temp_folder_path)
 
                 elapsed = time.time() - start_time
-                destination_folder = move_folder_to_upload(original_folder_path, folder_name, show_progress)
+                destination_folder = move_folder_to_upload(
+                    original_folder_path, folder_name, show_progress
+                )
                 log_verbose(f"[ÉXITO] {folder_name} renderizado en {elapsed:.1f}s")
                 log_verbose(f"[UPLOAD] Carpeta movida a: {destination_folder}")
                 return True
@@ -2531,7 +2949,8 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
 
 def process_folders_parallel(folders_override=None, staging_ctx=None):
     """
-    Procesa carpetas en paralelo (hasta MAX_PARALLEL_RENDERS simultáneos)
+    Procesa carpetas en paralelo (hasta MAX_PARALLEL_RENDERS simultáneos).
+    Se detiene automáticamente cuando el disco tiene poco espacio libre.
     """
     if folders_override is not None:
         folders = folders_override
@@ -2546,45 +2965,104 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
     # Prioridad por año (más reciente primero), con mezcla opcional dentro del mismo año
     folders = order_folders_by_year(folders, shuffle_within_year=STAGING_SHUFFLE)
 
-    # Limitar cantidad
+    # Limitar cantidad (ahora es un tope alto, el límite real es el espacio en disco)
     folders = folders[:MAX_FOLDERS_TO_PROCESS]
 
-    log_verbose(f"\n{'='*60}")
+    # Verificar espacio inicial
+    free_gb = get_free_space_gb(DIR_UPLOAD)
+    log_verbose(f"\n{'=' * 60}")
     log_verbose("INICIANDO RENDERIZADO PARALELO")
-    log_verbose(f"Carpetas a procesar: {len(folders)}")
+    log_verbose(f"Carpetas disponibles: {len(folders)}")
     log_verbose(f"Renders paralelos: {MAX_PARALLEL_RENDERS}")
-    log_verbose(f"{'='*60}\n")
+    log_verbose(
+        f"Espacio libre: {format_size_gb(free_gb)} (mínimo: {MIN_FREE_SPACE_GB} GB)"
+    )
+    log_verbose(f"{'=' * 60}\n")
+
+    if not has_enough_disk_space():
+        print(f"\n[ESPACIO] Disco casi lleno ({format_size_gb(free_gb)} libres)")
+        print(f"[ESPACIO] Mínimo requerido: {MIN_FREE_SPACE_GB} GB. Abortando.")
+        return
 
     # Procesar en paralelo
     successful = 0
     failed = 0
+    stopped_by_space = False
+    processed = 0
 
     executor = ProcessPoolExecutor(max_workers=MAX_PARALLEL_RENDERS)
-    future_to_folder = {
-        executor.submit(render_video, folder_path, folder_name): (folder_path, folder_name)
-        for folder_path, folder_name in folders
-    }
+
+    # En lugar de lanzar todos a la vez, lanzamos por lotes y verificamos espacio
+    pending_futures = {}
+    folder_iter = iter(folders)
+
+    def submit_next_batch(max_to_submit):
+        """Envía el siguiente lote de trabajos si hay espacio."""
+        submitted = 0
+        for folder_path, folder_name in folder_iter:
+            if submitted >= max_to_submit:
+                break
+            future = executor.submit(render_video, folder_path, folder_name)
+            pending_futures[future] = (folder_path, folder_name)
+            submitted += 1
+        return submitted
+
+    # Lanzar lote inicial
+    submit_next_batch(MAX_PARALLEL_RENDERS)
 
     cancelled = False
     try:
-        # Procesar conforme terminan
-        for future in as_completed(future_to_folder):
-            folder_path, folder_name = future_to_folder[future]
-            try:
-                success = future.result()
-                if success:
-                    successful += 1
-                else:
+        while pending_futures:
+            # Esperar a que termine al menos uno
+            done_futures = []
+            for future in list(pending_futures.keys()):
+                if future.done():
+                    done_futures.append(future)
+
+            if not done_futures:
+                # Ninguno terminó aún, esperar un poco
+                time.sleep(0.5)
+                continue
+
+            for future in done_futures:
+                folder_path, folder_name = pending_futures.pop(future)
+                processed += 1
+                try:
+                    success = future.result()
+                    if success:
+                        successful += 1
+                    else:
+                        failed += 1
+                        move_folder_to_error(folder_path, folder_name)
+                except Exception as e:
+                    print(f"[EXCEPCIÓN] Error en {folder_name}: {e}")
                     failed += 1
                     move_folder_to_error(folder_path, folder_name)
-            except Exception as e:
-                print(f"[EXCEPCIÓN] Error en {folder_name}: {e}")
-                failed += 1
-                move_folder_to_error(folder_path, folder_name)
+
+            # Verificar espacio antes de lanzar más trabajos
+            if not has_enough_disk_space():
+                free_gb = get_free_space_gb(DIR_UPLOAD)
+                print(
+                    f"\n[ESPACIO] Disco casi lleno ({format_size_gb(free_gb)} libres)"
+                )
+                print(
+                    f"[ESPACIO] Mínimo requerido: {MIN_FREE_SPACE_GB} GB. Deteniendo."
+                )
+                stopped_by_space = True
+                # Cancelar futuros pendientes
+                for future in pending_futures:
+                    future.cancel()
+                break
+
+            # Lanzar más trabajos para mantener el paralelismo
+            slots_available = MAX_PARALLEL_RENDERS - len(pending_futures)
+            if slots_available > 0:
+                submit_next_batch(slots_available)
+
     except KeyboardInterrupt:
         cancelled = True
         print("\n\nRenderizado cancelado por el usuario.")
-        for future in future_to_folder:
+        for future in pending_futures:
             future.cancel()
         try:
             executor.shutdown(wait=False, cancel_futures=True)
@@ -2610,24 +3088,29 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
             if staging_ctx:
                 for name in staging_ctx.get("staged_names", set()):
                     restore_staged_folder(
-                        staging_ctx["fast_audio"],
-                        staging_ctx["slow_audio"],
-                        name
+                        staging_ctx["fast_audio"], staging_ctx["slow_audio"], name
                     )
 
     if cancelled:
         return
 
-    log_verbose(f"\n{'='*60}")
-    log_verbose("RENDERIZADO COMPLETADO")
-    log_verbose(f"Exitosos: {successful}")
-    log_verbose(f"Fallidos: {failed}")
-    log_verbose(f"{'='*60}\n")
+    free_gb = get_free_space_gb(DIR_UPLOAD)
+    log_verbose(f"\n{'=' * 60}")
+    if stopped_by_space:
+        log_verbose("RENDERIZADO DETENIDO POR ESPACIO EN DISCO")
+    else:
+        log_verbose("RENDERIZADO COMPLETADO")
+    log_verbose(
+        f"Procesados: {processed} | Exitosos: {successful} | Fallidos: {failed}"
+    )
+    log_verbose(f"Espacio libre: {format_size_gb(free_gb)}")
+    log_verbose(f"{'=' * 60}\n")
 
 
 def process_folders_sequential(folders_override=None, staging_ctx=None):
     """
-    Procesa carpetas secuencialmente (1 a la vez) con barra de progreso
+    Procesa carpetas secuencialmente (1 a la vez) con barra de progreso.
+    Se detiene automáticamente cuando el disco tiene poco espacio libre.
     """
     if folders_override is not None:
         folders = folders_override
@@ -2642,29 +3125,51 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
     # Prioridad por año (más reciente primero), con mezcla opcional dentro del mismo año
     folders = order_folders_by_year(folders, shuffle_within_year=STAGING_SHUFFLE)
 
-    # Limitar cantidad
+    # Limitar cantidad (ahora es un tope alto, el límite real es el espacio en disco)
     folders = folders[:MAX_FOLDERS_TO_PROCESS]
     total = len(folders)
     if total == 0:
         print("ERROR: No hay carpetas para procesar")
         return
 
-    print(f"\n{'='*60}")
+    # Verificar espacio inicial
+    free_gb = get_free_space_gb(DIR_UPLOAD)
+    print(f"\n{'=' * 60}")
     print(f"INICIANDO RENDERIZADO SECUENCIAL")
-    print(f"Carpetas a procesar: {total}")
-    print(f"[PROGRESO] Completados: 0/{total} | Faltan: {total}")
-    print(f"{'='*60}")
+    print(f"Carpetas disponibles: {total}")
+    print(f"Espacio libre: {format_size_gb(free_gb)} (mínimo: {MIN_FREE_SPACE_GB} GB)")
+    print(f"{'=' * 60}")
+
+    if not has_enough_disk_space():
+        print(f"\n[ESPACIO] Disco casi lleno ({format_size_gb(free_gb)} libres)")
+        print(f"[ESPACIO] Mínimo requerido: {MIN_FREE_SPACE_GB} GB. Abortando.")
+        return
 
     # Procesar secuencialmente
     successful = 0
     failed = 0
     total_start_time = time.time()
     cancelled = False
+    stopped_by_space = False
+    processed = 0
 
     try:
         for i, (folder_path, folder_name) in enumerate(folders, 1):
+            # Verificar espacio antes de cada render
+            if not has_enough_disk_space():
+                free_gb = get_free_space_gb(DIR_UPLOAD)
+                print(
+                    f"\n[ESPACIO] Disco casi lleno ({format_size_gb(free_gb)} libres)"
+                )
+                print(
+                    f"[ESPACIO] Mínimo requerido: {MIN_FREE_SPACE_GB} GB. Deteniendo."
+                )
+                stopped_by_space = True
+                break
+
             print(f"\n[INICIO] ({i}/{total}) Procesando: {folder_name}")
             success = render_video(folder_path, folder_name, show_progress=True)
+            processed += 1
 
             if success:
                 successful += 1
@@ -2672,10 +3177,13 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
                 failed += 1
                 move_folder_to_error(folder_path, folder_name)
 
-            # Mostrar estadísticas parciales
+            # Mostrar estadísticas parciales con espacio libre
+            free_gb = get_free_space_gb(DIR_UPLOAD)
             remaining = total - i
 
-            print(f"\n[PROGRESO] Completados: {i}/{total} | Faltan: {remaining}")
+            print(
+                f"\n[PROGRESO] Completados: {i}/{total} | Faltan: {remaining} | Espacio: {format_size_gb(free_gb)}"
+            )
     except KeyboardInterrupt:
         cancelled = True
         print("\n\nRenderizado cancelado por el usuario.")
@@ -2685,16 +3193,19 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
         if staging_ctx:
             for name in staging_ctx.get("staged_names", set()):
                 restore_staged_folder(
-                    staging_ctx["fast_audio"],
-                    staging_ctx["slow_audio"],
-                    name
+                    staging_ctx["fast_audio"], staging_ctx["slow_audio"], name
                 )
         return
 
-    print(f"\n{'='*60}")
-    print("RENDERIZADO COMPLETADO")
-    print(f"[PROGRESO] Completados: {total}/{total} | Faltan: 0")
-    print(f"{'='*60}\n")
+    free_gb = get_free_space_gb(DIR_UPLOAD)
+    print(f"\n{'=' * 60}")
+    if stopped_by_space:
+        print("RENDERIZADO DETENIDO POR ESPACIO EN DISCO")
+    else:
+        print("RENDERIZADO COMPLETADO")
+    print(f"Procesados: {processed} | Exitosos: {successful} | Fallidos: {failed}")
+    print(f"Espacio libre: {format_size_gb(free_gb)}")
+    print(f"{'=' * 60}\n")
 
 
 def render_single_video(specific_folder=None):
@@ -2724,33 +3235,39 @@ def render_single_video(specific_folder=None):
         # Seleccionar una carpeta aleatoria
         folder_path, folder_name = random.choice(folders)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"MODO PRUEBA - RENDERIZADO ÚNICO")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     # Renderizar con barra de progreso
     success = render_video(folder_path, folder_name, show_progress=True)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     if success:
         print(f"PRUEBA COMPLETADA EXITOSAMENTE")
-        log_verbose(f"Carpeta final: {DIR_UPLOAD} (revisa [UPLOAD] para el nombre final)")
+        log_verbose(
+            f"Carpeta final: {DIR_UPLOAD} (revisa [UPLOAD] para el nombre final)"
+        )
     else:
         print(f"PRUEBA FALLIDA")
         move_folder_to_error(folder_path, folder_name)
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 # ============================================================================
 # MAIN
 # ============================================================================
 
+
 def cleanup_temp():
-    """Limpia el directorio temporal del SSD"""
-    if USE_SSD_TEMP and SSD_TEMP_DIR.exists():
-        for item in SSD_TEMP_DIR.iterdir():
+    """Limpia el directorio temporal (ramdisk o SSD)"""
+    temp_dir = get_temp_dir()
+    if temp_dir.exists():
+        for item in temp_dir.iterdir():
             if item.is_dir():
                 shutil.rmtree(item)
+            else:
+                item.unlink()
 
 
 if __name__ == "__main__":
@@ -2764,6 +3281,13 @@ if __name__ == "__main__":
         if not MAIN_DIR.exists():
             print(f"ERROR: No se encuentra el directorio {MAIN_DIR}")
             exit(1)
+
+        # Montar ramdisk si está habilitado
+        if USE_RAMDISK:
+            if not ensure_fast_storage():
+                print(
+                    "[ADVERTENCIA] No se pudo montar ramdisk, usando SSD como fallback"
+                )
 
         # Verificar argumentos
         if len(sys.argv) > 1:
@@ -2780,12 +3304,24 @@ if __name__ == "__main__":
                 process_folders_parallel()
             elif sys.argv[1] == "--help" or sys.argv[1] == "-h":
                 print("\nUso:")
-                print(f"  python '{Path(__file__).name}'                        # Renderizado secuencial (1 video a la vez)")
-                print(f"  python '{Path(__file__).name}' --test                 # Prueba con 1 video aleatorio + barra de progreso")
-                print(f"  python '{Path(__file__).name}' --test /ruta/carpeta   # Prueba con carpeta específica")
-                print(f"  python '{Path(__file__).name}' -t                     # Igual que --test")
-                print(f"  python '{Path(__file__).name}' --parallel             # Renderizado paralelo ({MAX_PARALLEL_RENDERS} videos simultáneos)")
-                print(f"  python '{Path(__file__).name}' -p                     # Igual que --parallel")
+                print(
+                    f"  python '{Path(__file__).name}'                        # Renderizado secuencial (1 video a la vez)"
+                )
+                print(
+                    f"  python '{Path(__file__).name}' --test                 # Prueba con 1 video aleatorio + barra de progreso"
+                )
+                print(
+                    f"  python '{Path(__file__).name}' --test /ruta/carpeta   # Prueba con carpeta específica"
+                )
+                print(
+                    f"  python '{Path(__file__).name}' -t                     # Igual que --test"
+                )
+                print(
+                    f"  python '{Path(__file__).name}' --parallel             # Renderizado paralelo ({MAX_PARALLEL_RENDERS} videos simultáneos)"
+                )
+                print(
+                    f"  python '{Path(__file__).name}' -p                     # Igual que --parallel"
+                )
                 print("")
             else:
                 print(f"Argumento desconocido: {sys.argv[1]}")
@@ -2793,8 +3329,14 @@ if __name__ == "__main__":
         else:
             # Modo normal: renderizado secuencial (con staging opcional)
             folders_override, staging_ctx = prepare_staging_batch()
-            process_folders_sequential(folders_override=folders_override, staging_ctx=staging_ctx)
+            process_folders_sequential(
+                folders_override=folders_override, staging_ctx=staging_ctx
+            )
 
     except KeyboardInterrupt:
         print("\n\nRenderizado cancelado por el usuario.")
-        exit(0)
+    finally:
+        # Limpiar y desmontar ramdisk al terminar
+        cleanup_temp()
+        if USE_RAMDISK and RAMDISK_MOUNTED:
+            unmount_ramdisk()

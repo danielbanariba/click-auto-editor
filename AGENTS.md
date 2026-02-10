@@ -1,146 +1,152 @@
-## AGENTS Handbook
-Bienvenido/a. Este archivo es para agentes (humanos o LLMs) que trabajen en este repositorio. Sigue estas reglas para no romper el pipeline ni los assets.
+# AGENTS.md
+Handbook para agentes (humanos o LLMs) que trabajen en este repositorio.
 
-## TL;DR Operativo
-- Instala dependencias base: `pip install -r requirements.txt`.
-- Instala dependencias VHS opcionales: `pip install -r vhs_effect/requirements.txt`.
-- Instala navegadores Playwright: `playwright install chromium`.
-- Valida y crea carpetas: `python config.py`.
-- Render rápido de prueba: `python "2. ffmpeg_render.py" --test`.
-- Subida mínima por API: `python "3. subir_video_API.py" --limite 1`.
-- No hay reglas Cursor ni Copilot en este repo.
+## Quick Start
+```bash
+pip install -r requirements.txt                    # Dependencias base
+pip install -r vhs_effect/requirements.txt         # VHS (OpenCV/SciPy)
+playwright install chromium                        # Navegadores Playwright
+python config.py                                   # Validar entorno y crear carpetas
+```
 
-## Mapa del Repo
-- Scripts numerados en la raíz (`1. verificacion_previa.py`, `2. ffmpeg_render.py`, `3. subir_video_API.py`, `10. inpunar_video.py`, `11. apelacion.py`, `12. mapear_playlists.py`). Respeta el patrón `N. descripcion.py`.
-- `config.py`: rutas (disco externo, staging NVMe), flags GPU/NVENC, opciones de render.
-- `limpieza/`: helpers de normalización y limpieza de carpetas/archivos.
-- `effects/`: utilidades de imagen y VHS (`sombra`, overlays).
-- `subir_video/`: autenticación y YouTube Data API.
-- `vhs_effect/`: librería VHS autocontenida + tests y ejemplos manuales.
-- `cpp/`: renderer VHS C++/CUDA; `cpp/build/` es generado.
-- `content/`: intro y overlays (`0000000000000000.mp4`, `vhs_noise.mp4`).
-- `Comentarios/`: plantillas de textos legacy.
-- `analisis_canal/`, `selectores/`, `old/`: pipelines de análisis, selectores Playwright, scripts legacy de coordenadas.
+## Comandos de Test
 
-## Setup Detallado
-- Python 3.x, sin gestor especial; venv opcional (`python -m venv env && source env/bin/activate`).
-- Dependencias principales en `requirements.txt`; no uses `pip_install.ps1` antiguo.
-- Dependencias VHS (OpenCV/SciPy) opcionales en `vhs_effect/requirements.txt`.
-- Playwright requiere instalación de navegador tras `pip install playwright` (`playwright install chromium`).
-- C++/CUDA: `cmake -S cpp -B cpp/build && cmake --build cpp/build`; bin esperado en `cpp/build/vhs_render`.
-- Ejecuta `python config.py` para verificar rutas montadas y crear directorios en disco externo/NVMe.
+### Test único (recomendado)
+```bash
+pytest vhs_effect/test_vhs.py -k color_processor    # Test específico por nombre
+pytest vhs_effect/test_vhs.py -k position_jitter    # Otro test específico
+pytest vhs_effect/test_vhs.py                       # Todos los tests VHS
+```
 
-## Comandos Frecuentes
-- Render principal: `python "2. ffmpeg_render.py"` (usa GPU NVENC si disponible, respeta `MAX_PARALLEL_RENDERS`).
-- Render de smoke: `python "2. ffmpeg_render.py" --test` procesa 1 carpeta.
-- Subir por API: `python "3. subir_video_API.py" --todo --cantidad-lote 24 --gap-horas 1` o `--limite 1` para prueba.
-- Impugnación manual asistida: `python "10. inpunar_video.py" --aprender`.
-- Apelación: `python "11. apelacion.py"`.
-- Mapear playlists: `python "12. mapear_playlists.py" --limite 200`.
-- VHS python tests (todo el archivo): `python vhs_effect/test_vhs.py`.
-- VHS con pytest y test único (si tienes pytest): `pytest vhs_effect/test_vhs.py -k color_processor`.
+### Sin pytest
+```bash
+python vhs_effect/test_vhs.py                       # Ejecuta todas las pruebas
+```
 
-## Tests y QA
-- No hay suite unificada; `vhs_effect/test_vhs.py` ejecuta asserts y genera `test_output.jpg` para inspección manual.
-- Requiere OpenCV y SciPy (instala `vhs_effect/requirements.txt`).
-- Para cambios en render, corre `python "2. ffmpeg_render.py" --test` sobre 1 carpeta y revisa output.
-- Para Playwright, valida credenciales y perfil en `.playwright_profile` antes de ejecutar scripts de estudio.
-- No hay linting configurado (sin black/flake8); revisa estilo a mano.
+### Smoke tests del pipeline
+```bash
+python "2. ffmpeg_render.py" --test                 # 1 carpeta de prueba
+python "3. subir_video_API.py" --limite 1          # Subida mínima por API
+```
 
-## Estilo Python
-- Indentación de 4 espacios; sin tabs.
-- Nombres snake_case para funciones/variables; PascalCase para clases; constantes en MAYÚSCULAS.
-- Orden de imports: stdlib, terceros, locales; usa `pathlib.Path` en vez de strings cuando toques rutas.
-- Logs y prompts siempre en español; evita mezclar idiomas en UX.
-- Prefiere mensajes claros con emojis/✔️ ya usados; conserva tono imperativo y breve.
-- Evita comentarios innecesarios; solo explica bloques no obvios.
-- Evita prints silenciados; usa excepciones con contexto en español en lugar de `pass` silencioso.
-- No uses type hints pesados; cuando añadas, usa `Optional`, `Path`, `list[str]`, y conserva el estilo existente (muchos archivos sin tipos).
-- No introduzcas frameworks de logging; sigue prints sencillos.
-- Reutiliza helpers de `config.py` para rutas y flags; no dupliques constantes.
+### Build C++/CUDA
+```bash
+cmake -S cpp -B cpp/build && cmake --build cpp/build
+# Binario: cpp/build/vhs_render
+```
 
-## Patrones de Código
-- Prefiere funciones pequeñas y puras; evita lógica duplicada entre scripts numerados.
-- Para rutas usa `Path` y métodos (`.exists()`, `.mkdir()`) en lugar de `os.path` cuando toques código nuevo.
-- Evita globales mutables; si necesitas estado, pásalo como argumentos o usa dataclasses ligeras.
-- Cuando uses multiprocessing (`ProcessPoolExecutor`), protege entrada con `if __name__ == "__main__":`.
-- Para comandos externos usa `subprocess.run` con `check=True` y listas, no cadenas con `shell=True` salvo que sea imprescindible.
-- Normaliza texto con `unidecode` donde se hace matching de títulos; respeta el comportamiento existente.
-- Mantén los mensajes en consola consistentes con los emojis y formatos actuales.
-- Si agregas JSON/YAML, mantén UTF-8 y evita valores nulos innecesarios.
-- No mezcles PIL y OpenCV sin convertir BGR↔RGB explícitamente.
-- Cuando abras archivos, usa `encoding="utf-8"` y `newline=""` si escribes CSV.
+## Estructura del Repositorio
+- **Scripts numerados**: `1. verificacion_previa.py`, `2. ffmpeg_render.py`, etc.
+- `config.py`: rutas, flags GPU/NVENC, opciones de render
+- `limpieza/`: normalización y limpieza de carpetas
+- `effects/`: utilidades de imagen (`sombra`)
+- `subir_video/`: autenticación y YouTube Data API
+- `vhs_effect/`: librería VHS autocontenida + tests
+- `cpp/`: renderer VHS C++/CUDA
+- `content/`: intro y overlays
+- `selectores/`: JSON de acciones Playwright
 
-## Manejo de Errores y Retries
-- No uses `except Exception:` vacío; captura errores específicos y loguea en español.
-- Mantén reintentos y backoff para API DeathGrind (`DELAY_BASE_429`, `MAX_RETRIES_429`).
-- Cuando el renderer CUDA falle, respeta flags de fallback (`ALLOW_FFMPEG_FALLBACK`, `DISABLE_CPP_ON_CUDA`, `CUDA_FAIL_FAST`).
-- Para I/O, comprueba existencia de rutas antes de operar; crea carpetas con `mkdir(parents=True, exist_ok=True)` como en `config.py`.
-- No borres archivos de usuario ni muevas a producción sin copia; usa staging NVMe (`STAGING_*`) si ya está activado.
+## Estilo de Código
 
-## Datos y Credenciales
-- No subas `client_secrets.json`, `token.json` ni `.env`; están presentes localmente.
-- DeathGrind usa `.env` con `DEATHGRIND_EMAIL` y `DEATHGRIND_PASSWORD`; no los escribas en código ni en logs.
-- Paths a discos externos vienen de `BASE_DIR` y `FAST_BASE_DIR`; evita hardcodear rutas absolutas nuevas.
-- `bandas-subidas-al-canal.txt` controla duplicados; edítalo con cuidado y siempre en UTF-8.
+### Formato
+- Indentación: 4 espacios
+- Nombres: `snake_case` funciones/variables, `PascalCase` clases, `MAYUSCULAS` constantes
+- Líneas: máximo ~100 caracteres (flexible)
 
-## Playwright y Automatización
-- `selectores/` contiene JSON de acciones; respeta su forma si agregas pasos.
-- Scripts de estudio (`10. inpunar_video.py`, `11. apelacion.py`) asumen un perfil en `.playwright_profile`; no lo limpies.
-- Ajusta tiempos con cautela; sleeps demasiado cortos rompen la automatización.
+### Imports (orden obligatorio)
+```python
+import os                                # 1. stdlib
+import subprocess
+from pathlib import Path
 
-## VHS Effect (Python)
-- `vhs_effect` es independiente; imports relativos ya configurados en tests con `sys.path.insert`.
-- Usa OpenCV en BGR; no mezcles con PIL sin convertir.
-- Guarda salidas temporales fuera de assets (`test_output.jpg` en raíz está bien para smoke).
+import numpy as np                       # 2. terceros
+from PIL import Image
 
-## Renderer C++/CUDA
-- Código vive en `cpp/` con headers `.hpp` y fuentes `.cpp/.cu`.
-- Mantén formato existente; no hay clang-format configurado.
-- Bin esperado: `cpp/build/vhs_render`; scripts Python lo invocan cuando `USE_CPP_VHS=True`.
-- Si cambias flags NVENC/CUDA, refleja el cambio en `config.py` y en las llamadas del renderer.
+from config import BASE_DIR, USE_GPU     # 3. locales
+from effects.sombra import add_shadow
+```
 
-## Formato y Naming de Archivos
-- Nuevos pasos del pipeline siguen patrón `NN. descripcion.py` sin huecos.
-- Evita caracteres raros en nombres; mantén ASCII por defecto.
-- Recursos van en `content/`; no los dupliques.
+### Type hints (opcional)
+```python
+def procesar_carpeta(ruta: Path, limite: int = 10) -> list[str]:
+    ...
+```
 
-## Commits y PRs
-- Mensajes cortos en español, descriptivos (`Barra de progreso`, `Arreglo render NVENC`). Sin prefijos tipo Conventional Commits.
-- Incluye en PR: resumen, comandos ejecutados, cambios en rutas/coords, capturas o clips si tocas UI/visuales.
-- No empujes credenciales ni cambios en assets binarios pesados sin aviso.
+### Rutas - SIEMPRE pathlib
+```python
+from pathlib import Path
+carpeta = Path("/ruta/al/archivo")
+carpeta.mkdir(parents=True, exist_ok=True)
+# NO: os.path.join(), strings con "/"
+```
 
-## Seguridad y Limpieza
-- No uses `git reset --hard` ni toques cambios del usuario.
-- No añadas nuevas dependencias sin necesidad; prioriza stdlib.
-- Evita dormir hilos largos en código nuevo; usa tiempos existentes como referencia.
+### Subprocesos
+```python
+subprocess.run(["ffmpeg", "-i", str(input_path), str(output_path)], check=True)
+# Evita shell=True
+```
 
-## Documentos Existentes
-- README.md cubre flujo completo y comandos rápidos; mantenlo sincronizado.
-- CLAUDE.md contiene contexto antiguo (Windows + Adobe); útil para histórico pero el pipeline activo es FFmpeg/Playwright.
-- No hay `.cursor/rules` ni `.github/copilot-instructions.md` a la fecha.
+### Archivos
+```python
+with open(archivo, "r", encoding="utf-8") as f:
+    ...
+with open(csv_file, "w", encoding="utf-8", newline="") as f:
+    ...
+```
 
-## Cómo Pedir Ayuda (para agentes)
-- Si una instrucción es ambigua y afecta producción (rutas, credenciales, costos), pregunta con una sola duda concreta y propone tu default.
-- En tareas simples, actúa sin pedir permiso y resume lo que hiciste.
+## Manejo de Errores
+- Captura errores específicos, NO `except Exception:` vacío
+- Loguea errores en español con contexto
+- Respeta reintentos existentes: `DELAY_BASE_429`, `MAX_RETRIES_429`
+- Fallbacks CUDA: `ALLOW_FFMPEG_FALLBACK`, `DISABLE_CPP_ON_CUDA`
+- Verifica existencia de rutas antes de operar
 
-## Checklist Rápido Antes de Subir Cambios
-- [ ] Dependencias instaladas (`requirements.txt`, opcional `vhs_effect/requirements.txt`).
-- [ ] Playwright instalado (`playwright install chromium`) si tocas scripts de estudio.
-- [ ] `python config.py` corre sin errores en tu entorno.
-- [ ] Prueba mínima del cambio (render `--test`, pytest -k si aplica, o smoke manual en VHS).
-- [ ] Sin secretos nuevos en git status.
-- [ ] Mensaje de commit en español.
+## UX y Mensajes
+- Logs/prompts en **español**
+- Emojis consistentes: ✓ ✔️ ❌ (ya en el proyecto)
+- Tono imperativo y breve
+
+## Credenciales y Secretos
+**NUNCA subas a git:**
+- `client_secrets.json`, `token.json`, `.env`
+- `.playwright_profile`, `PASS.py`
+
+Variables de entorno en `.env`:
+- `DEATHGRIND_EMAIL`, `DEATHGRIND_PASSWORD`
+
+## VHS Effect
+- Ubicación: `vhs_effect/` (librería independiente)
+- OpenCV usa **BGR**; convierte explícitamente si usas PIL (RGB)
+- Output temporal: `test_output.jpg` (no versionado)
+
+## C++/CUDA Renderer
+- Activado con `USE_CPP_VHS=True` en `config.py`
+- Si falla CUDA, respeta `ALLOW_FFMPEG_FALLBACK`
+
+## Playwright/Automatización
+- Perfil persistente en `.playwright_profile`
+- Selectores en `selectores/*.json`
+- Ajusta sleeps con cautela; tiempos cortos rompen automatización
+
+## Commits
+- Mensajes cortos en **español**, descriptivos
+- Ejemplos: `Barra de progreso`, `Arreglo render NVENC`
+- Sin prefijos Conventional Commits
+- No empujes credenciales ni binarios pesados
+
+## Checklist Pre-Commit
+- [ ] `pip install -r requirements.txt` sin errores
+- [ ] `python config.py` valida entorno
+- [ ] Smoke test: `pytest vhs_effect/test_vhs.py` o `python "2. ffmpeg_render.py" --test`
+- [ ] Sin secretos en `git status`
 
 ## Fricción Conocida
-- Coordinadas de GUI son frágiles; no ajustes sin probar en la resolución objetivo.
-- Render 4K es pesado; `MAX_PARALLEL_RENDERS=4` es el techo sugerido con 3090 Ti.
-- Fallback FFmpeg usa NVENC si `USE_GPU` es True y hay soporte; de lo contrario cae a libx264.
+- Coordenadas GUI son frágiles; prueba en resolución objetivo
+- Render 4K pesado; `MAX_PARALLEL_RENDERS=4` techo con 3090 Ti
+- Fallback FFmpeg usa NVENC si `USE_GPU=True`, sino libx264
 
-## Para Ejecutar Un Test Único (ejemplo)
-- Con pytest instalado: `pytest vhs_effect/test_vhs.py -k position_jitter`.
-- Sin pytest: duplica/ajusta la función en `test_vhs.py` y ejecútala con `python vhs_effect/test_vhs.py` (llama todas las pruebas secuencialmente).
-- Limpia `test_output.jpg` si no lo necesitas; no se versiona.
-
-## Última Nota
-Todo lo que sea cara al usuario debe permanecer en español. Cambios en rutas o coordenadas deben documentarse en el PR. Mantén los assets donde están y evita romper los scripts numerados.
+## Notas para Agentes
+- Instrucción ambigua que afecta producción → pregunta con duda concreta, propón default
+- Tareas simples → actúa sin pedir permiso, resume lo que hiciste
+- Todo cara al usuario en **español**
+- No hay `.cursor/rules` ni `.github/copilot-instructions.md` en este repo

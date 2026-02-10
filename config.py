@@ -20,18 +20,27 @@ BASE_DIR = Path(FAST_BASE_DIR) if USE_FAST_BASE and FAST_BASE_DIR else DEFAULT_B
 # Pipeline de procesamiento
 DIR_LIMPIEZA = BASE_DIR / "01_limpieza_de_impurezas"
 DIR_JUNTAR_AUDIOS = BASE_DIR / "02_juntar_audios"
-DIR_AUDIO_SCRIPTS = BASE_DIR / "01_limpieza_de_impurezas"  # Carpeta fuente para renderizado
+DIR_AUDIO_SCRIPTS = (
+    BASE_DIR / "01_limpieza_de_impurezas"
+)  # Carpeta fuente para renderizado
 DIR_UPLOAD = BASE_DIR / "upload_video"
 DIR_VERIFICACION = BASE_DIR / "verificacion"
 
-# Directorio temporal en SSD para renderizado rápido
-# Los archivos se copian aquí antes de renderizar para evitar I/O bottleneck
+# Directorio temporal para renderizado rápido
+# Opciones: RAM (tmpfs) > SSD NVMe > HDD
+# Con 64GB RAM, usar ramdisk es ~7x más rápido que NVMe
 SSD_TEMP_DIR = Path("/home/banar/temp_render")
-USE_SSD_TEMP = True  # Copiar a SSD antes de renderizar
+USE_SSD_TEMP = True  # Copiar a almacenamiento rápido antes de renderizar
 
-# Staging por lotes en NVMe (opcional)
-# Mueve temporalmente carpetas al NVMe para renderizar y luego devuelve a upload en HDD.
-STAGING_ENABLED = True
+# Ramdisk (tmpfs) - Máxima velocidad de I/O
+# El script monta/desmonta automáticamente si USE_RAMDISK=True
+USE_RAMDISK = True  # Usar RAM en lugar de SSD (requiere sudo sin password para mount)
+RAMDISK_SIZE_GB = 48  # Tamaño del ramdisk en GB (soporta videos 4K de hasta ~4 horas)
+RAMDISK_PATH = Path("/mnt/ramdisk_render")  # Punto de montaje del tmpfs
+
+# Staging por lotes en NVMe (desactivado - usamos RAM directamente)
+# Con ramdisk habilitado, el staging en NVMe es redundante.
+STAGING_ENABLED = False  # Desactivado: flujo directo HDD → RAM → HDD
 STAGING_FAST_BASE_DIR = Path("/var/tmp/01_edicion_automatizada")
 STAGING_BATCH_SIZE = 150
 STAGING_SHUFFLE = True
@@ -75,7 +84,11 @@ INTRO_DURATION = 7.0  # Segundos del video de intro
 # RTX 3090 Ti puede manejar 3-5 streams NVENC simultáneos
 # Configuración óptima: 4 renders paralelos (4 threads por render ≈ 16 total)
 MAX_PARALLEL_RENDERS = 1  # 4K es pesado; ajusta si tu VRAM lo permite
-MAX_FOLDERS_TO_PROCESS = 10  # Límite de carpetas por ejecución
+MAX_FOLDERS_TO_PROCESS = 9999  # Sin límite fijo, se detiene por espacio en disco
+
+# Control inteligente de espacio en disco
+# El renderizado se detiene cuando queda menos de este espacio libre en DIR_UPLOAD
+MIN_FREE_SPACE_GB = 10  # GB mínimos libres antes de detenerse
 
 # Video quality settings
 # GPU (NVENC) settings - Requiere GPU Nvidia con soporte NVENC
@@ -88,19 +101,32 @@ VIDEO_BUFSIZE = "90M"
 
 # Opciones NVENC recomendadas para YouTube 4K SDR
 NVENC_EXTRA_OPTS = [
-    "-rc", "vbr",              # Variable bitrate
-    "-b:v", VIDEO_BITRATE,
-    "-maxrate", VIDEO_MAXRATE,
-    "-bufsize", VIDEO_BUFSIZE,
-    "-bf", "2",
-    "-g", str(FPS // 2),
-    "-profile:v", "high",
-    "-movflags", "+faststart",
-    "-color_primaries", "bt709",
-    "-color_trc", "bt709",
-    "-colorspace", "bt709",
-    "-spatial_aq", "1",        # Adaptive quantization espacial
-    "-temporal_aq", "1",       # Adaptive quantization temporal
+    "-rc",
+    "vbr",  # Variable bitrate
+    "-b:v",
+    VIDEO_BITRATE,
+    "-maxrate",
+    VIDEO_MAXRATE,
+    "-bufsize",
+    VIDEO_BUFSIZE,
+    "-bf",
+    "2",
+    "-g",
+    str(FPS // 2),
+    "-profile:v",
+    "high",
+    "-movflags",
+    "+faststart",
+    "-color_primaries",
+    "bt709",
+    "-color_trc",
+    "bt709",
+    "-colorspace",
+    "bt709",
+    "-spatial_aq",
+    "1",  # Adaptive quantization espacial
+    "-temporal_aq",
+    "1",  # Adaptive quantization temporal
 ]
 
 # CPU (libx264) settings - Fallback si no hay GPU
@@ -144,6 +170,7 @@ IMAGE_FORMATS = (".png", ".jpg", ".jpeg", ".jfif", ".gif", ".tiff", ".raw")
 # FUNCIONES AUXILIARES
 # ============================================================================
 
+
 def create_directories():
     """
     Crea todos los directorios necesarios si no existen
@@ -170,6 +197,7 @@ def create_directories():
         directory.mkdir(parents=True, exist_ok=True)
         print(f"✓ {directory}")
 
+
 def check_environment():
     """
     Verifica que el entorno esté correctamente configurado
@@ -186,10 +214,11 @@ def check_environment():
 
     return errors
 
+
 if __name__ == "__main__":
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("VERIFICACIÓN DE ENTORNO")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     # Verificar entorno
     errors = check_environment()
@@ -206,6 +235,6 @@ if __name__ == "__main__":
         print("Creando directorios necesarios...\n")
         create_directories()
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("CONFIGURACIÓN COMPLETA")
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")
