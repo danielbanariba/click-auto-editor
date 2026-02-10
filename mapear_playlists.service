@@ -1,0 +1,18 @@
+[Unit]
+Description=Mapear Playlists YouTube
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=banar
+WorkingDirectory=/home/banar/Desktop/click-auto-editor
+Environment=YOUTUBE_AUTO_WAIT=1
+Environment=YOUTUBE_AUTO_ROTATE=1
+Environment=YOUTUBE_PLAYLIST_DELAY=2.0
+ExecStart=/home/banar/Desktop/click-auto-editor/env/bin/python "/home/banar/Desktop/click-auto-editor/12. mapear_playlists.py"
+Restart=on-failure
+RestartSec=300
+
+[Install]
+WantedBy=multi-user.target
