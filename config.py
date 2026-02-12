@@ -86,6 +86,11 @@ INTRO_DURATION = 7.0  # Segundos del video de intro
 MAX_PARALLEL_RENDERS = 1  # 4K es pesado; ajusta si tu VRAM lo permite
 MAX_FOLDERS_TO_PROCESS = 9999  # Sin límite fijo, se detiene por espacio en disco
 
+# Selección de carpetas/videos en scripts 1, 2 y 3
+# True  = orden aleatorio
+# False = orden descendente por año (más reciente primero)
+RANDOMIZE_VIDEO_SELECTION = True
+
 # Control inteligente de espacio en disco
 # El renderizado se detiene cuando queda menos de este espacio libre en DIR_UPLOAD
 MIN_FREE_SPACE_GB = 10  # GB mínimos libres antes de detenerse

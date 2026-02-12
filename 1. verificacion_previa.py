@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 import argparse
+import random
 import re
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 
-from config import DIR_LIMPIEZA, DIR_UPLOAD
+from config import DIR_LIMPIEZA, DIR_UPLOAD, RANDOMIZE_VIDEO_SELECTION
 
 
 def cargar_modulo_subir_api():
@@ -87,6 +88,21 @@ def ordenar_carpetas_por_anio(folders):
     return ordered
 
 
+def ordenar_carpetas_para_verificacion(folders, helpers):
+    if not folders:
+        return folders
+
+    if RANDOMIZE_VIDEO_SELECTION:
+        randomized = list(folders)
+        random.shuffle(randomized)
+        return randomized
+
+    if hasattr(helpers, "ordenar_carpetas_por_anio"):
+        return helpers.ordenar_carpetas_por_anio(folders, shuffle_within_year=False)
+
+    return ordenar_carpetas_por_anio(folders)
+
+
 def elegir_origen_interactivo():
     while True:
         print("Elige carpeta base para verificar:")
@@ -101,22 +117,30 @@ def elegir_origen_interactivo():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Verificacion manual sin eliminar carpetas.")
+    parser = argparse.ArgumentParser(
+        description="Verificacion manual sin eliminar carpetas."
+    )
     parser.add_argument(
         "--origen",
         choices=["upload", "limpieza"],
         default=None,
         help="Carpeta base a verificar (upload_video o 01_limpieza_de_impurezas).",
     )
-    parser.add_argument("--ruta", help="Ruta absoluta a verificar (sobrescribe --origen).")
-    parser.add_argument("--carpeta", help="Carpeta especifica dentro de la carpeta base")
+    parser.add_argument(
+        "--ruta", help="Ruta absoluta a verificar (sobrescribe --origen)."
+    )
+    parser.add_argument(
+        "--carpeta", help="Carpeta especifica dentro de la carpeta base"
+    )
     parser.add_argument(
         "--limite",
         type=int,
         default=None,
         help="Cantidad maxima de carpetas a verificar (default: todas)",
     )
-    parser.add_argument("--todo", action="store_true", help="Verificar todas las carpetas disponibles")
+    parser.add_argument(
+        "--todo", action="store_true", help="Verificar todas las carpetas disponibles"
+    )
     parser.add_argument(
         "--permitir-sin-video",
         action="store_true",
@@ -152,10 +176,7 @@ def main():
         folders = [upload_dir]
     else:
         folders = [path for path in upload_dir.iterdir() if path.is_dir()]
-        if hasattr(helpers, "ordenar_carpetas_por_anio"):
-            folders = helpers.ordenar_carpetas_por_anio(folders, shuffle_within_year=False)
-        else:
-            folders = ordenar_carpetas_por_anio(folders)
+        folders = ordenar_carpetas_para_verificacion(folders, helpers)
 
     if not folders:
         print("No hay carpetas para verificar.")
@@ -182,7 +203,9 @@ def main():
             ya_subidos += 1
         revisados += 1
 
-    print(f"Verificacion terminada. Revisados: {revisados} | Marcados como ya subidos: {ya_subidos}")
+    print(
+        f"Verificacion terminada. Revisados: {revisados} | Marcados como ya subidos: {ya_subidos}"
+    )
 
 
 if __name__ == "__main__":

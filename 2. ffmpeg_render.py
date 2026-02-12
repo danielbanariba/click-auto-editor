@@ -50,6 +50,7 @@ from config import (
     STAGING_FAST_BASE_DIR,
     STAGING_BATCH_SIZE,
     STAGING_SHUFFLE,
+    RANDOMIZE_VIDEO_SELECTION,
     USE_CPP_VHS,
     VHS_CPP_BIN,
     VHS_CPP_INTENSITY,
@@ -416,6 +417,22 @@ def order_folders_by_year(entries, shuffle_within_year=True, show_progress=False
     return ordered
 
 
+def order_folders_for_processing(entries, show_progress=False):
+    if not entries:
+        return entries
+
+    if RANDOMIZE_VIDEO_SELECTION:
+        randomized = list(entries)
+        random.shuffle(randomized)
+        return randomized
+
+    return order_folders_by_year(
+        entries,
+        shuffle_within_year=False,
+        show_progress=show_progress,
+    )
+
+
 def stage_folders_to_fast(
     slow_audio: Path, fast_audio: Path, batch_size: int, shuffle: bool
 ):
@@ -426,9 +443,7 @@ def stage_folders_to_fast(
     if not folders:
         return []
 
-    folders = order_folders_by_year(
-        folders, shuffle_within_year=shuffle, show_progress=True
-    )
+    folders = order_folders_for_processing(folders, show_progress=True)
 
     batch_size = max(1, batch_size)
     batch = folders[:batch_size]
@@ -2963,7 +2978,7 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
         ]
 
     # Prioridad por año (más reciente primero), con mezcla opcional dentro del mismo año
-    folders = order_folders_by_year(folders, shuffle_within_year=STAGING_SHUFFLE)
+    folders = order_folders_for_processing(folders)
 
     # Limitar cantidad (ahora es un tope alto, el límite real es el espacio en disco)
     folders = folders[:MAX_FOLDERS_TO_PROCESS]
@@ -3123,7 +3138,7 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
         ]
 
     # Prioridad por año (más reciente primero), con mezcla opcional dentro del mismo año
-    folders = order_folders_by_year(folders, shuffle_within_year=STAGING_SHUFFLE)
+    folders = order_folders_for_processing(folders)
 
     # Limitar cantidad (ahora es un tope alto, el límite real es el espacio en disco)
     folders = folders[:MAX_FOLDERS_TO_PROCESS]
@@ -3232,8 +3247,8 @@ def render_single_video(specific_folder=None):
             print("ERROR: No hay carpetas para procesar")
             return
 
-        # Seleccionar una carpeta aleatoria
-        folder_path, folder_name = random.choice(folders)
+        folders = order_folders_for_processing(folders)
+        folder_path, folder_name = folders[0]
 
     print(f"\n{'=' * 60}")
     print(f"MODO PRUEBA - RENDERIZADO ÚNICO")

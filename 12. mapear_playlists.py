@@ -5,14 +5,23 @@ import os
 import re
 import time
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
 
 from googleapiclient.errors import HttpError
 
-from subir_video.authenticate import authenticate
+from subir_video.authenticate import (
+    authenticate,
+    authenticate_next,
+    mark_credential_exhausted,
+    get_current_credential_path,
+)
 
 DEFAULT_CHECKPOINT = Path(__file__).resolve().parent / "mapear_playlists_checkpoint.txt"
 DEFAULT_STATE = Path(__file__).resolve().parent / "mapear_playlists_state.json"
+DEFAULT_PLAYLIST_LINKS_CACHE = (
+    Path(__file__).resolve().parent / "data" / "playlist_links_cache.json"
+)
 
 
 class RateLimitError(RuntimeError):
@@ -25,12 +34,14 @@ class QuotaExceededError(RuntimeError):
 
 def get_uploads_playlist_id(youtube):
     response = run_with_backoff(
-        lambda: youtube.channels().list(
+        lambda: youtube.channels()
+        .list(
             part="contentDetails",
             mine=True,
             maxResults=1,
             fields="items(contentDetails/relatedPlaylists/uploads)",
-        ).execute(),
+        )
+        .execute(),
         descripcion="listar canal",
     )
     items = response.get("items", [])
@@ -44,12 +55,14 @@ def get_latest_upload_video_id(youtube, uploads_playlist_id=None):
     if not playlist_id:
         return None
     resp = run_with_backoff(
-        lambda: youtube.playlistItems().list(
+        lambda: youtube.playlistItems()
+        .list(
             part="contentDetails",
             playlistId=playlist_id,
             maxResults=1,
             fields="items(contentDetails/videoId)",
-        ).execute(),
+        )
+        .execute(),
         descripcion="listar ultimo upload",
     )
     items = resp.get("items", [])
@@ -88,13 +101,15 @@ def list_playlists(youtube, include_counts=True):
     while True:
         try:
             resp = run_with_backoff(
-                lambda: youtube.playlists().list(
+                lambda: youtube.playlists()
+                .list(
                     part=part,
                     mine=True,
                     maxResults=50,
                     pageToken=page_token,
                     fields=fields,
-                ).execute(),
+                )
+                .execute(),
                 descripcion="listar playlists",
             )
         except QuotaExceededError:
@@ -236,7 +251,9 @@ def is_daily_quota_error(exc):
     return any(reason in {"quotaExceeded", "dailyLimitExceeded"} for reason in reasons)
 
 
-def run_with_backoff(action, descripcion, max_retries=5, base_delay=1.0, max_delay=60.0):
+def run_with_backoff(
+    action, descripcion, max_retries=8, base_delay=2.0, max_delay=120.0
+):
     attempt = 0
     while True:
         try:
@@ -301,13 +318,15 @@ def get_playlist_video_ids(youtube, playlist_id, max_items=200, cache=None):
     truncated = False
     while True:
         resp = run_with_backoff(
-            lambda: youtube.playlistItems().list(
+            lambda: youtube.playlistItems()
+            .list(
                 part="contentDetails",
                 playlistId=playlist_id,
                 maxResults=50,
                 pageToken=page_token,
                 fields="items(contentDetails/videoId),nextPageToken",
-            ).execute(),
+            )
+            .execute(),
             descripcion="listar items de playlist",
         )
         items = resp.get("items", [])
@@ -342,13 +361,15 @@ def is_video_in_playlist(youtube, playlist_id, video_id, max_items=200, cache=No
     fetched = 0
     while True:
         resp = run_with_backoff(
-            lambda: youtube.playlistItems().list(
+            lambda: youtube.playlistItems()
+            .list(
                 part="contentDetails",
                 playlistId=playlist_id,
                 maxResults=50,
                 pageToken=page_token,
                 fields="items(contentDetails/videoId),nextPageToken",
-            ).execute(),
+            )
+            .execute(),
             descripcion="listar items de playlist",
         )
         items = resp.get("items", [])
@@ -438,9 +459,7 @@ def merge_duplicate_playlists(
                 continue
             raise
     if skipped_missing:
-        print(
-            f"Aviso: {skipped_missing} videos no encontrados al fusionar playlists."
-        )
+        print(f"Aviso: {skipped_missing} videos no encontrados al fusionar playlists.")
     return added, canonical_trunc or duplicate_trunc
 
 
@@ -564,7 +583,10 @@ def parse_band_from_title(title):
     if not title:
         return None
     if " - " in title:
-        return title.split(" - ", 1)[0].strip()
+        band = title.split(" - ", 1)[0].strip()
+        # Remover bandera al inicio (ej: "🇦🇺 Gape" -> "Gape").
+        band = re.sub(r"^[\U0001F1E6-\U0001F1FF]{2}\s+", "", band)
+        return band.strip()
     return None
 
 
@@ -576,7 +598,7 @@ def parse_genres_from_description(description):
         if not text:
             continue
         lower = text.lower()
-        if lower.startswith("genre:") or lower.startswith("genero:"):
+        if "genre:" in lower or "genero:" in lower:
             value = text.split(":", 1)[1].strip()
             return split_genres(value)
     return []
@@ -595,6 +617,7 @@ def split_countries(value):
         item = clean_title(part)
         if not item:
             continue
+        item = re.sub(r"[\U0001F1E6-\U0001F1FF]{2}", "", item).strip()
         key = normalize_title(item)
         if key in {"unknown", "desconocido", "n/a", "na"}:
             continue
@@ -614,10 +637,10 @@ def parse_countries_from_description(description):
             continue
         lower = text.lower()
         if (
-            lower.startswith("country:")
-            or lower.startswith("contry:")
-            or lower.startswith("pais:")
-            or lower.startswith("pa\u00eds:")
+            "country:" in lower
+            or "contry:" in lower
+            or "pais:" in lower
+            or "pa\u00eds:" in lower
         ):
             value = text.split(":", 1)[1].strip()
             return split_countries(value)
@@ -661,11 +684,7 @@ def parse_years_from_description(description):
         if not text:
             continue
         lower = text.lower()
-        if (
-            lower.startswith("year:")
-            or lower.startswith("anio:")
-            or lower.startswith("a\u00f1o:")
-        ):
+        if "year:" in lower or "anio:" in lower or "a\u00f1o:" in lower:
             value = text.split(":", 1)[1].strip()
             return split_years(value)
     return []
@@ -673,7 +692,7 @@ def parse_years_from_description(description):
 
 def chunked(items, size):
     for index in range(0, len(items), size):
-        yield items[index:index + size]
+        yield items[index : index + size]
 
 
 def iter_videos_by_ids(youtube, video_ids, include_unlisted=False):
@@ -682,11 +701,13 @@ def iter_videos_by_ids(youtube, video_ids, include_unlisted=False):
             continue
         try:
             vids = run_with_backoff(
-                lambda: youtube.videos().list(
+                lambda: youtube.videos()
+                .list(
                     part="snippet,status",
                     id=",".join(chunk),
                     fields="items(id,snippet(title,description),status/privacyStatus)",
-                ).execute(),
+                )
+                .execute(),
                 descripcion="listar detalles de videos",
             )
         except QuotaExceededError:
@@ -711,7 +732,12 @@ def iter_public_videos(
     uploads_playlist_id=None,
 ):
     playlist_id = uploads_playlist_id or get_uploads_playlist_id(youtube)
-    state = {"first_video_id": None, "completed": False, "stopped_at": False, "limited": False}
+    state = {
+        "first_video_id": None,
+        "completed": False,
+        "stopped_at": False,
+        "limited": False,
+    }
     if not playlist_id:
         return iter(()), state
 
@@ -722,7 +748,8 @@ def iter_public_videos(
         while True:
             try:
                 resp = run_with_backoff(
-                    lambda: youtube.playlistItems().list(
+                    lambda: youtube.playlistItems()
+                    .list(
                         part="snippet,status",
                         playlistId=playlist_id,
                         maxResults=50,
@@ -731,11 +758,14 @@ def iter_public_videos(
                             "items(snippet(title,description,resourceId/videoId),"
                             "status/privacyStatus),nextPageToken"
                         ),
-                    ).execute(),
+                    )
+                    .execute(),
                     descripcion="listar uploads",
                 )
             except QuotaExceededError:
-                print("Cuota diaria agotada al listar uploads. Se detiene la ejecucion.")
+                print(
+                    "Cuota diaria agotada al listar uploads. Se detiene la ejecucion."
+                )
                 raise
             except RateLimitError:
                 print("Rate limit al listar uploads. Se detiene la ejecucion.")
@@ -754,7 +784,9 @@ def iter_public_videos(
                     return
                 status = item.get("status", {})
                 privacy = status.get("privacyStatus") or "public"
-                if privacy != "public" and not (include_unlisted and privacy == "unlisted"):
+                if privacy != "public" and not (
+                    include_unlisted and privacy == "unlisted"
+                ):
                     continue
                 yield {
                     "id": video_id,
@@ -813,6 +845,65 @@ def save_state(path, state):
         json.dump(state, handle, ensure_ascii=True, indent=2)
 
 
+def save_playlist_links_cache(path, playlists_by_key, all_playlists):
+    if not path:
+        return
+    by_id = {}
+    for item in all_playlists:
+        playlist_id = item.get("id")
+        title = clean_title(item.get("title"))
+        if not playlist_id or not title:
+            continue
+        current = by_id.get(playlist_id)
+        count = item.get("count", 0) or 0
+        if current is None or count > current.get("count", 0):
+            by_id[playlist_id] = {
+                "id": playlist_id,
+                "title": title,
+                "count": count,
+            }
+
+    for key, playlist_id in playlists_by_key.items():
+        info = by_id.get(playlist_id)
+        if info is None:
+            by_id[playlist_id] = {
+                "id": playlist_id,
+                "title": key,
+                "count": 0,
+            }
+
+    items = []
+    for item in by_id.values():
+        title = clean_title(item.get("title")) or ""
+        key = normalize_title(title)
+        items.append(
+            {
+                "id": item["id"],
+                "title": title,
+                "title_key": key,
+                "count": int(item.get("count", 0) or 0),
+                "url": f"https://www.youtube.com/playlist?list={item['id']}",
+            }
+        )
+
+    items_sorted = sorted(
+        items,
+        key=lambda row: (
+            -(row.get("count") or 0),
+            row.get("title") or "",
+            row.get("id") or "",
+        ),
+    )
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "total": len(items_sorted),
+        "items": items_sorted,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+
 def append_checkpoint(path, video_id, status="ok"):
     if not path or not video_id:
         return
@@ -831,16 +922,28 @@ def update_checkpoint(path, processed, video_id, status):
     return True
 
 
-def main():
+def main(youtube=None):
     parser = argparse.ArgumentParser(
         description="Mapea videos publicos a playlists por banda, genero, ano y pais."
     )
-    parser.add_argument("--limite", type=int, help="Cantidad maxima de videos a procesar")
-    parser.add_argument("--sin-check", action="store_true", help="No validar si ya existe en playlist")
-    parser.add_argument("--incluir-no-listado", action="store_true", help="Incluye videos no listados")
-    parser.add_argument("--pausa", type=float, help="Segundos de espera entre operaciones")
-    parser.add_argument("--max-scan", type=int, help="Maximo de items a escanear por playlist")
-    parser.add_argument("--solo-bandas", action="store_true", help="Solo playlists por banda")
+    parser.add_argument(
+        "--limite", type=int, help="Cantidad maxima de videos a procesar"
+    )
+    parser.add_argument(
+        "--sin-check", action="store_true", help="No validar si ya existe en playlist"
+    )
+    parser.add_argument(
+        "--incluir-no-listado", action="store_true", help="Incluye videos no listados"
+    )
+    parser.add_argument(
+        "--pausa", type=float, help="Segundos de espera entre operaciones"
+    )
+    parser.add_argument(
+        "--max-scan", type=int, help="Maximo de items a escanear por playlist"
+    )
+    parser.add_argument(
+        "--solo-bandas", action="store_true", help="Solo playlists por banda"
+    )
     parser.add_argument(
         "--solo-generos",
         action="store_true",
@@ -866,11 +969,24 @@ def main():
         type=int,
         help="Procesa solo N pendientes del checkpoint.",
     )
+    parser.add_argument(
+        "--solo-cache-links",
+        action="store_true",
+        help="Solo actualiza data/playlist_links_cache.json y termina.",
+    )
     args = parser.parse_args()
 
-    pause = args.pausa if args.pausa is not None else float(os.environ.get("YOUTUBE_PLAYLIST_DELAY", "0.2"))
+    pause = (
+        args.pausa
+        if args.pausa is not None
+        else float(os.environ.get("YOUTUBE_PLAYLIST_DELAY", "2.0"))
+    )
     create_pause = max(pause or 0.0, 1.0)
-    max_scan = args.max_scan if args.max_scan is not None else int(os.environ.get("YOUTUBE_PLAYLIST_SCAN", "200"))
+    max_scan = (
+        args.max_scan
+        if args.max_scan is not None
+        else int(os.environ.get("YOUTUBE_PLAYLIST_SCAN", "200"))
+    )
     if args.solo_bandas and args.solo_generos:
         print("No se puede usar --solo-bandas y --solo-generos al mismo tiempo.")
         return
@@ -889,7 +1005,9 @@ def main():
     pending_ids = [
         video_id for video_id, status in processed.items() if status == "pendiente"
     ]
-    skip_pending = args.omitir_pendientes or os.environ.get("YOUTUBE_SKIP_PENDING", "0") == "1"
+    skip_pending = (
+        args.omitir_pendientes or os.environ.get("YOUTUBE_SKIP_PENDING", "0") == "1"
+    )
     if skip_pending:
         if pending_ids:
             print(f"Pendientes omitidos por configuracion: {len(pending_ids)}.")
@@ -898,30 +1016,36 @@ def main():
         limite_pendientes = args.limite_pendientes
         if limite_pendientes <= 0:
             if pending_ids:
-                print(
-                    f"Limite de pendientes <= 0. Se omiten {len(pending_ids)}."
-                )
+                print(f"Limite de pendientes <= 0. Se omiten {len(pending_ids)}.")
             pending_ids = []
         elif len(pending_ids) > limite_pendientes:
             total_pendientes = len(pending_ids)
             pending_ids = pending_ids[:limite_pendientes]
-            print(
-                "Pendientes limitados: "
-                f"{len(pending_ids)} de {total_pendientes}."
-            )
+            print(f"Pendientes limitados: {len(pending_ids)} de {total_pendientes}.")
 
     state_path = DEFAULT_STATE
     state = load_state(state_path)
     last_full_scan = bool(state.get("last_full_scan_completed"))
     stop_at_video_id = state.get("last_newest_video_id") if last_full_scan else None
-    auto_limpieza = not args.sin_limpieza and os.environ.get("YOUTUBE_AUTO_CLEAN", "1") == "1"
-    fast_exit = args.salir_si_no_hay_nuevos or os.environ.get("YOUTUBE_FAST_EXIT", "0") == "1"
+    auto_limpieza = (
+        not args.sin_limpieza and os.environ.get("YOUTUBE_AUTO_CLEAN", "1") == "1"
+    )
+    fast_exit = (
+        args.salir_si_no_hay_nuevos or os.environ.get("YOUTUBE_FAST_EXIT", "0") == "1"
+    )
 
-    youtube = authenticate()
+    if youtube is None:
+        youtube = authenticate(prefix="playlists")
 
     uploads_playlist_id = None
     skip_video_processing = False
-    if fast_exit and args.limite is None and not pending_ids and last_full_scan and stop_at_video_id:
+    if (
+        fast_exit
+        and args.limite is None
+        and not pending_ids
+        and last_full_scan
+        and stop_at_video_id
+    ):
         uploads_playlist_id = get_uploads_playlist_id(youtube)
         latest_video_id = get_latest_upload_video_id(
             youtube, uploads_playlist_id=uploads_playlist_id
@@ -937,6 +1061,15 @@ def main():
     playlist_cache, duplicadas, todas_playlists = list_playlists(
         youtube, include_counts=auto_limpieza
     )
+    save_playlist_links_cache(
+        DEFAULT_PLAYLIST_LINKS_CACHE,
+        playlist_cache,
+        todas_playlists,
+    )
+    print(f"Cache de playlists actualizada: {DEFAULT_PLAYLIST_LINKS_CACHE}")
+    if args.solo_cache_links:
+        print("Modo --solo-cache-links: finalizado sin mapear videos.")
+        return
     playlist_items_cache = {}
     if auto_limpieza:
         print("Limpieza automatica: fusionar duplicadas (sin eliminar playlists).")
@@ -960,7 +1093,13 @@ def main():
     seen_video_ids = set()
 
     def procesar_video(video):
-        nonlocal total, added, skipped_no_data, skipped_checkpoint, checkpointed, crear_playlists_bloqueado
+        nonlocal \
+            total, \
+            added, \
+            skipped_no_data, \
+            skipped_checkpoint, \
+            checkpointed, \
+            crear_playlists_bloqueado
         video_id = video.get("id")
         if not video_id:
             return
@@ -972,7 +1111,11 @@ def main():
         title = clean_title(snippet.get("title") or "") or ""
         description = snippet.get("description") or ""
 
-        if checkpoint_path and video_id in processed and processed.get(video_id) in {"ok", "sin_datos"}:
+        if (
+            checkpoint_path
+            and video_id in processed
+            and processed.get(video_id) in {"ok", "sin_datos"}
+        ):
             skipped_checkpoint += 1
             print(f"Omitido por checkpoint: {title} ({video_id})")
             return
@@ -1019,7 +1162,9 @@ def main():
             playlist_id = playlist_cache.get(key)
             if not playlist_id:
                 if crear_playlists_bloqueado:
-                    print(f"Creacion de playlists en pausa. Se salta '{playlist_title}'.")
+                    print(
+                        f"Creacion de playlists en pausa. Se salta '{playlist_title}'."
+                    )
                     video_pendiente = True
                     continue
                 try:
@@ -1030,11 +1175,13 @@ def main():
                         pause=create_pause,
                     )
                 except QuotaExceededError:
-                    print("Cuota diaria agotada al crear playlists. Se detiene la ejecucion.")
+                    print(
+                        "Cuota diaria agotada al crear playlists. Se detiene la ejecucion."
+                    )
                     raise
                 except RateLimitError:
-                    print("Rate limit al crear playlists. Se pausa la creacion por este run.")
-                    crear_playlists_bloqueado = True
+                    print("Rate limit al crear playlists. Esperando 60s...")
+                    time.sleep(60)
                     video_pendiente = True
                     continue
                 except HttpError:
@@ -1062,14 +1209,18 @@ def main():
                 if pause:
                     time.sleep(pause)
             except QuotaExceededError:
-                print("Cuota diaria agotada al agregar videos. Se detiene la ejecucion.")
+                print(
+                    "Cuota diaria agotada al agregar videos. Se detiene la ejecucion."
+                )
                 raise
             except RateLimitError:
                 print("Rate limit en playlists. Se detiene la ejecucion.")
                 raise
             except HttpError as exc:
                 if is_playlist_not_found(exc):
-                    playlist_id = refresh_playlist(youtube, playlist_title, playlist_cache)
+                    playlist_id = refresh_playlist(
+                        youtube, playlist_title, playlist_cache
+                    )
                     if playlist_id:
                         add_video_to_playlist(youtube, playlist_id, video_id)
                         added += 1
@@ -1123,16 +1274,74 @@ def main():
 
 if __name__ == "__main__":
     auto_wait = os.environ.get("YOUTUBE_AUTO_WAIT", "0") == "1"
+    auto_rotate = os.environ.get("YOUTUBE_AUTO_ROTATE", "1") == "1"
     quota_wait = int(os.environ.get("YOUTUBE_QUOTA_WAIT", "3600"))
-    rate_wait = int(os.environ.get("YOUTUBE_RATE_WAIT", "300"))
-    if not auto_wait:
+    rate_wait = int(os.environ.get("YOUTUBE_RATE_WAIT", "60"))
+
+    if not auto_wait and not auto_rotate:
         try:
             main()
         except QuotaExceededError:
-            print("Cuota diaria agotada. Intenta mas tarde o activa YOUTUBE_AUTO_WAIT=1.")
+            print(
+                "Cuota diaria agotada. Intenta mas tarde o activa YOUTUBE_AUTO_ROTATE=1."
+            )
         except RateLimitError:
-            print("Rate limit. Intenta mas tarde o activa YOUTUBE_AUTO_WAIT=1.")
+            print("Rate limit. Intenta mas tarde o activa YOUTUBE_AUTO_ROTATE=1.")
+    elif auto_rotate:
+        # Modo rotacion: cambiar credenciales solo cuando se agota cuota diaria
+        youtube_client = None
+        while True:
+            try:
+                main(youtube=youtube_client)
+                break
+            except QuotaExceededError:
+                print("Cuota agotada. Intentando con siguiente credencial...")
+                youtube_client = authenticate_next()
+                if youtube_client is None:
+                    if auto_wait:
+                        print(
+                            f"Todas las credenciales agotadas. Esperando {quota_wait}s."
+                        )
+                        time.sleep(quota_wait)
+                        from subir_video.authenticate import reset_exhausted_credentials
+
+                        reset_exhausted_credentials()
+                        youtube_client = None  # Se re-autentica en main()
+                    else:
+                        print("Todas las credenciales agotadas. Intenta manana.")
+                        break
+            except RateLimitError:
+                # Rate limit es por canal, no por proyecto. Esperar y reintentar.
+                print(f"Rate limit del canal. Esperando {rate_wait}s y reintentando...")
+                time.sleep(rate_wait)
+            except (QuotaExceededError, RateLimitError) as e:
+                error_tipo = (
+                    "Cuota agotada"
+                    if isinstance(e, QuotaExceededError)
+                    else "Rate limit"
+                )
+                print(f"{error_tipo}. Intentando con siguiente credencial...")
+                youtube_client = authenticate_next()
+                if youtube_client is None:
+                    if auto_wait:
+                        wait_time = (
+                            quota_wait
+                            if isinstance(e, QuotaExceededError)
+                            else rate_wait
+                        )
+                        print(
+                            f"Todas las credenciales agotadas. Esperando {wait_time}s."
+                        )
+                        time.sleep(wait_time)
+                        from subir_video.authenticate import reset_exhausted_credentials
+
+                        reset_exhausted_credentials()
+                        youtube_client = None  # Se re-autentica en main()
+                    else:
+                        print("Todas las credenciales agotadas. Intenta mas tarde.")
+                        break
     else:
+        # Modo espera (legacy)
         while True:
             try:
                 main()

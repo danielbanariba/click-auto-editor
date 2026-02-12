@@ -54,6 +54,7 @@ PROFANITY_EXACT = {
     "whore",
     "whores",
     "whorecraft",
+    "whorrified",
     "bastard",
     "bastards",
     "cum",
@@ -115,6 +116,7 @@ PROFANITY_EXACT = {
     "erect",
     "testicle",
     "testicles",
+    "testicular",
     "susticles",  # Variante meme de testicles
     "balls",
     "ballsack",
@@ -136,16 +138,15 @@ PROFANITY_EXACT = {
     "sodomized",
     "fellatio",
     "cunnilingus",
-    "69",
     "doggystyle",
     "missionary",
     "cowgirl",
-    "reverse",
     "facial",
     "bukake",
     "bukkake",
     "semen",
     "sperm",
+    "spermatic",
     "precum",
     "horny",
     "horniest",
@@ -162,6 +163,73 @@ PROFANITY_EXACT = {
     "kink",
     "fetish",
     "fetishes",
+    # Actos sexuales compuestos
+    "skullfuck",
+    "skullfucked",
+    "skullfucking",
+    "facefuck",
+    "facefucked",
+    "facefucking",
+    "throatfuck",
+    "throatfucked",
+    "throatfucking",
+    "assfuck",
+    "assfucked",
+    "assfucking",
+    "buttfuck",
+    "buttfucked",
+    "buttfucking",
+    "mindfuck",
+    "mindfucked",
+    "mindfucking",
+    "clusterfuck",
+    "insemination",
+    "inseminated",
+    "inseminate",
+    "impregnate",
+    "impregnated",
+    "impregnation",
+    # Términos de prostitución/explotación
+    "hooker",
+    "hookers",
+    "prostitute",
+    "prostitutes",
+    "prostitution",
+    "pimp",
+    "pimps",
+    "pimping",
+    # Genital/anatomía explícita
+    "genital",
+    "genitals",
+    "genitalia",
+    "boner",
+    "boners",
+    "erect",
+    "erection",
+    "womb",
+    "uterus",
+    "uterine",
+    "ovary",
+    "ovaries",
+    "umbilical",
+    "amniotic",
+    # Fluidos corporales ofensivos
+    "faeces",
+    "feces",
+    "faecal",
+    "fecal",
+    "faecaloma",
+    "diarrhoea",
+    "diarrhea",
+    "vomit",
+    "vomiting",
+    "urine",
+    "urinate",
+    "urinating",
+    "excrement",
+    "defecate",
+    "defecating",
+    "defecation",
     # Inglés - violencia extrema / gore explícito
     "rape",
     "raped",
@@ -188,6 +256,7 @@ PROFANITY_EXACT = {
     "mutilate",
     "mutilated",
     "mutilation",
+    "mutilating",
     "dismember",
     "dismembered",
     "dismemberment",
@@ -202,11 +271,141 @@ PROFANITY_EXACT = {
     "evisceration",
     "fetal",
     "abortion",
+    "aborted",
     "infanticide",
     "genocide",
     "holocaust",
     "terrorist",
     "terrorism",
+    # Gore médico/anatómico gráfico
+    "cadaver",
+    "cadaveric",
+    "cadavers",
+    "corpse",
+    "corpses",
+    "carcass",
+    "carcasses",
+    "carrion",
+    "putrid",
+    "putridity",
+    "putrefaction",
+    "putrefied",
+    "putrescent",
+    "rotten",
+    "rotting",
+    "rot",
+    "decompose",
+    "decomposed",
+    "decomposing",
+    "decomposition",
+    "decay",
+    "decayed",
+    "decaying",
+    "necrotic",
+    "necrosis",
+    "necrotizing",
+    "gangrene",
+    "gangrenous",
+    "septic",
+    "sepsis",
+    "septicemia",
+    "septicemic",
+    "suppurate",
+    "suppurated",
+    "suppuration",
+    "pus",
+    "purulent",
+    "pustule",
+    "pustules",
+    "abscess",
+    "abscesses",
+    "lesion",
+    "lesions",
+    "maggot",
+    "maggots",
+    "vermin",
+    "verminous",
+    "infest",
+    "infested",
+    "infestation",
+    # Violencia gráfica
+    "beheaded",
+    "behead",
+    "beheading",
+    "impale",
+    "impaled",
+    "impalement",
+    "disembowel",
+    "disemboweled",
+    "castrate",
+    "castrated",
+    "castration",
+    "amputation",
+    "amputate",
+    "amputated",
+    "lacerate",
+    "lacerated",
+    "laceration",
+    "sever",
+    "severed",
+    "severing",
+    "hack",
+    "hacked",
+    "hacking",
+    "slash",
+    "slashed",
+    "slashing",
+    "stab",
+    "stabbed",
+    "stabbing",
+    "butcher",
+    "butchered",
+    "butchering",
+    "slaughter",
+    "slaughtered",
+    "slaughtering",
+    "massacre",
+    "massacred",
+    "carnage",
+    "bloodbath",
+    "gory",
+    "goriest",
+    "viscera",
+    "visceral",
+    "entrails",
+    "intestine",
+    "intestines",
+    "intestinal",
+    "bowel",
+    "bowels",
+    # Enfermedades/condiciones ofensivas
+    "syphilis",
+    "syphilitic",
+    "herpes",
+    "gonorrhea",
+    "chlamydia",
+    "plague",
+    "leprosy",
+    "leper",
+    "cholera",
+    "typhoid",
+    "anthrax",
+    "ebola",
+    "smallpox",
+    # Términos de abuso/explotación
+    "retard",
+    "retarded",
+    "cripple",
+    "crippled",
+    # Canibalismo (cannibal está en whitelist para Cannibal Corpse)
+    "cannibalism",
+    "cannibalistic",
+    "anthropophagy",
+    "anthropophagous",
+    "anthropophagia",
+    "devour",
+    "devoured",
+    "devouring",
     # Español - vulgaridades
     "puta",
     "putas",
@@ -366,11 +565,8 @@ WHITELIST = {
     "murdered",
     "murderer",
     "murderous",
-    "gore",
-    "gory",
-    "gored",
-    "fist",  # Puño, temática común
-    "fists",
+    "fist",
+    "fists",  # Puño, temática común en metal
     # Palabras con "gore"
     "category",
     "categories",
@@ -387,14 +583,67 @@ WHITELIST = {
     "cucumber",
     "cumulative",
     "vacuum",
-    # Nombres de bandas/artistas conocidos
+    # Nombres de bandas/artistas y términos temáticos de metal
     "cannibal",  # Cannibal Corpse
+    "corpse",  # Cannibal Corpse, Corpse, etc.
     "carcass",  # Banda de grindcore
     "napalm",  # Napalm Death
     "obituary",  # Banda de death metal
     "slayer",  # Banda de thrash metal
     "exodus",  # Banda de thrash metal
     "massacre",  # Banda de death metal
+    "autopsy",  # Banda de death metal
+    "morbid",  # Morbid Angel
+    "death",  # Banda de death metal
+    "dying",  # Dying Fetus
+    "fetus",  # Dying Fetus
+    "butcher",
+    "butchered",
+    "butchering",  # Términos comunes en metal
+    "slaughter",
+    "slaughtered",  # Términos comunes en metal
+    "blood",
+    "bloody",
+    "bleeding",
+    "dead",
+    "deadly",
+    "evil",
+    "dark",
+    "darkness",
+    "doom",
+    "doomed",
+    "grave",
+    "graveyard",
+    "tomb",
+    "tombs",
+    "death",
+    "deathly",
+    "demon",
+    "demons",
+    "demonic",
+    "satan",
+    "satanic",
+    "satanism",
+    "hell",
+    "hellish",
+    "infernal",
+    "inferno",
+    "abyss",
+    "chaos",
+    "chaotic",
+    "brutal",
+    "brutality",
+    "extreme",
+    "savage",
+    "vicious",
+    "violent",
+    "violence",
+    "war",
+    "warfare",
+    "destruction",
+    "destructive",
+    "annihilation",
+    "annihilate",
 }
 
 # ============================================================================
@@ -525,29 +774,6 @@ VOWELLESS_PATTERNS = {
     "plln": "pollon",
 }
 
-# Patrones regex para detectar palabras parcialmente censuradas
-# Formato: (regex_pattern, palabra_original)
-# NOTA: No usamos \b porque no funciona bien con asteriscos
-CENSORED_PATTERNS = [
-    # fuck/fucking/fucked (f***, f****, f*****, f******, etc.)
-    (r"^f\*+(?:ing|ed|er|s|k|ck)?$", "fuck"),
-    (r"^f\*+k(?:ing|ed|er|s)?$", "fuck"),
-    # shit/shitting (s***, s****)
-    (r"^s\*+(?:t|tt|tty|tting)?$", "shit"),
-    # dick (d***, d**k)
-    (r"^d\*+(?:k|ck|cks)?$", "dick"),
-    # cock (c***, c**k) - también cubre cum/cunt parcialmente
-    (r"^c\*+(?:k|ck|cks)?$", "cock"),
-    (r"^c\*+(?:m|ms)?$", "cum"),
-    (r"^c\*+(?:t|nt|nts)?$", "cunt"),
-    # pussy (p****, p***y)
-    (r"^p\*+(?:y|sy|ssy)?$", "pussy"),
-    # anal (a***)
-    (r"^a\*+(?:l|al)?$", "anal"),
-    # ass (a**)
-    (r"^a\*+(?:s|ss)?$", "ass"),
-]
-
 # ============================================================================
 # FUNCIONES DE CENSURA
 # ============================================================================
@@ -562,18 +788,6 @@ def is_whitelisted(word: str) -> bool:
     """Verifica si una palabra está en la lista blanca."""
     normalized = normalize_word(word)
     return normalized in WHITELIST
-
-
-def matches_censored_pattern(word: str) -> bool:
-    """
-    Verifica si una palabra coincide con patrones de censura parcial.
-    Por ejemplo: f***, c***, d***, p****, etc.
-    """
-    word_lower = word.lower()
-    for pattern, _ in CENSORED_PATTERNS:
-        if re.match(pattern, word_lower):
-            return True
-    return False
 
 
 def should_censor(word: str) -> bool:
@@ -599,10 +813,6 @@ def should_censor(word: str) -> bool:
 
     # Detectar patrones sin vocales (f*ck -> fck -> fuck)
     if normalized in VOWELLESS_PATTERNS:
-        return True
-
-    # Detectar palabras ya parcialmente censuradas (f***, c***, etc.)
-    if matches_censored_pattern(word):
         return True
 
     return False

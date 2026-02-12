@@ -12,6 +12,7 @@ import socket
 import ssl
 import sys
 import time
+import unicodedata
 import webbrowser
 from urllib.parse import quote, unquote
 import uuid
@@ -26,9 +27,57 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from mutagen import File as MutagenFile
 
-from config import AUDIO_FORMATS, DIR_UPLOAD, DIR_YA_SUBIDOS
-from subir_video.authenticate import authenticate
+from config import AUDIO_FORMATS, DIR_UPLOAD, DIR_YA_SUBIDOS, RANDOMIZE_VIDEO_SELECTION
+from subir_video.authenticate import authenticate, authenticate_next
 from limpieza.censura import censor_profanity
+
+
+class QuotaExceededError(RuntimeError):
+    """Error lanzado cuando se agota la cuota diaria de la YouTube API."""
+
+    pass
+
+
+class UploadLimitExceededError(RuntimeError):
+    """Error lanzado cuando el canal de YouTube alcanza su limite de subidas diarias."""
+
+    pass
+
+
+def _get_error_reasons(exc: HttpError) -> list[str]:
+    """Extrae las razones de error de un HttpError."""
+    try:
+        content = (
+            exc.content.decode("utf-8")
+            if isinstance(exc.content, bytes)
+            else exc.content
+        )
+        data = json.loads(content)
+        errors = data.get("error", {}).get("errors", [])
+        return [e.get("reason", "") for e in errors]
+    except (json.JSONDecodeError, AttributeError):
+        return []
+
+
+def is_quota_error(exc: HttpError) -> bool:
+    """Detecta si un HttpError es por cuota agotada de la API."""
+    if exc.resp is None:
+        return False
+    if exc.resp.status not in (403, 429):
+        return False
+    reasons = _get_error_reasons(exc)
+    return any(r in {"quotaExceeded", "dailyLimitExceeded"} for r in reasons)
+
+
+def is_upload_limit_error(exc: HttpError) -> bool:
+    """Detecta si un HttpError es por limite de subidas del canal."""
+    if exc.resp is None:
+        return False
+    if exc.resp.status != 400:
+        return False
+    reasons = _get_error_reasons(exc)
+    return "uploadLimitExceeded" in reasons
+
 
 BASE_URL = "https://deathgrind.club"
 API_URL = f"{BASE_URL}/api"
@@ -79,6 +128,7 @@ STREAM_SERVICES = [
 ]
 
 FOLLOW_SERVICES = [
+    "official_site",
     "facebook",
     "instagram",
     "youtube",
@@ -97,6 +147,7 @@ SERVICE_LABELS = {
     "apple_music": "Apple Music",
     "deezer": "Deezer",
     "amazon": "Amazon Music",
+    "official_site": "Official Site",
     "facebook": "Facebook",
     "instagram": "Instagram",
     "youtube": "YouTube",
@@ -125,6 +176,13 @@ SERVICE_MATCHERS = {
     "discogs": ["discogs.com"],
     "vk": ["vk.com"],
 }
+
+PLAYLIST_LINKS_CACHE_PATH = Path(
+    os.environ.get(
+        "YOUTUBE_PLAYLIST_LINKS_CACHE",
+        str(Path(__file__).resolve().parent / "data" / "playlist_links_cache.json"),
+    )
+)
 
 
 def cargar_env(env_path=".env"):
@@ -427,6 +485,162 @@ def format_genre_text(value):
     return "/".join(parts) if parts else "Unknown"
 
 
+def normalize_lookup_text(value):
+    if not value:
+        return ""
+    text = unicodedata.normalize("NFKD", str(value))
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    return re.sub(r"\s+", " ", text)
+
+
+def tokenize_lookup_text(value):
+    text = normalize_lookup_text(value)
+    if not text:
+        return []
+    return [token for token in text.split() if len(token) > 2]
+
+
+def country_flag_emoji(country_code):
+    if not country_code or len(country_code) != 2:
+        return ""
+    code = country_code.upper()
+    if not code.isalpha():
+        return ""
+    return "".join(chr(127397 + ord(char)) for char in code)
+
+
+def resolve_country_meta(country_name):
+    code = None
+    normalized_name = country_name
+    if not country_name:
+        return {
+            "name": None,
+            "code": None,
+            "flag": "",
+        }
+
+    text = str(country_name).strip()
+    if len(text) == 2 and text.isalpha():
+        code = text.upper()
+    else:
+        try:
+            import pycountry
+
+            match = pycountry.countries.lookup(text)
+            if match and getattr(match, "alpha_2", None):
+                code = match.alpha_2
+                normalized_name = match.name
+        except Exception:
+            pass
+
+    return {
+        "name": normalized_name,
+        "code": code,
+        "flag": country_flag_emoji(code),
+    }
+
+
+def load_playlist_links_cache():
+    path = PLAYLIST_LINKS_CACHE_PATH
+    if not path.exists():
+        return []
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        items = payload.get("items") if isinstance(payload, dict) else payload
+        if not isinstance(items, list):
+            return []
+        normalized = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            url = str(item.get("url") or "").strip()
+            if not title or not url:
+                continue
+            normalized.append(
+                {
+                    "title": title,
+                    "url": url,
+                    "title_key": normalize_lookup_text(item.get("title_key") or title),
+                }
+            )
+        return normalized
+    except Exception:
+        return []
+
+
+def find_best_playlist_link(playlist_cache, query_texts, required_texts=None):
+    if not playlist_cache:
+        return None
+
+    query_tokens = []
+    for query in query_texts or []:
+        query_tokens.extend(tokenize_lookup_text(query))
+    if not query_tokens:
+        return None
+    required_tokens = []
+    for text in required_texts or []:
+        required_tokens.extend(tokenize_lookup_text(text))
+
+    best_item = None
+    best_score = -1
+    for item in playlist_cache:
+        title_key = item.get("title_key") or ""
+        if not title_key:
+            continue
+        if required_tokens and not all(token in title_key for token in required_tokens):
+            continue
+        score = 0
+        for token in query_tokens:
+            if token in title_key:
+                score += 3
+        for token in required_tokens:
+            if token in title_key:
+                score += 5
+        if title_key == normalize_lookup_text(" ".join(query_texts or [])):
+            score += 10
+        if score > best_score:
+            best_score = score
+            best_item = item
+    return best_item
+
+
+def build_dynamic_hashtags(genres, country_name, year_value, tipo_full):
+    tags = []
+    seen = set()
+
+    def add_tag(raw):
+        if not raw:
+            return
+        slug = normalize_lookup_text(raw).replace(" ", "")
+        if not slug or slug in seen:
+            return
+        seen.add(slug)
+        tags.append(f"#{slug}")
+
+    for genre in genres or []:
+        add_tag(genre)
+
+    if genres:
+        add_tag(genres[0])
+        primary_tokens = tokenize_lookup_text(genres[0])
+        for token in primary_tokens[:4]:
+            add_tag(token)
+
+    if country_name:
+        add_tag(f"{country_name} metal")
+    if year_value:
+        add_tag(year_value)
+    if tipo_full:
+        add_tag(tipo_full)
+    add_tag("underground metal")
+    add_tag("extreme metal")
+
+    return tags[:14]
+
+
 def strip_album_suffix(value):
     cleaned = str(value)
     patterns = [
@@ -574,6 +788,18 @@ def ordenar_carpetas_por_anio(folders, shuffle_within_year=True):
     return ordered
 
 
+def ordenar_carpetas_para_subida(folders):
+    if not folders:
+        return folders
+
+    if RANDOMIZE_VIDEO_SELECTION:
+        randomized = list(folders)
+        random.shuffle(randomized)
+        return randomized
+
+    return ordenar_carpetas_por_anio(folders, shuffle_within_year=False)
+
+
 def unwrap_deathgrind_payload(data):
     if isinstance(data, dict):
         for key in ("post", "band"):
@@ -694,7 +920,7 @@ def normalizar_pais(pais):
         if name_en and name_es:
             if name_en == name_es:
                 return name_en
-            return f"{name_en} / {name_es}"
+            return name_en
         return name_en or name_es or code
     return text
 
@@ -949,6 +1175,8 @@ def normalizar_link(item):
             break
     if not service_key and name:
         name_lower = name.lower()
+        if any(token in name_lower for token in ["official", "website", "site", "web"]):
+            service_key = "official_site"
         for key in SERVICE_MATCHERS.keys():
             if key.replace("_", " ") in name_lower:
                 # Evitar etiquetas incorrectas (ej: Bandcamp apuntando a Mega).
@@ -957,6 +1185,10 @@ def normalizar_link(item):
                 ):
                     service_key = key
                 break
+    if not service_key and name:
+        lowered = str(name).strip().lower()
+        if lowered in {"official", "official site", "website", "site", "web"}:
+            service_key = "official_site"
     return service_key, url
 
 
@@ -1069,6 +1301,63 @@ def truncar_titulo(title, max_len=TITLE_MAX_CHARS, marker=FULL_ALBUM_MARKER):
     return texto[: max_len - len(ellipsis)].rstrip() + ellipsis
 
 
+def build_public_title(country_flag, band, album, year_text, genre_display, tipo_caps):
+    flag_prefix = f"{country_flag} " if country_flag else ""
+    return (
+        f"{flag_prefix}{band} - {album} ({year_text}) • [{genre_display}] ⟨{tipo_caps}⟩"
+    )
+
+
+def compress_title_to_limit(
+    country_flag, band, album, year_text, genre_text, tipo_full
+):
+    genres = split_genres(genre_text)
+    if not genres:
+        genres = ["Unknown"]
+    tipo_caps = (tipo_full or "Full Album").upper()
+
+    def make_title(active_flag, active_genres, active_tipo):
+        return build_public_title(
+            active_flag,
+            band,
+            album,
+            year_text,
+            "/".join(active_genres),
+            active_tipo,
+        )
+
+    title = make_title(country_flag, genres, tipo_caps)
+    if len(title) <= TITLE_MAX_CHARS:
+        return title
+
+    # 1) Si hay multiples generos, quitar progresivamente el mas largo.
+    reduced_genres = list(genres)
+    while len(reduced_genres) > 1:
+        longest = max(reduced_genres, key=len)
+        reduced_genres.remove(longest)
+        title = make_title(country_flag, reduced_genres, tipo_caps)
+        if len(title) <= TITLE_MAX_CHARS:
+            return title
+
+    # 2) Quitar bandera.
+    title = make_title("", reduced_genres, tipo_caps)
+    if len(title) <= TITLE_MAX_CHARS:
+        return title
+
+    # 3) Acortar tipo.
+    short_tipo = tipo_caps.replace("FULL ", "")
+    title = make_title("", reduced_genres, short_tipo)
+    if len(title) <= TITLE_MAX_CHARS:
+        return title
+
+    # 4) Quitar bloque de tipo.
+    title = f"{band} - {album} ({year_text}) • [{'/'.join(reduced_genres)}]"
+    if len(title) <= TITLE_MAX_CHARS:
+        return title
+
+    return truncar_titulo(title)
+
+
 def truncar_descripcion(texto, max_bytes=DESCRIPTION_MAX_BYTES, suffix="..."):
     if texto is None:
         return ""
@@ -1082,6 +1371,54 @@ def truncar_descripcion(texto, max_bytes=DESCRIPTION_MAX_BYTES, suffix="..."):
     limit = max_bytes - len(suffix_bytes)
     truncated = raw[:limit].decode("utf-8", errors="ignore").rstrip()
     return truncated + suffix
+
+
+def ensure_description_limit(full_description):
+    if len(full_description.encode("utf-8")) <= DESCRIPTION_MAX_BYTES:
+        return full_description
+
+    trimmed = full_description
+    steps = [
+        ("💼 LABELS: Promotional Packages Available", "Eliminar bloque LABELS"),
+        ("🎸 BANDS: Submit Your Album (FREE)", "Eliminar bloque BANDS"),
+        ("╔════════════════════════════════════════════╗", "Eliminar bloque SUBSCRIBE"),
+        ("🔥 MORE SLAM", "Eliminar bloque MORE SLAM"),
+        ("🔗 FOLLOW", "Eliminar bloque FOLLOW"),
+        ("🎧 STREAM & DOWNLOAD", "Eliminar bloque STREAM"),
+    ]
+
+    for header, _label in steps:
+        trimmed = remove_section_by_header(trimmed, header)
+        if len(trimmed.encode("utf-8")) <= DESCRIPTION_MAX_BYTES:
+            return trimmed
+
+    return truncar_descripcion(trimmed, max_bytes=DESCRIPTION_MAX_BYTES)
+
+
+def remove_section_by_header(text, header_prefix):
+    lines = text.splitlines()
+    divider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    i = 0
+    while i < len(lines):
+        if (
+            lines[i].strip() == divider
+            and i + 2 < len(lines)
+            and lines[i + 2].strip() == divider
+            and lines[i + 1].strip().startswith(header_prefix)
+        ):
+            j = i + 3
+            while j < len(lines):
+                if (
+                    lines[j].strip() == divider
+                    and j + 2 < len(lines)
+                    and lines[j + 2].strip() == divider
+                ):
+                    break
+                j += 1
+            del lines[i:j]
+            break
+        i += 1
+    return "\n".join(lines).strip()
 
 
 def extraer_audio_metadata(audio_path):
@@ -1833,37 +2170,186 @@ def verificacion_manual(folder_path, repertorio):
     return False
 
 
-def construir_descripcion(genre, year, links, tracklist, country=None):
+def format_tracklist_for_description(tracklist):
     lines = []
-    lines.append(f"Genre: {format_genre_text(genre)}")
-    if country:
-        lines.append(f"Country: {country}")
-    lines.append(f"Year: {year or 'Unknown'}")
-    lines.append("")
-    stream_links = [
-        f"{SERVICE_LABELS[key]}: {links.get('stream', {}).get(key)}"
-        for key in STREAM_SERVICES
-        if links.get("stream", {}).get(key)
-    ]
-    follow_links = [
-        f"{SERVICE_LABELS[key]}: {links.get('follow', {}).get(key)}"
-        for key in FOLLOW_SERVICES
-        if links.get("follow", {}).get(key)
-    ]
+    pattern = re.compile(r"^\s*\d+\s*-\s*(.*?)\s*\((\d{2}:\d{2})\)\s*$")
+    for row in tracklist:
+        text = str(row).strip()
+        match = pattern.match(text)
+        if match:
+            title = match.group(1).strip()
+            timestamp = match.group(2).strip()
+            lines.append(f"[{timestamp}] ► {title}")
+            continue
+        lines.append(f"► {text}")
+    return lines
 
-    if stream_links:
-        lines.append("Stream/Download:")
-        lines.extend(stream_links)
+
+def construir_descripcion(
+    band,
+    genre,
+    year,
+    links,
+    tracklist,
+    country_name,
+    country_flag,
+    tipo_full,
+    playlist_cache,
+):
+    genre_display = format_genre_text(genre)
+    country_display = country_name or "Unknown"
+    year_display = str(year) if year else "Unknown"
+    tipo_display = (tipo_full or "Full Album").upper()
+
+    genre_parts = split_genres(genre_display)
+    genre_playlist = find_best_playlist_link(playlist_cache, [genre_display])
+    regional_playlist = find_best_playlist_link(
+        playlist_cache,
+        [genre_display, f"{country_display} metal"],
+        required_texts=[country_display],
+    )
+
+    regional_playlist_url = regional_playlist["url"] if regional_playlist else None
+    regional_playlist_title = (
+        regional_playlist["title"] if regional_playlist else country_display
+    )
+
+    hashtags = build_dynamic_hashtags(
+        split_genres(genre_display),
+        country_display,
+        year_display,
+        tipo_display,
+    )
+
+    tracklist_lines = format_tracklist_for_description(tracklist)
+
+    divider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    follow_lines = []
+    follow_map = [
+        ("📘", "Facebook", "facebook"),
+        ("📸", "Instagram", "instagram"),
+        ("🗂️", "Metal Archives", "metal_archives"),
+        ("🌐", "Official Site", "official_site"),
+    ]
+    for icon, label, key in follow_map:
+        value = links.get("follow", {}).get(key)
+        if value:
+            follow_lines.append(f"{icon} {label}: {value}")
+
+    stream_lines = []
+    stream_map = [
+        ("🟢", "Spotify", "spotify", False),
+        ("🔵", "Bandcamp", "bandcamp", True),
+        ("🔴", "Apple Music", "apple_music", False),
+        ("⚫", "YouTube Music", "youtube_music", False),
+        ("🟠", "Deezer", "deezer", False),
+    ]
+    for icon, label, key, support_band in stream_map:
+        value = links.get("stream", {}).get(key)
+        if not value:
+            continue
+        line = f"{icon} {label}: {value}"
+        if support_band:
+            line += " ← SUPPORT THE BAND!"
+        stream_lines.append(line)
+
+    more_slam_lines = ["▸ Browse 1000+ albums: danielbanariba.com/metal-archive"]
+    used_playlist_urls = set()
+    for part in genre_parts:
+        part_playlist = find_best_playlist_link(playlist_cache, [part])
+        if not part_playlist:
+            continue
+        url = part_playlist.get("url")
+        if not url or url in used_playlist_urls:
+            continue
+        used_playlist_urls.add(url)
+        more_slam_lines.append(f"▸ {part} playlist: {url}")
+
+    if not genre_parts and genre_playlist and genre_playlist.get("url"):
+        url = genre_playlist.get("url")
+        if url not in used_playlist_urls:
+            used_playlist_urls.add(url)
+            more_slam_lines.append(f"▸ {genre_display} playlist: {url}")
+
+    if regional_playlist_url and regional_playlist_url not in used_playlist_urls:
+        more_slam_lines.append(f"▸ {regional_playlist_title}: {regional_playlist_url}")
+
+    lines = [
+        divider,
+        f"🔗 FOLLOW {band.upper()}",
+        divider,
+    ]
+    if follow_lines:
+        lines.extend(["", *follow_lines, ""])
+    else:
         lines.append("")
 
-    if follow_links:
-        lines.append("Follow:")
-        lines.extend(follow_links)
+    lines.extend(
+        [
+            divider,
+            "🎧 STREAM & DOWNLOAD",
+            divider,
+        ]
+    )
+    if stream_lines:
+        lines.extend(["", *stream_lines, ""])
+    else:
         lines.append("")
 
-    lines.append("Tracklist:")
-    lines.append("")
-    lines.extend(tracklist)
+    lines.extend(
+        [
+            divider,
+            "📀 ALBUM INFO",
+            divider,
+            "",
+            f"📅 Year: {year_display}",
+            f"🌍 Country: {country_display}{' ' + country_flag if country_flag else ''}",
+            f"⚡ Genre: {genre_display}",
+            "",
+            divider,
+            "⏱️ TRACKLIST",
+            divider,
+            "",
+        ]
+    )
+    lines.extend(tracklist_lines)
+    lines.extend(
+        [
+            "",
+            divider,
+            "🔥 MORE SLAM",
+            divider,
+            "",
+            *more_slam_lines,
+            "",
+            "╔════════════════════════╗",
+            "║       💀 SUBSCRIBE FOR MORE 💀        ║",
+            "╚════════════════════════╝",
+            "",
+            "🔔 Daily underground extreme metal uploads",
+            "👍 LIKE if this crushes your skull",
+            "💬 COMMENT your favorite track",
+            "🔄 SHARE with metalheads",
+            "",
+            divider,
+            "🎸 BANDS: Submit Your Album (FREE)",
+            divider,
+            "",
+            "Get featured on our channel (13,000+ monthly listeners)",
+            "→ danielbanariba.com/metal-archive/submit",
+            "",
+            divider,
+            "💼 LABELS: Promotional Packages Available",
+            divider,
+            "",
+            "Reach highly engaged extreme metal audience",
+            "→ danielbanariba.com/metal-archive/promo",
+            "",
+            divider,
+            "",
+            " ".join(hashtags),
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -1965,6 +2451,14 @@ def subir_video(
                 sys.stdout.write("\n")
                 sys.stdout.flush()
                 last_percent = -1
+            # Detectar error de cuota agotada (API)
+            if is_quota_error(exc):
+                raise QuotaExceededError(f"Cuota diaria agotada: {exc}")
+            # Detectar limite de subidas del canal
+            if is_upload_limit_error(exc):
+                raise UploadLimitExceededError(
+                    f"Limite de subidas del canal alcanzado: {exc}"
+                )
             if exc.resp is not None and exc.resp.status in RETRIABLE_STATUS_CODES:
                 retry += 1
                 if max_retries is not None and retry > max_retries:
@@ -2103,7 +2597,6 @@ def procesar_carpeta(
         genre_text = context["genre"]
 
     tipo_full = formatear_tipo_full(release_tipo)
-    title = f"{band} - {album} ({tipo_full})"
 
     band_data = None
     if session and band_id:
@@ -2120,6 +2613,19 @@ def procesar_carpeta(
     if not pais and csv_country:
         pais = csv_country
     pais = normalizar_pais(pais)
+    country_meta = resolve_country_meta(pais)
+    country_name = country_meta.get("name") or pais or "Unknown"
+    country_flag = country_meta.get("flag") or ""
+
+    year_text = str(release_year) if release_year else "Unknown"
+    title = compress_title_to_limit(
+        country_flag=country_flag,
+        band=band,
+        album=album,
+        year_text=year_text,
+        genre_text=genre_text,
+        tipo_full=tipo_full,
+    )
 
     links = {"stream": {}, "follow": {}}
     if session and post_id:
@@ -2152,9 +2658,19 @@ def procesar_carpeta(
 
     tracklist = build_tracklist(tracks, track_titles if track_titles else None)
     safe_tracklist = [censor_profanity(line) for line in tracklist]
+    playlist_cache = load_playlist_links_cache()
     description = construir_descripcion(
-        genre_text, release_year, links, safe_tracklist, country=pais
+        band=band,
+        genre=genre_text,
+        year=release_year,
+        links=links,
+        tracklist=safe_tracklist,
+        country_name=country_name,
+        country_flag=country_flag,
+        tipo_full=tipo_full,
+        playlist_cache=playlist_cache,
     )
+    description = ensure_description_limit(description)
     title = censor_profanity(title)
     title = truncar_titulo(title)
     description = censor_profanity(description)
@@ -2239,7 +2755,7 @@ def main():
     generos, generos_lookup = cargar_generos()
     repertorio = cargar_repertorio()
 
-    youtube = authenticate()
+    youtube = authenticate(prefix="upload")
     if session and not args.sin_deathgrind:
         ok = deathgrind_smoke_test(session, generos)
         if not ok:
@@ -2278,13 +2794,24 @@ def main():
     pending_items = []
     queued_names = set()
     revisadas = set()  # Todas las carpetas ya revisadas (agregadas o no)
+    total_uploaded = 0
+    total_skipped_missing_video = 0
+    total_failed_api = 0
+
+    def imprimir_resumen_subida():
+        print(f"\n{'=' * 60}")
+        print("RESUMEN DE SUBIDA")
+        print(f"Subidos: {total_uploaded}")
+        print(f"Omitidos sin video: {total_skipped_missing_video}")
+        print(f"Fallidos API: {total_failed_api}")
+        print(f"{'=' * 60}\n")
 
     while True:
         if args.carpeta:
             folders = [upload_dir] if upload_dir.exists() else []
         else:
             folders = [path for path in upload_dir.iterdir() if path.is_dir()]
-            folders = ordenar_carpetas_por_anio(folders, shuffle_within_year=True)
+            folders = ordenar_carpetas_para_subida(folders)
 
         if not folders:
             if args.carpeta:
@@ -2306,6 +2833,7 @@ def main():
                 video_path = encontrar_video(folder_path)
                 if not video_path:
                     print(f"No hay video .mp4 en {folder_path}, se omite.")
+                    total_skipped_missing_video += 1
                     continue
                 if not args.sin_verificacion:
                     if verificacion_manual(folder_path, repertorio):
@@ -2445,36 +2973,108 @@ def main():
                 print(
                     f"Ya hay {existentes} videos programados para {schedule_date.isoformat()}, se programa el lote ahi."
                 )
-            random.shuffle(pending_items)
+            if RANDOMIZE_VIDEO_SELECTION:
+                random.shuffle(pending_items)
             random.shuffle(slots)
             print(
                 f"Programando {actual_batch_size} videos para {schedule_date.isoformat()} con separacion de {gap_hours}h."
             )
             total_items = len(pending_items)
+            upload_limit_hit = False
             for idx, (item, slot) in enumerate(zip(pending_items, slots), start=1):
+                if upload_limit_hit:
+                    break
                 folder_path = item["folder"]
                 metadata = item["metadata"]
+                video_path = item.get("video")
+                if not video_path or not Path(video_path).exists():
+                    video_path = encontrar_video(folder_path)
+                    if video_path:
+                        item["video"] = video_path
+                if not video_path:
+                    print(f"[OMITIDO] No hay video .mp4 en {folder_path}, se omite.")
+                    total_skipped_missing_video += 1
+                    continue
                 publish_at = format_rfc3339(slot)
                 restantes = total_items - idx
                 print(f"Subiendo {idx}/{total_items}. Faltan {restantes}.")
-                try:
-                    response = subir_video(
-                        youtube,
-                        item["video"],
-                        metadata["title"],
-                        metadata["description"],
-                        privacy=args.privacidad,
-                        publish_at=publish_at,
-                        label=metadata.get("title"),
-                    )
-                    print(
-                        f"Video subido: {response.get('id')} (programado: {publish_at})"
-                    )
-                    destino = mover_carpeta_subida(folder_path, DIR_YA_SUBIDOS)
-                    if destino:
-                        print(f"Carpeta movida a {destino}")
-                except HttpError as exc:
-                    print(f"Error YouTube API en {folder_path.name}: {exc}")
+                video_missing = False
+                while True:
+                    try:
+                        # Revalidar justo antes de subir para evitar caidas si la carpeta se movio.
+                        if not Path(video_path).exists():
+                            refreshed_video = encontrar_video(folder_path)
+                            if not refreshed_video:
+                                print(
+                                    f"[OMITIDO] Video no encontrado al subir: {folder_path.name}"
+                                )
+                                total_skipped_missing_video += 1
+                                video_missing = True
+                                break
+                            video_path = refreshed_video
+                            item["video"] = video_path
+                        response = subir_video(
+                            youtube,
+                            video_path,
+                            metadata["title"],
+                            metadata["description"],
+                            privacy=args.privacidad,
+                            publish_at=publish_at,
+                            label=metadata.get("title"),
+                        )
+                        print(
+                            f"Video subido: {response.get('id')} (programado: {publish_at})"
+                        )
+                        total_uploaded += 1
+                        destino = mover_carpeta_subida(folder_path, DIR_YA_SUBIDOS)
+                        if destino:
+                            print(f"Carpeta movida a {destino}")
+                        break  # Subida exitosa, salir del while
+                    except QuotaExceededError as exc:
+                        print(f"Cuota agotada: {exc}")
+                        print("Intentando rotar a otra credencial de upload...")
+                        youtube = authenticate_next(prefix="upload")
+                        if youtube is None:
+                            print("No hay mas credenciales disponibles. Abortando.")
+                            return
+                        print("Credencial rotada exitosamente. Reintentando subida...")
+                    except UploadLimitExceededError as exc:
+                        print(f"\n{'=' * 60}")
+                        print(f"LIMITE DE SUBIDAS DEL CANAL ALCANZADO")
+                        print(f"{'=' * 60}")
+                        print(
+                            f"YouTube limita la cantidad de videos que puedes subir por dia."
+                        )
+                        print(f"Este limite es por CANAL, no por proyecto de API.")
+                        print(f"Rotar credenciales NO ayuda con este error.")
+                        print(f"Videos subidos en este lote: {idx - 1}/{total_items}")
+                        print(f"Debes esperar ~24 horas para continuar subiendo.")
+                        print(f"{'=' * 60}\n")
+                        upload_limit_hit = True
+                        break
+                    except HttpError as exc:
+                        print(f"Error YouTube API en {folder_path.name}: {exc}")
+                        total_failed_api += 1
+                        break  # Otro error HTTP, continuar con siguiente video
+                    except FileNotFoundError:
+                        refreshed_video = encontrar_video(folder_path)
+                        if refreshed_video:
+                            video_path = refreshed_video
+                            item["video"] = video_path
+                            print(
+                                f"[REINTENTO] Video reaparecio, reintentando: {folder_path.name}"
+                            )
+                            continue
+                        print(f"[OMITIDO] Video no existe para {folder_path.name}")
+                        total_skipped_missing_video += 1
+                        video_missing = True
+                        break
+                if video_missing:
+                    continue
+            if upload_limit_hit:
+                print("Abortando lote por limite de subidas del canal.")
+                imprimir_resumen_subida()
+                return
             break
 
         uploaded = 0
@@ -2484,6 +3084,7 @@ def main():
             video_path = encontrar_video(folder_path)
             if not video_path:
                 print(f"No hay video .mp4 en {folder_path}, se omite.")
+                total_skipped_missing_video += 1
                 continue
             if not args.sin_verificacion:
                 if verificacion_manual(folder_path, repertorio):
@@ -2499,26 +3100,77 @@ def main():
             )
             if not metadata:
                 continue
-            try:
-                response = subir_video(
-                    youtube,
-                    video_path,
-                    metadata["title"],
-                    metadata["description"],
-                    privacy=args.privacidad,
-                    publish_at=None,
-                    label=metadata.get("title"),
-                )
-                print(f"Video subido: {response.get('id')}")
-                uploaded += 1
-                destino = mover_carpeta_subida(folder_path, DIR_YA_SUBIDOS)
-                if destino:
-                    print(f"Carpeta movida a {destino}")
-            except HttpError as exc:
-                print(f"Error YouTube API en {folder_path.name}: {exc}")
+            upload_limit_hit = False
+            video_missing = False
+            while True:
+                try:
+                    video_path = encontrar_video(folder_path)
+                    if not video_path:
+                        print(
+                            f"[OMITIDO] No hay video .mp4 en {folder_path}, se omite."
+                        )
+                        video_missing = True
+                        break
+                    response = subir_video(
+                        youtube,
+                        video_path,
+                        metadata["title"],
+                        metadata["description"],
+                        privacy=args.privacidad,
+                        publish_at=None,
+                        label=metadata.get("title"),
+                    )
+                    print(f"Video subido: {response.get('id')}")
+                    uploaded += 1
+                    total_uploaded += 1
+                    destino = mover_carpeta_subida(folder_path, DIR_YA_SUBIDOS)
+                    if destino:
+                        print(f"Carpeta movida a {destino}")
+                    break  # Subida exitosa, salir del while
+                except QuotaExceededError as exc:
+                    print(f"Cuota agotada: {exc}")
+                    print("Intentando rotar a otra credencial de upload...")
+                    youtube = authenticate_next(prefix="upload")
+                    if youtube is None:
+                        print("No hay mas credenciales disponibles. Abortando.")
+                        return
+                    print("Credencial rotada exitosamente. Reintentando subida...")
+                except UploadLimitExceededError as exc:
+                    print(f"\n{'=' * 60}")
+                    print(f"LIMITE DE SUBIDAS DEL CANAL ALCANZADO")
+                    print(f"{'=' * 60}")
+                    print(
+                        f"YouTube limita la cantidad de videos que puedes subir por dia."
+                    )
+                    print(f"Este limite es por CANAL, no por proyecto de API.")
+                    print(f"Rotar credenciales NO ayuda con este error.")
+                    print(f"Videos subidos en esta sesion: {uploaded}")
+                    print(f"Debes esperar ~24 horas para continuar subiendo.")
+                    print(f"{'=' * 60}\n")
+                    upload_limit_hit = True
+                    break
+                except HttpError as exc:
+                    print(f"Error YouTube API en {folder_path.name}: {exc}")
+                    total_failed_api += 1
+                    break  # Otro error HTTP, continuar con siguiente video
+                except FileNotFoundError:
+                    print(
+                        f"[OMITIDO] Video no encontrado durante la subida: {folder_path.name}"
+                    )
+                    total_skipped_missing_video += 1
+                    video_missing = True
+                    break
+            if video_missing:
+                continue
+            if upload_limit_hit:
+                print("Abortando por limite de subidas del canal.")
+                imprimir_resumen_subida()
+                return
 
         if args.carpeta:
             break
+
+    imprimir_resumen_subida()
 
 
 if __name__ == "__main__":
