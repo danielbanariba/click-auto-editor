@@ -91,6 +91,10 @@ PYCOUNTRY_WARNED = False
 BABEL_WARNED = False
 DEATHGRIND_API_CACHE = {}
 DEATHGRIND_LAST_REQUEST_TS = 0.0
+METADATA_RETRY_DELAY = int(os.environ.get("DEATHGRIND_METADATA_RETRY_DELAY", "45"))
+METADATA_MAX_WAIT_MINUTES = int(
+    os.environ.get("DEATHGRIND_METADATA_MAX_WAIT_MINUTES", "30")
+)
 
 DEFAULT_SCHEDULE_HOURS = [8, 12]
 DEFAULT_PLAYLIST_PRIVACY = os.environ.get("YOUTUBE_PLAYLIST_PRIVACY", "public")
@@ -482,7 +486,7 @@ def split_genres(value):
 
 def format_genre_text(value):
     parts = split_genres(value)
-    return "/".join(parts) if parts else "Unknown"
+    return "/".join(parts) if parts else ""
 
 
 def normalize_lookup_text(value):
@@ -740,7 +744,30 @@ def extraer_genero(post, generos_lookup):
         cleaned = limpiar_genero_texto(raw)
         if cleaned:
             generos.append(cleaned)
-    return ", ".join(generos) if generos else None
+    if generos:
+        return ", ".join(generos)
+
+    # Fallback: algunos posts traen el genero en bands[].genre
+    bands = post.get("bands") or post.get("band")
+    if isinstance(bands, dict):
+        bands = [bands]
+    if isinstance(bands, list):
+        fallback = []
+        seen = set()
+        for band in bands:
+            if not isinstance(band, dict):
+                continue
+            genre_value = band.get("genre") or band.get("genres")
+            for item in split_genres(genre_value):
+                key = item.lower().strip()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                fallback.append(item)
+        if fallback:
+            return ", ".join(fallback)
+
+    return None
 
 
 def extraer_anio(post):
@@ -836,14 +863,45 @@ def extraer_pais_valor(value):
     return text if text else None
 
 
+def inferir_pais_desde_location(location_text):
+    if not location_text:
+        return None
+    text = str(location_text).strip()
+    if not text:
+        return None
+
+    # Ejemplos: "Bogota, Colombia", "Madrid, Spain"
+    if "," in text:
+        parts = [part.strip() for part in text.split(",") if part.strip()]
+        if parts:
+            return parts[-1]
+
+    # Fallback simple si viene con separadores alternos
+    for sep in (" / ", " - ", " | "):
+        if sep in text:
+            parts = [part.strip() for part in text.split(sep) if part.strip()]
+            if parts:
+                return parts[-1]
+
+    return text
+
+
 def extraer_pais_desde_data(data, band_id=None, band_name=None):
     data = unwrap_deathgrind_payload(data)
     if not isinstance(data, dict):
         return None
-    for key in ("country", "pais", "origin", "countryName", "country_name", "location"):
+    for key in ("country", "pais", "origin", "countryName", "country_name"):
         parsed = extraer_pais_valor(data.get(key))
         if parsed:
             return parsed
+
+    # Location suele venir como "Ciudad, Pais"
+    location = extraer_pais_valor(data.get("location"))
+    if location:
+        inferred = inferir_pais_desde_location(location)
+        if inferred:
+            return inferred
+
     bands = data.get("bands") or data.get("band")
     if isinstance(bands, dict):
         return extraer_pais_desde_data(bands, band_id=band_id, band_name=band_name)
@@ -876,15 +934,23 @@ def normalizar_pais(pais):
     if not text:
         return None
     code = None
-    if len(text) == 2 and text.isalpha():
-        code = text.upper()
-    else:
+    lookup_candidates = [text]
+    inferred_from_location = inferir_pais_desde_location(text)
+    if inferred_from_location and inferred_from_location not in lookup_candidates:
+        lookup_candidates.insert(0, inferred_from_location)
+
+    for candidate in lookup_candidates:
+        if len(candidate) == 2 and candidate.isalpha():
+            code = candidate.upper()
+            break
         try:
             import pycountry
 
-            match = pycountry.countries.lookup(text)
+            match = pycountry.countries.lookup(candidate)
             if match and getattr(match, "alpha_2", None):
                 code = match.alpha_2
+                text = match.name
+                break
         except Exception:
             global PYCOUNTRY_WARNED
             if not PYCOUNTRY_WARNED:
@@ -1124,6 +1190,44 @@ def buscar_release_en_api(
     return None
 
 
+def esperar_release_en_api(
+    session, band_name, album_name, generos, allow_genre_fallback
+):
+    if DEATHGRIND_DISABLED or not session:
+        return None
+
+    waited = 0
+    delay = max(10, METADATA_RETRY_DELAY)
+    max_wait_seconds = (
+        METADATA_MAX_WAIT_MINUTES * 60 if METADATA_MAX_WAIT_MINUTES > 0 else None
+    )
+
+    while True:
+        post = buscar_release_en_api(
+            session,
+            band_name,
+            album_name,
+            generos,
+            allow_genre_fallback,
+        )
+        if post:
+            return post
+
+        if max_wait_seconds is not None and waited >= max_wait_seconds:
+            print(
+                f"No se encontro release en API tras esperar {METADATA_MAX_WAIT_MINUTES} min: "
+                f"{band_name} - {album_name}"
+            )
+            return None
+
+        print(
+            f"API sin metadata completa para {band_name} - {album_name}. "
+            f"Esperando {delay}s para reintentar..."
+        )
+        time.sleep(delay)
+        waited += delay
+
+
 def iter_link_items(data):
     if isinstance(data, dict):
         if any(key in data for key in ("url", "link", "href", "value")):
@@ -1303,18 +1407,21 @@ def truncar_titulo(title, max_len=TITLE_MAX_CHARS, marker=FULL_ALBUM_MARKER):
 
 def build_public_title(country_flag, band, album, year_text, genre_display, tipo_caps):
     flag_prefix = f"{country_flag} " if country_flag else ""
-    return (
-        f"{flag_prefix}{band} - {album} ({year_text}) • [{genre_display}] ⟨{tipo_caps}⟩"
-    )
+    base = f"{flag_prefix}{band} - {album}"
+    if year_text:
+        base += f" ({year_text})"
+    if genre_display:
+        base += f" • [{genre_display}]"
+    if tipo_caps:
+        base += f" ⟨{tipo_caps}⟩"
+    return base
 
 
 def compress_title_to_limit(
     country_flag, band, album, year_text, genre_text, tipo_full
 ):
     genres = split_genres(genre_text)
-    if not genres:
-        genres = ["Unknown"]
-    tipo_caps = (tipo_full or "Full Album").upper()
+    tipo_caps = (tipo_full or "").upper().strip()
 
     def make_title(active_flag, active_genres, active_tipo):
         return build_public_title(
@@ -1322,7 +1429,7 @@ def compress_title_to_limit(
             band,
             album,
             year_text,
-            "/".join(active_genres),
+            "/".join(active_genres) if active_genres else "",
             active_tipo,
         )
 
@@ -1345,13 +1452,13 @@ def compress_title_to_limit(
         return title
 
     # 3) Acortar tipo.
-    short_tipo = tipo_caps.replace("FULL ", "")
+    short_tipo = tipo_caps.replace("FULL ", "") if tipo_caps else ""
     title = make_title("", reduced_genres, short_tipo)
     if len(title) <= TITLE_MAX_CHARS:
         return title
 
     # 4) Quitar bloque de tipo.
-    title = f"{band} - {album} ({year_text}) • [{'/'.join(reduced_genres)}]"
+    title = build_public_title("", band, album, year_text, "/".join(reduced_genres), "")
     if len(title) <= TITLE_MAX_CHARS:
         return title
 
@@ -2197,17 +2304,19 @@ def construir_descripcion(
     playlist_cache,
 ):
     genre_display = format_genre_text(genre)
-    country_display = country_name or "Unknown"
-    year_display = str(year) if year else "Unknown"
+    country_display = country_name or ""
+    year_display = str(year) if year else ""
     tipo_display = (tipo_full or "Full Album").upper()
 
     genre_parts = split_genres(genre_display)
     genre_playlist = find_best_playlist_link(playlist_cache, [genre_display])
-    regional_playlist = find_best_playlist_link(
-        playlist_cache,
-        [genre_display, f"{country_display} metal"],
-        required_texts=[country_display],
-    )
+    regional_playlist = None
+    if country_display:
+        regional_playlist = find_best_playlist_link(
+            playlist_cache,
+            [genre_display, f"{country_display} metal"],
+            required_texts=[country_display],
+        )
 
     regional_playlist_url = regional_playlist["url"] if regional_playlist else None
     regional_playlist_title = (
@@ -2216,8 +2325,8 @@ def construir_descripcion(
 
     hashtags = build_dynamic_hashtags(
         split_genres(genre_display),
-        country_display,
-        year_display,
+        country_display or None,
+        year_display or None,
         tipo_display,
     )
 
@@ -2284,17 +2393,17 @@ def construir_descripcion(
     else:
         lines.append("")
 
-    lines.extend(
-        [
-            divider,
-            "🎧 STREAM & DOWNLOAD",
-            divider,
-        ]
-    )
     if stream_lines:
-        lines.extend(["", *stream_lines, ""])
-    else:
-        lines.append("")
+        lines.extend(
+            [
+                divider,
+                "🎧 STREAM & DOWNLOAD",
+                divider,
+                "",
+                *stream_lines,
+                "",
+            ]
+        )
 
     lines.extend(
         [
@@ -2302,9 +2411,18 @@ def construir_descripcion(
             "📀 ALBUM INFO",
             divider,
             "",
-            f"📅 Year: {year_display}",
-            f"🌍 Country: {country_display}{' ' + country_flag if country_flag else ''}",
-            f"⚡ Genre: {genre_display}",
+        ]
+    )
+    if year_display:
+        lines.append(f"📅 Year: {year_display}")
+    if country_display:
+        lines.append(
+            f"🌍 Country: {country_display}{' ' + country_flag if country_flag else ''}"
+        )
+    if genre_display:
+        lines.append(f"⚡ Genre: {genre_display}")
+    lines.extend(
+        [
             "",
             divider,
             "⏱️ TRACKLIST",
@@ -2539,7 +2657,7 @@ def procesar_carpeta(
         release = buscar_release_en_cache(repertorio, band, album)
     post = None
     if release is None and session:
-        post = buscar_release_en_api(
+        post = esperar_release_en_api(
             session, band, album, generos, allow_genre_fallback
         )
         if post:
@@ -2591,10 +2709,11 @@ def procesar_carpeta(
                 genre_text = extraer_genero(post_detail, generos_lookup)
             post = post_detail
 
-    if not release_year:
-        release_year = extraer_anio_de_texto(folder_path.name) or context["year"]
-    if not genre_text:
-        genre_text = context["genre"]
+    if not session:
+        if not release_year:
+            release_year = extraer_anio_de_texto(folder_path.name) or context["year"]
+        if not genre_text:
+            genre_text = context["genre"]
 
     tipo_full = formatear_tipo_full(release_tipo)
 
@@ -2613,11 +2732,20 @@ def procesar_carpeta(
     if not pais and csv_country:
         pais = csv_country
     pais = normalizar_pais(pais)
+
+    # Si DeathGrind esta activo, no inventar valores. Mejor omitir y reintentar luego.
+    if session and (not release_year or not genre_text or not pais):
+        print(
+            f"Metadata incompleta desde API para {band} - {album}. "
+            "Se omite para reintentar en la siguiente pasada."
+        )
+        return None
+
     country_meta = resolve_country_meta(pais)
-    country_name = country_meta.get("name") or pais or "Unknown"
+    country_name = country_meta.get("name") or pais or ""
     country_flag = country_meta.get("flag") or ""
 
-    year_text = str(release_year) if release_year else "Unknown"
+    year_text = str(release_year) if release_year else ""
     title = compress_title_to_limit(
         country_flag=country_flag,
         band=band,
