@@ -1131,6 +1131,7 @@ def main(youtube=None):
             print(f"Omitido por checkpoint: {title} ({video_id})")
             return
 
+        is_new_video = video_id not in processed
         video_pendiente = False
 
         band = parse_band_from_title(title)
@@ -1201,7 +1202,7 @@ def main(youtube=None):
                 video_pendiente = True
                 continue
             try:
-                if not args.sin_check:
+                if not args.sin_check and not is_new_video:
                     in_playlist = is_video_in_playlist(
                         youtube,
                         playlist_id,

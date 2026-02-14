@@ -3,6 +3,7 @@
  */
 
 #include "video_pipeline.hpp"
+#include "async_encode_queue.hpp"
 #include "utils/cuda_utils.hpp"
 #include "utils/cancel_flag.hpp"
 
@@ -126,79 +127,151 @@ bool VideoPipeline::process_frames(
     int height = decoder.height();
     size_t frame_size = width * height * 3;
 
-    // Allocate GPU buffers
-    unsigned char* d_input;
-    unsigned char* d_output;
+    // Allocate GPU double-buffers for output
+    unsigned char* d_input = nullptr;
+    unsigned char* d_output[2] = {nullptr, nullptr};
     CUDA_CHECK(cudaMalloc(&d_input, frame_size));
-    CUDA_CHECK(cudaMalloc(&d_output, frame_size));
+
+    // Try double-buffer allocation; fall back to single-buffer synchronous path
+    bool double_buffer = true;
+    cudaError_t alloc_err = cudaMalloc(&d_output[0], frame_size);
+    if (alloc_err != cudaSuccess) {
+        fprintf(stderr, "[Pipeline] Failed to allocate output buffer 0\n");
+        cudaFree(d_input);
+        return false;
+    }
+    alloc_err = cudaMalloc(&d_output[1], frame_size);
+    if (alloc_err != cudaSuccess) {
+        fprintf(stderr, "[Pipeline] VRAM tight, falling back to single-buffer sync path\n");
+        cudaGetLastError(); // clear error
+        double_buffer = false;
+    }
+
+    // Create CUDA events for async synchronization
+    cudaEvent_t events[2] = {nullptr, nullptr};
+    if (double_buffer) {
+        CUDA_CHECK(cudaEventCreate(&events[0]));
+        CUDA_CHECK(cudaEventCreate(&events[1]));
+    }
 
     int64_t total_frames = decoder.frame_count();
     int64_t frame_number = 0;
     int64_t pts;
 
     auto start_time = std::chrono::high_resolution_clock::now();
-    auto last_progress_time = start_time;
 
-    printf("[Pipeline] Processing %ld frames...\n", total_frames);
+    printf("[Pipeline] Processing %ld frames%s...\n", total_frames,
+           double_buffer ? " (async double-buffer)" : " (sync)");
 
-    while (decoder.decode_frame(d_input, &pts)) {
-        if (vhs::utils::is_cancel_requested()) {
-            fprintf(stderr, "[Pipeline] Cancel requested, stopping\n");
-            break;
+    if (double_buffer) {
+        // ── Async double-buffered path ──
+        AsyncEncodeQueue async_encoder(encoder);
+        async_encoder.start();
+        int buf_idx = 0;
+
+        while (decoder.decode_frame(d_input, &pts)) {
+            if (vhs::utils::is_cancel_requested() || async_encoder.has_error()) {
+                if (async_encoder.has_error())
+                    fprintf(stderr, "[Pipeline] Encoder error, stopping\n");
+                else
+                    fprintf(stderr, "[Pipeline] Cancel requested, stopping\n");
+                break;
+            }
+
+            float frame_time = static_cast<float>(frame_number) / decoder.fps();
+
+            unsigned char* d_overlay = nullptr;
+            if (vhs_overlay_ && vhs_overlay_->is_loaded()) {
+                d_overlay = vhs_overlay_->get_frame(static_cast<int>(frame_number));
+            }
+
+            effect_chain.process_frame(d_input, d_output[buf_idx], d_overlay, frame_time, stream_);
+            CUDA_CHECK(cudaEventRecord(events[buf_idx], stream_));
+
+            if (!async_encoder.submit(d_output[buf_idx], pts, events[buf_idx])) {
+                fprintf(stderr, "[Pipeline] Encoding failed at frame %ld\n", frame_number);
+                break;
+            }
+
+            buf_idx = 1 - buf_idx;
+            frame_number++;
+
+            if (frame_number % 30 == 0) {
+                auto now = std::chrono::high_resolution_clock::now();
+                double elapsed = std::chrono::duration<double>(now - start_time).count();
+                double fps_actual = frame_number / elapsed;
+
+                if (progress_callback_) {
+                    progress_callback_(frame_number, total_frames, fps_actual);
+                } else {
+                    double progress = (total_frames > 0) ?
+                        (100.0 * frame_number / total_frames) : 0.0;
+                    printf("\r[Pipeline] Frame %ld/%ld (%.1f%%) @ %.1f fps   ",
+                           frame_number, total_frames, progress, fps_actual);
+                    fflush(stdout);
+                }
+            }
         }
-        // Calculate frame time for effects
-        float frame_time = static_cast<float>(frame_number) / decoder.fps();
 
-        // Get VHS overlay frame if available
-        unsigned char* d_overlay = nullptr;
-        if (vhs_overlay_ && vhs_overlay_->is_loaded()) {
-            d_overlay = vhs_overlay_->get_frame(static_cast<int>(frame_number));
-        }
+        async_encoder.flush_and_stop();
 
-        // Apply VHS effects
-        effect_chain.process_frame(d_input, d_output, d_overlay, frame_time, stream_);
+    } else {
+        // ── Synchronous single-buffer fallback ──
+        while (decoder.decode_frame(d_input, &pts)) {
+            if (vhs::utils::is_cancel_requested()) {
+                fprintf(stderr, "[Pipeline] Cancel requested, stopping\n");
+                break;
+            }
 
-        // Synchronize before encoding
-        CUDA_CHECK(cudaStreamSynchronize(stream_));
+            float frame_time = static_cast<float>(frame_number) / decoder.fps();
 
-        // Encode frame
-        if (!encoder.encode_frame(d_output, pts)) {
-            fprintf(stderr, "[Pipeline] Encoding failed at frame %ld\n", frame_number);
-            break;
-        }
+            unsigned char* d_overlay = nullptr;
+            if (vhs_overlay_ && vhs_overlay_->is_loaded()) {
+                d_overlay = vhs_overlay_->get_frame(static_cast<int>(frame_number));
+            }
 
-        frame_number++;
+            effect_chain.process_frame(d_input, d_output[0], d_overlay, frame_time, stream_);
+            CUDA_CHECK(cudaStreamSynchronize(stream_));
 
-        // Progress update every 30 frames
-        if (frame_number % 30 == 0) {
-            auto now = std::chrono::high_resolution_clock::now();
-            auto elapsed = std::chrono::duration<double>(now - start_time).count();
-            double fps_actual = frame_number / elapsed;
+            if (!encoder.encode_frame(d_output[0], pts)) {
+                fprintf(stderr, "[Pipeline] Encoding failed at frame %ld\n", frame_number);
+                break;
+            }
 
-            if (progress_callback_) {
-                progress_callback_(frame_number, total_frames, fps_actual);
-            } else {
-                // Default progress output
-                double progress = (total_frames > 0) ?
-                    (100.0 * frame_number / total_frames) : 0.0;
-                printf("\r[Pipeline] Frame %ld/%ld (%.1f%%) @ %.1f fps   ",
-                       frame_number, total_frames, progress, fps_actual);
-                fflush(stdout);
+            frame_number++;
+
+            if (frame_number % 30 == 0) {
+                auto now = std::chrono::high_resolution_clock::now();
+                double elapsed = std::chrono::duration<double>(now - start_time).count();
+                double fps_actual = frame_number / elapsed;
+
+                if (progress_callback_) {
+                    progress_callback_(frame_number, total_frames, fps_actual);
+                } else {
+                    double progress = (total_frames > 0) ?
+                        (100.0 * frame_number / total_frames) : 0.0;
+                    printf("\r[Pipeline] Frame %ld/%ld (%.1f%%) @ %.1f fps   ",
+                           frame_number, total_frames, progress, fps_actual);
+                    fflush(stdout);
+                }
             }
         }
     }
 
     // Final progress
     auto end_time = std::chrono::high_resolution_clock::now();
-    auto total_elapsed = std::chrono::duration<double>(end_time - start_time).count();
-    double avg_fps = frame_number / total_elapsed;
+    double total_elapsed = std::chrono::duration<double>(end_time - start_time).count();
+    double avg_fps = (total_elapsed > 0) ? frame_number / total_elapsed : 0;
 
     printf("\n[Pipeline] Processed %ld frames in %.1f seconds (%.1f fps avg)\n",
            frame_number, total_elapsed, avg_fps);
 
     // Cleanup
+    if (events[0]) cudaEventDestroy(events[0]);
+    if (events[1]) cudaEventDestroy(events[1]);
     cudaFree(d_input);
-    cudaFree(d_output);
+    cudaFree(d_output[0]);
+    if (d_output[1]) cudaFree(d_output[1]);
 
     return true;
 }

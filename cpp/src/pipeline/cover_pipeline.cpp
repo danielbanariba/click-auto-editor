@@ -3,6 +3,7 @@
  */
 
 #include "cover_pipeline.hpp"
+#include "async_encode_queue.hpp"
 
 #include "ffmpeg_decoder.hpp"
 #include "ffmpeg_encoder.hpp"
@@ -324,24 +325,43 @@ bool CoverPipeline::process(
     cudaStream_t stream = nullptr;
     CUDA_CHECK(cudaStreamCreate(&stream));
 
-    // Allocate buffers (retry without overlay if VRAM is tight)
-    unsigned char* d_input = nullptr;
-    unsigned char* d_output = nullptr;
+    // Allocate double-buffered I/O (both d_input and d_output need double-buffer
+    // because transitions write their result into d_input)
+    unsigned char* d_input[2] = {nullptr, nullptr};
+    unsigned char* d_output[2] = {nullptr, nullptr};
+    bool double_buffer = true;
+
     auto allocate_io_buffers = [&]() -> bool {
-        cudaError_t err = cudaMalloc(&d_input, frame_size);
+        cudaError_t err;
+        err = cudaMalloc(&d_input[0], frame_size);
         if (err != cudaSuccess) {
-            fprintf(stderr, "[CoverPipeline] Failed to allocate input buffer: %s\n",
+            fprintf(stderr, "[CoverPipeline] Failed to allocate input buffer 0: %s\n",
                     cudaGetErrorString(err));
-            d_input = nullptr;
+            d_input[0] = nullptr;
             return false;
         }
-        err = cudaMalloc(&d_output, frame_size);
+        err = cudaMalloc(&d_output[0], frame_size);
         if (err != cudaSuccess) {
-            fprintf(stderr, "[CoverPipeline] Failed to allocate output buffer: %s\n",
+            fprintf(stderr, "[CoverPipeline] Failed to allocate output buffer 0: %s\n",
                     cudaGetErrorString(err));
-            cudaFree(d_input);
-            d_input = nullptr;
-            d_output = nullptr;
+            cudaFree(d_input[0]); d_input[0] = nullptr;
+            d_output[0] = nullptr;
+            return false;
+        }
+        return true;
+    };
+
+    auto allocate_double_buffers = [&]() -> bool {
+        cudaError_t err;
+        err = cudaMalloc(&d_input[1], frame_size);
+        if (err != cudaSuccess) {
+            cudaGetLastError();
+            return false;
+        }
+        err = cudaMalloc(&d_output[1], frame_size);
+        if (err != cudaSuccess) {
+            cudaGetLastError();
+            cudaFree(d_input[1]); d_input[1] = nullptr;
             return false;
         }
         return true;
@@ -351,7 +371,7 @@ bool CoverPipeline::process(
         if (vhs_overlay) {
             fprintf(stderr, "[CoverPipeline] VRAM low, disabling overlay and retrying\n");
             vhs_overlay.reset();
-            cudaGetLastError();  // Clear error state before retry
+            cudaGetLastError();
         }
         if (!allocate_io_buffers()) {
             encoder.close();
@@ -361,6 +381,18 @@ bool CoverPipeline::process(
             cudaStreamDestroy(stream);
             return false;
         }
+    }
+
+    if (!allocate_double_buffers()) {
+        fprintf(stderr, "[CoverPipeline] VRAM tight, falling back to single-buffer sync path\n");
+        double_buffer = false;
+    }
+
+    // Create CUDA events for async synchronization
+    cudaEvent_t events[2] = {nullptr, nullptr};
+    if (double_buffer) {
+        CUDA_CHECK(cudaEventCreate(&events[0]));
+        CUDA_CHECK(cudaEventCreate(&events[1]));
     }
 
     // Process intro frames (no VHS effect)
@@ -443,88 +475,167 @@ bool CoverPipeline::process(
     if (transition_frames < 1) {
         transition_frames = 1;
     }
-    for (int64_t i = 0; i < main_frames; i++) {
-        if (vhs::utils::is_cancel_requested()) {
-            fprintf(stderr, "[CoverPipeline] Cancel requested, stopping\n");
-            break;
-        }
-        CUDA_CHECK(cudaMemcpyAsync(d_input, d_bg_final, frame_size,
-                                   cudaMemcpyDeviceToDevice, stream));
 
-        float frame_time = static_cast<float>(i / fps);
-        unsigned char* d_overlay = nullptr;
-        if (vhs_overlay && vhs_overlay->is_loaded()) {
-            d_overlay = vhs_overlay->get_frame(static_cast<int>(i));
-        }
+    printf("[CoverPipeline] Processing %ld main frames%s...\n", main_frames,
+           double_buffer ? " (async double-buffer)" : " (sync)");
 
-        effect_chain.process_frame(d_input, d_output, d_overlay, frame_time, stream);
-        if (use_track_overlays) {
-            int track_idx = 0;
-            double current_time = static_cast<double>(i) / fps;
-            if (current_time >= tracklist.back().end) {
-                track_idx = static_cast<int>(tracklist.size()) - 1;
-            } else {
-                for (size_t t = 0; t < tracklist.size(); t++) {
-                    if (current_time >= tracklist[t].start && current_time < tracklist[t].end) {
-                        track_idx = static_cast<int>(t);
-                        break;
+    if (double_buffer) {
+        // ── Async double-buffered path ──
+        AsyncEncodeQueue async_encoder(encoder);
+        async_encoder.start();
+        int buf_idx = 0;
+
+        for (int64_t i = 0; i < main_frames; i++) {
+            if (vhs::utils::is_cancel_requested() || async_encoder.has_error()) {
+                if (async_encoder.has_error())
+                    fprintf(stderr, "[CoverPipeline] Encoder error, stopping\n");
+                else
+                    fprintf(stderr, "[CoverPipeline] Cancel requested, stopping\n");
+                break;
+            }
+
+            unsigned char* cur_input = d_input[buf_idx];
+            unsigned char* cur_output = d_output[buf_idx];
+
+            CUDA_CHECK(cudaMemcpyAsync(cur_input, d_bg_final, frame_size,
+                                       cudaMemcpyDeviceToDevice, stream));
+
+            float frame_time = static_cast<float>(i / fps);
+            unsigned char* d_overlay = nullptr;
+            if (vhs_overlay && vhs_overlay->is_loaded()) {
+                d_overlay = vhs_overlay->get_frame(static_cast<int>(i));
+            }
+
+            effect_chain.process_frame(cur_input, cur_output, d_overlay, frame_time, stream);
+
+            if (use_track_overlays) {
+                int track_idx = 0;
+                double current_time = static_cast<double>(i) / fps;
+                if (current_time >= tracklist.back().end) {
+                    track_idx = static_cast<int>(tracklist.size()) - 1;
+                } else {
+                    for (size_t t = 0; t < tracklist.size(); t++) {
+                        if (current_time >= tracklist[t].start && current_time < tracklist[t].end) {
+                            track_idx = static_cast<int>(t);
+                            break;
+                        }
                     }
                 }
+                if (!track_overlays.empty()) {
+                    if (track_idx < 0) track_idx = 0;
+                    if (track_idx >= static_cast<int>(track_overlays.size()))
+                        track_idx = static_cast<int>(track_overlays.size()) - 1;
+                    effects::apply_cover_overlay(
+                        cur_output, track_overlays[track_idx],
+                        width, height, width, height, stream
+                    );
+                }
+            } else {
+                effects::apply_cover_overlay(cur_output, d_cover, width, height,
+                                             cover_width, cover_height, stream);
             }
-            if (!track_overlays.empty()) {
-                if (track_idx < 0) {
-                    track_idx = 0;
-                }
-                if (track_idx >= static_cast<int>(track_overlays.size())) {
-                    track_idx = static_cast<int>(track_overlays.size()) - 1;
-                }
-                effects::apply_cover_overlay(
-                    d_output,
-                    track_overlays[track_idx],
-                    width,
-                    height,
-                    width,
-                    height,
-                    stream
+
+            // Determine which buffer holds the final frame to encode
+            const unsigned char* encode_buf = cur_output;
+            if (d_intro_last && i < transition_frames) {
+                float progress = static_cast<float>(i + 1) / static_cast<float>(transition_frames);
+                effects::apply_vhs_transition(
+                    d_intro_last, cur_output, cur_input,
+                    width, height, progress, static_cast<int>(i), stream
                 );
+                encode_buf = cur_input; // transition writes result to cur_input
             }
-        } else {
-            effects::apply_cover_overlay(d_output, d_cover, width, height, cover_width, cover_height, stream);
-        }
 
-        if (d_intro_last && i < transition_frames) {
-            float progress = static_cast<float>(i + 1) / static_cast<float>(transition_frames);
-            effects::apply_vhs_transition(
-                d_intro_last,
-                d_output,
-                d_input,
-                width,
-                height,
-                progress,
-                static_cast<int>(i),
-                stream
-            );
-            CUDA_CHECK(cudaStreamSynchronize(stream));
-            if (!encoder.encode_frame(d_input, pts)) {
-                fprintf(stderr, "[CoverPipeline] Failed to encode transition frame %ld\n", i);
+            CUDA_CHECK(cudaEventRecord(events[buf_idx], stream));
+
+            if (!async_encoder.submit(encode_buf, pts, events[buf_idx])) {
+                fprintf(stderr, "[CoverPipeline] Encoding failed at frame %ld\n", i);
                 break;
             }
-        } else {
-            CUDA_CHECK(cudaStreamSynchronize(stream));
-            if (!encoder.encode_frame(d_output, pts)) {
-                fprintf(stderr, "[CoverPipeline] Failed to encode frame %ld\n", i);
-                break;
-            }
+
+            buf_idx = 1 - buf_idx;
+            pts += 1000;
         }
 
-        pts += 1000;
+        async_encoder.flush_and_stop();
+
+    } else {
+        // ── Synchronous single-buffer fallback ──
+        for (int64_t i = 0; i < main_frames; i++) {
+            if (vhs::utils::is_cancel_requested()) {
+                fprintf(stderr, "[CoverPipeline] Cancel requested, stopping\n");
+                break;
+            }
+            CUDA_CHECK(cudaMemcpyAsync(d_input[0], d_bg_final, frame_size,
+                                       cudaMemcpyDeviceToDevice, stream));
+
+            float frame_time = static_cast<float>(i / fps);
+            unsigned char* d_overlay = nullptr;
+            if (vhs_overlay && vhs_overlay->is_loaded()) {
+                d_overlay = vhs_overlay->get_frame(static_cast<int>(i));
+            }
+
+            effect_chain.process_frame(d_input[0], d_output[0], d_overlay, frame_time, stream);
+
+            if (use_track_overlays) {
+                int track_idx = 0;
+                double current_time = static_cast<double>(i) / fps;
+                if (current_time >= tracklist.back().end) {
+                    track_idx = static_cast<int>(tracklist.size()) - 1;
+                } else {
+                    for (size_t t = 0; t < tracklist.size(); t++) {
+                        if (current_time >= tracklist[t].start && current_time < tracklist[t].end) {
+                            track_idx = static_cast<int>(t);
+                            break;
+                        }
+                    }
+                }
+                if (!track_overlays.empty()) {
+                    if (track_idx < 0) track_idx = 0;
+                    if (track_idx >= static_cast<int>(track_overlays.size()))
+                        track_idx = static_cast<int>(track_overlays.size()) - 1;
+                    effects::apply_cover_overlay(
+                        d_output[0], track_overlays[track_idx],
+                        width, height, width, height, stream
+                    );
+                }
+            } else {
+                effects::apply_cover_overlay(d_output[0], d_cover, width, height,
+                                             cover_width, cover_height, stream);
+            }
+
+            if (d_intro_last && i < transition_frames) {
+                float progress = static_cast<float>(i + 1) / static_cast<float>(transition_frames);
+                effects::apply_vhs_transition(
+                    d_intro_last, d_output[0], d_input[0],
+                    width, height, progress, static_cast<int>(i), stream
+                );
+                CUDA_CHECK(cudaStreamSynchronize(stream));
+                if (!encoder.encode_frame(d_input[0], pts)) {
+                    fprintf(stderr, "[CoverPipeline] Failed to encode transition frame %ld\n", i);
+                    break;
+                }
+            } else {
+                CUDA_CHECK(cudaStreamSynchronize(stream));
+                if (!encoder.encode_frame(d_output[0], pts)) {
+                    fprintf(stderr, "[CoverPipeline] Failed to encode frame %ld\n", i);
+                    break;
+                }
+            }
+
+            pts += 1000;
+        }
     }
 
     effect_chain.cleanup();
     encoder.close();
 
-    cudaFree(d_input);
-    cudaFree(d_output);
+    if (events[0]) cudaEventDestroy(events[0]);
+    if (events[1]) cudaEventDestroy(events[1]);
+    cudaFree(d_input[0]);
+    cudaFree(d_output[0]);
+    if (d_input[1]) cudaFree(d_input[1]);
+    if (d_output[1]) cudaFree(d_output[1]);
     cudaFree(d_bg);
     if (d_bg_blur) cudaFree(d_bg_blur);
     cudaFree(d_cover);

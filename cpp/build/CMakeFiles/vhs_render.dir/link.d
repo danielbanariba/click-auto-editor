@@ -127,7 +127,7 @@ vhs_render: \
   /usr/lib/librav1e.so.0.8 \
   /usr/lib32/libspeex.so.1 \
   /usr/lib/libspeex.so.1 \
-  /usr/lib/libSvtAv1Enc.so.3 \
+  /usr/lib/libSvtAv1Enc.so.4 \
   /usr/lib32/libtheoraenc.so.2 \
   /usr/lib/libtheoraenc.so.2 \
   /usr/lib32/libtheoradec.so.2 \
@@ -521,7 +521,7 @@ CMakeFiles/vhs_render.dir/cmake_device_link.o:
 
 /usr/lib/libspeex.so.1:
 
-/usr/lib/libSvtAv1Enc.so.3:
+/usr/lib/libSvtAv1Enc.so.4:
 
 /usr/lib32/libtheoraenc.so.2:
 
