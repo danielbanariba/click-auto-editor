@@ -32,6 +32,10 @@ class QuotaExceededError(RuntimeError):
     pass
 
 
+class CredentialNotConfiguredError(RuntimeError):
+    pass
+
+
 def get_uploads_playlist_id(youtube):
     response = run_with_backoff(
         lambda: youtube.channels()
@@ -251,6 +255,11 @@ def is_daily_quota_error(exc):
     return any(reason in {"quotaExceeded", "dailyLimitExceeded"} for reason in reasons)
 
 
+def is_access_not_configured_error(exc):
+    reasons = get_error_reasons(exc)
+    return any(reason in {"accessNotConfigured", "forbidden"} for reason in reasons)
+
+
 def run_with_backoff(
     action, descripcion, max_retries=8, base_delay=2.0, max_delay=120.0
 ):
@@ -259,6 +268,8 @@ def run_with_backoff(
         try:
             return action()
         except HttpError as exc:
+            if is_access_not_configured_error(exc):
+                raise CredentialNotConfiguredError(descripcion) from exc
             if not is_rate_limit_error(exc):
                 raise
             if is_daily_quota_error(exc):
@@ -307,7 +318,7 @@ def refresh_playlist(youtube, title, cache, privacy="public"):
     return get_or_create_playlist(youtube, title, cache, privacy=privacy)
 
 
-def get_playlist_video_ids(youtube, playlist_id, max_items=200, cache=None):
+def get_playlist_video_ids(youtube, playlist_id, max_items=None, cache=None):
     if cache is not None:
         cached = cache.get(playlist_id)
         if cached is not None:
@@ -347,7 +358,7 @@ def get_playlist_video_ids(youtube, playlist_id, max_items=200, cache=None):
     return video_ids, truncated
 
 
-def is_video_in_playlist(youtube, playlist_id, video_id, max_items=200, cache=None):
+def is_video_in_playlist(youtube, playlist_id, video_id, max_items=None, cache=None):
     if cache is not None:
         video_ids, _ = get_playlist_video_ids(
             youtube,
@@ -378,7 +389,7 @@ def is_video_in_playlist(youtube, playlist_id, video_id, max_items=200, cache=No
             if resource.get("videoId") == video_id:
                 return True
         fetched += len(items)
-        if fetched >= max_items:
+        if max_items is not None and fetched >= max_items:
             return False
         page_token = resp.get("nextPageToken")
         if not page_token:
@@ -425,7 +436,7 @@ def merge_duplicate_playlists(
     youtube,
     canonical_id,
     duplicate_id,
-    max_items=200,
+    max_items=None,
     cache=None,
     pause=None,
 ):
@@ -1287,6 +1298,11 @@ if __name__ == "__main__":
             )
         except RateLimitError:
             print("Rate limit. Intenta mas tarde o activa YOUTUBE_AUTO_ROTATE=1.")
+        except CredentialNotConfiguredError:
+            print(
+                "La credencial actual no tiene habilitada la YouTube Data API v3. "
+                "Activa la API en Google Cloud o usa otra credencial."
+            )
     elif auto_rotate:
         # Modo rotacion: cambiar credenciales solo cuando se agota cuota diaria
         youtube_client = None
@@ -1296,7 +1312,7 @@ if __name__ == "__main__":
                 break
             except QuotaExceededError:
                 print("Cuota agotada. Intentando con siguiente credencial...")
-                youtube_client = authenticate_next()
+                youtube_client = authenticate_next(prefix="playlists")
                 if youtube_client is None:
                     if auto_wait:
                         print(
@@ -1310,36 +1326,31 @@ if __name__ == "__main__":
                     else:
                         print("Todas las credenciales agotadas. Intenta manana.")
                         break
+            except CredentialNotConfiguredError:
+                print(
+                    "Credencial sin YouTube Data API v3 habilitada. "
+                    "Intentando con siguiente credencial..."
+                )
+                youtube_client = authenticate_next(prefix="playlists")
+                if youtube_client is None:
+                    if auto_wait:
+                        print(
+                            f"No hay credenciales validas disponibles. Esperando {quota_wait}s."
+                        )
+                        time.sleep(quota_wait)
+                        from subir_video.authenticate import reset_exhausted_credentials
+
+                        reset_exhausted_credentials()
+                        youtube_client = None
+                    else:
+                        print(
+                            "No hay credenciales validas disponibles. Revisa Google Cloud."
+                        )
+                        break
             except RateLimitError:
                 # Rate limit es por canal, no por proyecto. Esperar y reintentar.
                 print(f"Rate limit del canal. Esperando {rate_wait}s y reintentando...")
                 time.sleep(rate_wait)
-            except (QuotaExceededError, RateLimitError) as e:
-                error_tipo = (
-                    "Cuota agotada"
-                    if isinstance(e, QuotaExceededError)
-                    else "Rate limit"
-                )
-                print(f"{error_tipo}. Intentando con siguiente credencial...")
-                youtube_client = authenticate_next()
-                if youtube_client is None:
-                    if auto_wait:
-                        wait_time = (
-                            quota_wait
-                            if isinstance(e, QuotaExceededError)
-                            else rate_wait
-                        )
-                        print(
-                            f"Todas las credenciales agotadas. Esperando {wait_time}s."
-                        )
-                        time.sleep(wait_time)
-                        from subir_video.authenticate import reset_exhausted_credentials
-
-                        reset_exhausted_credentials()
-                        youtube_client = None  # Se re-autentica en main()
-                    else:
-                        print("Todas las credenciales agotadas. Intenta mas tarde.")
-                        break
     else:
         # Modo espera (legacy)
         while True:

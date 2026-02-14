@@ -15,6 +15,7 @@ import time
 import sys
 import re
 import shutil
+import unicodedata
 from mutagen import File as MutagenFile
 from effects.sombra import add_shadow
 from limpieza.censura import censor_profanity
@@ -877,7 +878,14 @@ def normalize_track_title(title: str) -> str:
 
 
 def normalize_compare(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    normalized = unicodedata.normalize("NFKC", str(text or "")).casefold()
+    chars = []
+    for ch in normalized:
+        if ch.isalnum():
+            chars.append(ch)
+        else:
+            chars.append(" ")
+    return re.sub(r"\s+", " ", "".join(chars)).strip()
 
 
 def strip_album_suffix(text: str) -> str:
@@ -893,10 +901,13 @@ def strip_album_suffix(text: str) -> str:
 
 
 def parse_band_album_from_folder(folder_name: str):
-    if " - " in folder_name:
-        band, album = folder_name.split(" - ", 1)
+    name = unicodedata.normalize("NFKC", str(folder_name or "")).strip()
+    for sep in (" - ", " – ", " — ", " ― ", " － ", " | "):
+        if sep not in name:
+            continue
+        band, album = name.split(sep, 1)
         return band.strip(), strip_album_suffix(album)
-    return folder_name.strip(), None
+    return name.strip(), None
 
 
 def clean_track_title(title: str, band_name, album_name, fallback_title: str) -> str:
@@ -1042,7 +1053,14 @@ def api_get(session, endpoint, params=None, max_retries=5):
 
 
 def normalize_name(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", str(value).lower()).strip()
+    text = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    chars = []
+    for ch in text:
+        if ch.isalnum():
+            chars.append(ch)
+        else:
+            chars.append(" ")
+    return re.sub(r"\s+", " ", "".join(chars)).strip()
 
 
 def normalize_album_name(value: str) -> str:
@@ -1410,23 +1428,34 @@ def wrap_text_lines(
     """
     Divide un texto en varias lineas sin exceder el ancho.
     """
-    words = text.split()
-    if not words:
+    text = unicodedata.normalize("NFKC", str(text or "")).strip()
+    if not text:
+        return [""]
+
+    # Para idiomas sin espacios (JP/CN/KR), envolver por caracter.
+    if " " in text:
+        tokens = [token for token in text.split() if token]
+        joiner = " "
+    else:
+        tokens = list(text)
+        joiner = ""
+
+    if not tokens:
         return [""]
 
     lines = []
     current = ""
     idx = 0
-    while idx < len(words):
-        word = words[idx]
+    while idx < len(tokens):
+        token = tokens[idx]
         if not current:
-            if measure_text(draw, word, font) > max_width:
+            if measure_text(draw, token, font) > max_width:
                 return None
-            current = word
+            current = token
             idx += 1
             continue
 
-        candidate = f"{current} {word}"
+        candidate = f"{current}{joiner}{token}"
         if measure_text(draw, candidate, font) <= max_width:
             current = candidate
             idx += 1

@@ -449,7 +449,14 @@ def deathgrind_smoke_test(session, generos):
 
 
 def normalize_name(value):
-    return re.sub(r"[^a-z0-9]+", " ", str(value).lower()).strip()
+    text = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    normalized_chars = []
+    for ch in text:
+        if ch.isalnum():
+            normalized_chars.append(ch)
+        else:
+            normalized_chars.append(" ")
+    return re.sub(r"\s+", " ", "".join(normalized_chars)).strip()
 
 
 def limpiar_genero_texto(value):
@@ -492,17 +499,30 @@ def format_genre_text(value):
 def normalize_lookup_text(value):
     if not value:
         return ""
-    text = unicodedata.normalize("NFKD", str(value))
-    text = "".join(ch for ch in text if not unicodedata.combining(ch))
-    text = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
-    return re.sub(r"\s+", " ", text)
+    text = unicodedata.normalize("NFKC", str(value)).casefold()
+    normalized_chars = []
+    for ch in text:
+        if ch.isalnum():
+            normalized_chars.append(ch)
+        else:
+            normalized_chars.append(" ")
+    return re.sub(r"\s+", " ", "".join(normalized_chars)).strip()
 
 
 def tokenize_lookup_text(value):
     text = normalize_lookup_text(value)
     if not text:
         return []
-    return [token for token in text.split() if len(token) > 2]
+    tokens = []
+    for token in text.split():
+        if re.search(r"[a-z]", token):
+            if len(token) > 2:
+                tokens.append(token)
+            continue
+        # Para scripts no latinos (JP/CN/KR/Cyrillic/etc), mantener tokens cortos.
+        if token:
+            tokens.append(token)
+    return tokens
 
 
 def country_flag_emoji(country_code):
@@ -1212,6 +1232,16 @@ def esperar_release_en_api(
         )
         if post:
             return post
+
+        # Si la API responde pero no hay match, no esperar en bucle.
+        health_query = f"{band_name} {album_name}".strip()
+        health = api_get(session, "/posts/filter", params={"search": health_query})
+        if health is not None:
+            print(
+                f"Release no encontrado en API para {band_name} - {album_name}. "
+                "Se omite sin esperar mas."
+            )
+            return None
 
         if max_wait_seconds is not None and waited >= max_wait_seconds:
             print(
@@ -2172,10 +2202,13 @@ def extraer_links_band_html(session, band_id):
 
 
 def parse_band_album_from_folder(folder_name):
-    if " - " in folder_name:
-        band, album = folder_name.split(" - ", 1)
-        return band.strip(), album.strip()
-    return folder_name, folder_name
+    name = unicodedata.normalize("NFKC", str(folder_name or "")).strip()
+    # Soporta separadores comunes entre banda/album en varios idiomas/formats.
+    for sep in (" - ", " – ", " — ", " ― ", " － ", " | "):
+        if sep in name:
+            band, album = name.split(sep, 1)
+            return band.strip(), album.strip()
+    return name, name
 
 
 def get_repertorio_csv_path():
@@ -2709,11 +2742,10 @@ def procesar_carpeta(
                 genre_text = extraer_genero(post_detail, generos_lookup)
             post = post_detail
 
-    if not session:
-        if not release_year:
-            release_year = extraer_anio_de_texto(folder_path.name) or context["year"]
-        if not genre_text:
-            genre_text = context["genre"]
+    if not release_year:
+        release_year = extraer_anio_de_texto(folder_path.name) or context["year"]
+    if not genre_text:
+        genre_text = context["genre"]
 
     tipo_full = formatear_tipo_full(release_tipo)
 
@@ -2732,14 +2764,6 @@ def procesar_carpeta(
     if not pais and csv_country:
         pais = csv_country
     pais = normalizar_pais(pais)
-
-    # Si DeathGrind esta activo, no inventar valores. Mejor omitir y reintentar luego.
-    if session and (not release_year or not genre_text or not pais):
-        print(
-            f"Metadata incompleta desde API para {band} - {album}. "
-            "Se omite para reintentar en la siguiente pasada."
-        )
-        return None
 
     country_meta = resolve_country_meta(pais)
     country_name = country_meta.get("name") or pais or ""

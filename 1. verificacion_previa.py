@@ -195,6 +195,9 @@ def main():
     for folder_path in folders:
         if max_items is not None and revisados >= max_items:
             break
+        if not folder_path.exists():
+            print(f"Carpeta ya no existe, se omite: {folder_path.name}")
+            continue
         video_path = helpers.encontrar_video(folder_path)
         if not video_path and not allow_no_video:
             print(f"No hay video .mp4 en {folder_path}, se omite.")
