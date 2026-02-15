@@ -2395,7 +2395,7 @@ def construir_descripcion(
             line += " ← SUPPORT THE BAND!"
         stream_lines.append(line)
 
-    more_slam_lines = ["▸ Browse 1000+ albums: danielbanariba.com/metal-archive"]
+    more_slam_lines = ["▸ Browse 1000+ albums: https://danielbanariba.com/metal-archive"]
     used_playlist_urls = set()
     for part in genre_parts:
         part_playlist = find_best_playlist_link(playlist_cache, [part])
@@ -2487,14 +2487,14 @@ def construir_descripcion(
             divider,
             "",
             "Get featured on our channel (13,000+ monthly listeners)",
-            "→ danielbanariba.com/metal-archive/submit",
+            "→ https://danielbanariba.com/metal-archive/submit",
             "",
             divider,
             "💼 LABELS: Promotional Packages Available",
             divider,
             "",
             "Reach highly engaged extreme metal audience",
-            "→ danielbanariba.com/metal-archive/promo",
+            "→ https://danielbanariba.com/metal-archive/promo",
             "",
             divider,
             "",
