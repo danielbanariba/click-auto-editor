@@ -442,18 +442,30 @@ def merge_duplicate_playlists(
 ):
     if not canonical_id or not duplicate_id or canonical_id == duplicate_id:
         return 0, False
-    canonical_ids, canonical_trunc = get_playlist_video_ids(
-        youtube,
-        canonical_id,
-        max_items=max_items,
-        cache=cache,
-    )
-    duplicate_ids, duplicate_trunc = get_playlist_video_ids(
-        youtube,
-        duplicate_id,
-        max_items=max_items,
-        cache=cache,
-    )
+    try:
+        canonical_ids, canonical_trunc = get_playlist_video_ids(
+            youtube,
+            canonical_id,
+            max_items=max_items,
+            cache=cache,
+        )
+    except HttpError as exc:
+        if is_playlist_not_found(exc):
+            print(f"Aviso: playlist canonica {canonical_id} no encontrada, saltando fusion.")
+            return 0, False
+        raise
+    try:
+        duplicate_ids, duplicate_trunc = get_playlist_video_ids(
+            youtube,
+            duplicate_id,
+            max_items=max_items,
+            cache=cache,
+        )
+    except HttpError as exc:
+        if is_playlist_not_found(exc):
+            print(f"Aviso: playlist duplicada {duplicate_id} no encontrada, saltando fusion.")
+            return 0, False
+        raise
     nuevos = duplicate_ids - canonical_ids
     added = 0
     skipped_missing = 0
@@ -532,11 +544,14 @@ def auto_cleanup_playlists(
                 continue
             for extra in data["extras"]:
                 titulo = extra.get("title") or extra["id"]
-                count = extra.get("count", 0) or 0
-                if count:
-                    print(f"Se omite eliminar duplicada: '{titulo}' ({count} videos).")
-                else:
-                    print(f"Se omite eliminar duplicada: '{titulo}'.")
+                try:
+                    delete_playlist(youtube, extra["id"])
+                    print(f"Eliminada playlist duplicada: '{titulo}'.")
+                    key = normalize_title(titulo)
+                    if key and playlist_cache.get(key) == extra["id"]:
+                        playlist_cache[key] = canonical["id"]
+                except Exception as exc:
+                    print(f"No se pudo eliminar duplicada '{titulo}': {exc}")
 
     vacias_ids = []
     for item in todas_playlists:
