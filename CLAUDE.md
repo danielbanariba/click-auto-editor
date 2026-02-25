@@ -4,193 +4,142 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an automated video editing pipeline for YouTube content creation, specifically designed for music album videos. The system processes audio files, creates visual effects in Adobe After Effects, edits in Adobe Premiere Pro, and automatically uploads to YouTube. The entire workflow is automated using PyAutoGUI for GUI automation and various Python libraries for media processing.
+Automated pipeline for creating full-album music videos with VHS aesthetics and uploading them to YouTube. Runs on Linux (Arch/CachyOS). Each album folder (audio files + cover image) is rendered into a 4K video and uploaded with auto-generated descriptions, tags, and playlist assignments.
 
-## Environment Setup
+## Quick Start
 
-### Dependencies Installation
-
-Run the PowerShell setup script:
-```powershell
-.\pip_install.ps1
-```
-
-This creates a virtual environment and installs required packages:
-- **GUI Automation**: `pyautogui`, `pynput`, `keyboard`
-- **Media Processing**: `pydub`, `pillow`, `scipy`, `eyed3`, `mutagen`
-- **Web Automation**: `playwright` (recently migrated from Selenium), `beautifulsoup4`, `requests`
-- **Utilities**: `numpy`, `unidecode`, `colormath`, `psutil`
-
-### External Dependencies
-
-- **FFmpeg**: Must be installed at `C:\Program Files\FFmpeg\bin\`
-- **Adobe After Effects**: Required for script execution (5. auto_effects.py)
-- **Adobe Premiere Pro**: Required for video editing (6. auto_premier.py)
-- **Adobe Media Encoder**: Must be running before executing 6. auto_premier.py
-
-## Project Architecture
-
-### Pipeline Overview
-
-The system follows a numbered sequential pipeline (0-11), where each script performs a specific task. Scripts are designed to be run in order, with each step preparing data for the next:
-
-```
-Input: Raw audio files + cover images
-  ↓
-0. limpieza_de_impurezas.py (Cleanup)
-  ↓
-1. juntar_audios.py (Merge audio + metadata extraction + web scraping)
-  ↓
-2. cantidad_de_archivos.py (Verification)
-  ↓
-3. cambiar_nombre_imagen.py (Image processing)
-  ↓
-4. verificacion_humana.py (Manual verification)
-  ↓
-5. auto_effects.py (After Effects automation)
-  ↓
-6. auto_premier.py (Premiere Pro automation)
-  ↓
-7. mover_videos_terminados.py (File organization)
-  ↓
-8. subir_video_coordenadas.py (YouTube upload with coordinates)
-  ↓
-9-11. Additional upload/appeal scripts
-  ↓
-Output: Published YouTube videos
-```
-
-### Key Design Patterns
-
-**1. Coordinate-Based GUI Automation**
-
-All Adobe software automation uses hardcoded PyAutoGUI coordinates. This is extremely fragile:
-- Screen resolution must be exactly as specified in scripts
-- Window positions must match exactly
-- Any UI movement breaks the automation
-
-Example from 5. auto_effects.py:712:
-```python
-pyautogui.click(2000, 193)  # New Project button
-pyautogui.click(3020, 397)  # New Composition with Footage
-```
-
-**CRITICAL**: When modifying automation scripts, even a 1-pixel movement in After Effects can break everything (see README warning at line 40-42).
-
-**2. ExtendScript (.jsx) Integration**
-
-After Effects automation executes ExtendScript files for visual effects:
-- `audio_to_keyframes.jsx`: Generates keyframes from audio waveform
-- `imagen_movimiento.jsx`: Adds wiggle rotation and audio-reactive scaling to images (Affter Effects/imagen_movimiento.jsx:1-24)
-- `espectro_de_audio.jsx`: Creates audio spectrum visualization with complementary colors (Affter Effects/espectro_de_audio.jsx:1-21)
-
-These are triggered via PyAutoGUI clicking File > Scripts > Run Script File.
-
-**3. Color Analysis Pipeline**
-
-The system analyzes album cover colors and applies complementary colors to audio spectrum:
-1. Extract average RGB from album cover (5. auto_effects.py:94-104)
-2. Convert RGB → HSV → rotate hue 180° → convert back to RGB (5. auto_effects.py:26-70)
-3. Write complementary color to After Effects spectrum effect (5. auto_effects.py:210-220)
-
-**4. Metadata Extraction with Web Scraping**
-
-Script 1. juntar_audios.py combines audio processing with automated web scraping using Playwright:
-- Extracts ID3 tags (artist, album, year, genre) from audio files
-- Scrapes DuckDuckGo for music platform links (Bandcamp, Spotify, Apple Music, Deezer, Amazon, YouTube Music)
-- Scrapes social media links (Facebook, Instagram, YouTube, TikTok, Twitter)
-- Scrapes metal database links (Metal Archives, Spirit of Metal)
-- Generates video description with all links (1. juntar_audios.py:287-348)
-
-Note: Recently migrated from Selenium to Playwright (see git commit da21d3c).
-
-**5. Process Monitoring**
-
-6. auto_premier.py includes process monitoring to ensure sequential execution:
-```python
-def is_premier_running():
-    """Verifies if Adobe Premier Pro is running"""
-    # Checks psutil for Adobe Premiere Pro.exe
-```
-
-This prevents pipeline conflicts when rendering multiple videos.
-
-### Directory Structure Conventions
-
-The scripts expect specific Windows directory paths:
-- **Input**: `E:\01_edicion_automatizada\audio_scripts` (raw audio folders)
-- **After Effects Projects**: `C:\Users\banar\Desktop\save_after_effects`
-- **Premiere Pro Projects**: `C:\Users\banar\Desktop\save_premier_pro`
-- **Render Output**: `E:\01_edicion_automatizada\audio_scripts` (same as input)
-- **Upload Queue**: `E:\01_edicion_automatizada\upload_video`
-- **JSX Scripts**: `C:\Users\banar\Desktop\click-auto-editor\Affter Effects\`
-
-### File Tracking
-
-The system maintains persistent state:
-- `bandas-subidas-al-canal.txt`: Tracks uploaded video titles to prevent duplicates (8. subir_video_coordenadas.py:16-19)
-
-## Running Scripts
-
-### Individual Script Execution
-
-Each script is standalone:
 ```bash
-python "0. limpieza_de_impurezas.py"
-python "1. juntar_audios.py"
-python "2. cantidad_de_archivos.py"
-# etc.
+pip install -r requirements.txt
+pip install -r vhs_effect/requirements.txt   # OpenCV/SciPy for VHS effects
+playwright install chromium                  # for YouTube Studio automation
+python config.py                             # validate environment + create directories
 ```
 
-### Critical Execution Notes
+### C++/CUDA renderer (recommended for GPU rendering)
 
-1. **5. auto_effects.py**: Processes up to 150 random folders (5. auto_effects.py:24). Adjust if needed.
-
-2. **6. auto_premier.py**: Adobe Media Encoder MUST be running before execution (README line 48-50).
-
-3. **8. subir_video_coordenadas.py**: Interactive - prompts for number of videos to upload (8. subir_video_coordenadas.py:26).
-
-4. **Timing Delays**: All scripts use `time.sleep()` extensively. These are calibrated for system performance and should not be reduced without testing.
-
-## Modifying Coordinate-Based Automation
-
-When working with 5. auto_effects.py, 6. auto_premier.py, or 8. subir_video_coordenadas.py:
-
-1. Use `coordenadas.py` to capture new screen coordinates:
-```python
-# Prints mouse position to console
-import pyautogui
-import time
-while True:
-    print(pyautogui.position())
-    time.sleep(1)
+```bash
+cmake -S cpp -B cpp/build && cmake --build cpp/build
+# Binary: cpp/build/vhs_render
 ```
 
-2. Document coordinate changes with comments explaining what UI element is being clicked
+## Running the Pipeline
 
-3. Test thoroughly - coordinate changes can cascade failures
+Scripts are numbered but **not all are sequential**. The active pipeline is:
 
-## Video Specifications
+```
+1. verificacion_previa.py   → Pre-flight: checks if album is already on YouTube
+2. ffmpeg_render.py         → Main render engine (VHS + CUDA/NVENC)
+3. subir_video_API.py       → YouTube upload via Data API (scheduled batches)
+10. inpunar_video.py        → Playwright: copyright dispute automation
+11. apelacion.py            → Playwright: copyright appeal automation
+12. mapear_playlists.py     → Maps videos to playlists (runs as systemd service)
+13. filtrar_portadas.py     → NSFW cover art filter (ONNX model)
+```
 
-- **Resolution**: Originally 4K, now 1080p (see git commit 99c52bb)
-- **Audio**: 320kbps MP3
-- **Intro Duration**: 8 seconds (hardcoded in tracklist timing at 1. juntar_audios.py:340)
-- **Transition Effect**: VHS transition between intro and main content (6. auto_premier.py:138-150)
-- **Premiere Pro Export Settings**: Configured for 1080p render to Adobe Media Encoder
+The old Windows/Adobe pipeline (steps 0-8) lives in `old/` as reference only.
 
-## Recent Changes
+### Common commands
 
-- Migrated from Selenium to Playwright for web scraping (git commit da21d3c)
-- Reduced spectrum visualization to 50% size (git commit 783389a)
-- Resolution downgrade from 4K to 1080p (git commit 99c52bb)
-- Increased Premiere Pro processing time (git commit 2ab23db)
+```bash
+python "2. ffmpeg_render.py"                     # render all (parallel by default)
+python "2. ffmpeg_render.py" --test              # render 1 folder as smoke test
+python "2. ffmpeg_render.py" --folder "Band - Album"  # render specific folder
 
-## Common Issues
+python "3. subir_video_API.py" --limite 1        # upload 1 video
+python "3. subir_video_API.py" --todo --cantidad-lote 24 --gap-horas 1
+python "3. subir_video_API.py" --modo-inmediato --limite 1
 
-1. **"PermissionError: The folder is currently in use"**: Another process (often Windows Explorer or antivirus) is accessing the folder. Scripts handle this with try/catch but may skip folders.
+python "12. mapear_playlists.py" --limite 200
+python "10. inpunar_video.py" --aprender         # record new selectors
+```
 
-2. **Coordinate Misalignment**: If Adobe apps update UI or window positions change, all coordinates must be recaptured.
+### Tests
 
-3. **Audio Spectrum Not Matching Colors**: Ensure PNG image exists before JSX script execution. Script expects .png format specifically (5. auto_effects.py:90).
+```bash
+pytest vhs_effect/test_vhs.py                    # all VHS unit tests
+pytest vhs_effect/test_vhs.py -k color_processor # specific test
+python vhs_effect/test_vhs.py                    # without pytest
+```
 
-4. **Upload Verification Failures**: Check `bandas-subidas-al-canal.txt` format - expects exact title match without the last 13 characters (8. subir_video_coordenadas.py:73).
+## Architecture
+
+### Render pipeline (`2. ffmpeg_render.py`, ~111 KB - largest script)
+
+For each album folder in `DIR_AUDIO_SCRIPTS`:
+1. Optionally copies to ramdisk (`/mnt/ramdisk_render`) for fast I/O
+2. Reads audio metadata (mutagen), generates tracklist overlay with auto-sized fonts
+3. Creates drop shadow for cover image (`effects/sombra.py`)
+4. Fetches track titles from DeathGrind API or falls back to filenames
+5. Runs profanity censorship (`limpieza/censura.py`)
+6. Renders via C++/CUDA binary (`cpp/build/vhs_render`) if `USE_CPP_VHS=True`, else FFmpeg
+7. Muxes audio and moves output to `DIR_UPLOAD`
+
+### Upload pipeline (`3. subir_video_API.py`, ~109 KB)
+
+- Authenticates via `subir_video/authenticate.py` (rotates through multiple credential sets in `credentials/`)
+- Builds rich video descriptions with streaming links (Bandcamp, Spotify, etc.) and social links
+- Schedules uploads in batches at configurable time slots
+- Creates/manages playlists per band and genre
+- Handles quota exceeded errors by rotating credentials
+
+### Credential rotation (`subir_video/authenticate.py`)
+
+Multiple OAuth credential pairs in `credentials/`:
+- `client_secrets_{prefix}_{n}.json` / `token_{prefix}_{n}.json`
+- Prefixes: `upload` (2 sets), `playlists` (8 sets)
+- Auto-rotates on quota exhaustion via `authenticate_next(prefix)`
+
+### Configuration (`config.py`)
+
+Central config for all scripts. Key settings:
+- `BASE_DIR`: root data directory (external drive at `/run/media/banar/Entretenimiento/01_edicion_automatizada`)
+- `USE_CPP_VHS`: enable C++/CUDA VHS renderer (default `True`)
+- `USE_GPU` / `USE_RAMDISK`: GPU and ramdisk flags
+- `ALLOW_FFMPEG_FALLBACK`: fall back to FFmpeg if CUDA fails
+- `MAX_PARALLEL_RENDERS`: concurrent render count (currently 1 for 4K)
+- `VIDEO_WIDTH`/`VIDEO_HEIGHT`: 3840x2160 (4K)
+
+### Key modules
+
+| Module | Purpose |
+|--------|---------|
+| `vhs_effect/` | Self-contained Python VHS effect library with CPU/GPU paths |
+| `cpp/` | C++/CUDA VHS renderer (targets SM 8.6 / RTX 3090 Ti) |
+| `effects/sombra.py` | Drop shadow generation for album covers |
+| `limpieza/censura.py` | Profanity filter with leetspeak handling |
+| `limpieza/` (other) | Folder cleanup utilities (normalize names, remove junk files) |
+| `selectores/` | JSON selector definitions for Playwright automation |
+| `analisis_canal/` | Separate 3-step sub-pipeline for YouTube channel analytics |
+| `content/` | Intro video (`0000000000000000.mp4`) and VHS noise overlay |
+
+## Code Style
+
+- **Language**: logs, prompts, and commit messages in **Spanish**
+- **Naming**: `snake_case` functions/variables, `PascalCase` classes, `UPPER_CASE` constants
+- **Paths**: always use `pathlib.Path`, never `os.path.join()` or string concatenation
+- **Imports**: stdlib → third-party → local (see AGENTS.md for full example)
+- **Subprocesses**: `subprocess.run([...], check=True)`, avoid `shell=True`
+- **Files**: always specify `encoding="utf-8"`
+- **Errors**: catch specific exceptions, never bare `except Exception:`
+- **Commits**: short Spanish messages, no Conventional Commits prefix
+
+## Persistent State Files
+
+- `mapear_playlists_checkpoint.txt`: tracks which videos have been mapped to playlists
+- `data/playlist_links_cache.json`: cached playlist IDs per band/genre
+- `bandas-subidas-al-canal.txt`: tracks uploaded video titles to prevent duplicates
+- `generos_activos.txt`: tab-separated list of active music genres with IDs
+
+## Credentials and Secrets (never commit)
+
+- `credentials/`: OAuth client secrets and tokens (gitignored)
+- `.env`: `DEATHGRIND_EMAIL`, `DEATHGRIND_PASSWORD`
+- `client_secrets.json`, `token.json`, `PASS.py`, `.playwright_profile`
+
+## Known Friction
+
+- Render is 4K and heavy; `MAX_PARALLEL_RENDERS=1` is the safe default
+- Ramdisk requires `sudo` without password for mount (configured via sudoers)
+- CUDA fallback chain: C++/CUDA → FFmpeg NVENC → FFmpeg libx264
+- Playwright sleeps are calibrated; reducing them breaks YouTube Studio automation
+- `12. mapear_playlists.py` runs as a systemd service (`mapear_playlists.service`) with auto-restart
