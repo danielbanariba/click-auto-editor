@@ -870,11 +870,18 @@ def ensure_shadow_cover(
 
 def normalize_track_title(title: str) -> str:
     """
-    Normaliza titulos de pistas eliminando prefijos numericos.
+    Normaliza titulos de pistas eliminando prefijos numericos consecutivos.
+    Solo elimina numeros seguidos de un separador explicito (. - _ ) ]).
+    Maneja casos como '01. 01. Goontro' → 'Goontro'.
+    No toca numeros sin separador como '3 Fuckeneers'.
     """
-    cleaned = re.sub(r"^\s*\d+\s*[-._)\]]\s*", "", title)
-    cleaned = re.sub(r"^\s*\d+\s+", "", cleaned)
-    return cleaned.strip()
+    cleaned = title
+    for _ in range(3):
+        prev = cleaned
+        cleaned = re.sub(r"^\s*\d+\s*[-._)\]]\s*", "", cleaned).strip()
+        if cleaned == prev:
+            break
+    return cleaned
 
 
 def normalize_compare(text: str) -> str:
@@ -1331,6 +1338,9 @@ def build_tracklist(audio_files, folder_name=None, api_titles=None):
         if not title:
             title = normalize_track_title(fallback) or fallback
         title = censor_profanity(title)
+        # Eliminar prefijo numérico redundante que coincida con el índice del track
+        # Ej: track 5 con título "05 3 Words..." → "3 Words..."
+        title = re.sub(rf"^0*{idx}(?:\s*[-._)\]]\s*|\s+)", "", title).strip() or title
         start = current
         end = current + duration
         tracks.append(

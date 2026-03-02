@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-02-25T16:19:36.451337Z",
-  "total": 555,
+  "generated_at": "2026-03-01T14:34:29.075150Z",
+  "total": 599,
   "items": [
     {
       "id": "PLFeRVs_dDivaZMxJDOziejzwI6Fa_nNkY",
@@ -10,18 +10,18 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaZMxJDOziejzwI6Fa_nNkY"
     },
     {
-      "id": "PLFeRVs_dDivbijY3MRSBZ2yX8lo91ab7j",
-      "title": "Death Metal",
-      "title_key": "death metal",
-      "count": 458,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbijY3MRSBZ2yX8lo91ab7j"
-    },
-    {
       "id": "PLFeRVs_dDivYgplzM-Oh1Bx4Qij8FwhZG",
       "title": "Vídeos Musicales (Oficiales)",
       "title_key": "vídeos musicales (oficiales)",
       "count": 419,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYgplzM-Oh1Bx4Qij8FwhZG"
+    },
+    {
+      "id": "PLFeRVs_dDivbijY3MRSBZ2yX8lo91ab7j",
+      "title": "Death Metal",
+      "title_key": "death metal",
+      "count": 418,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbijY3MRSBZ2yX8lo91ab7j"
     },
     {
       "id": "PLFeRVs_dDivacBUEQc5wuMRZgtRC5Y5K2",
@@ -48,7 +48,7 @@
       "id": "PLFeRVs_dDivYTQxcN7a-_gjIyFfOqnU0B",
       "title": "Brutal Death Metal",
       "title_key": "brutal death metal",
-      "count": 159,
+      "count": 143,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYTQxcN7a-_gjIyFfOqnU0B"
     },
     {
@@ -71,13 +71,6 @@
       "title_key": "2025",
       "count": 128,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYNg-yNr-aU5vZ4uOGPR2QM"
-    },
-    {
-      "id": "PLFeRVs_dDivYE6GBQnjLk_V__Wzl_ecAP",
-      "title": "Black Metal",
-      "title_key": "black metal",
-      "count": 107,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYE6GBQnjLk_V__Wzl_ecAP"
     },
     {
       "id": "PLFeRVs_dDivbRyGbosRHaJT2juLUPn6Dk",
@@ -108,10 +101,17 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb4vAhZL67hNukpumTKgYGc"
     },
     {
+      "id": "PLFeRVs_dDivYE6GBQnjLk_V__Wzl_ecAP",
+      "title": "Black Metal",
+      "title_key": "black metal",
+      "count": 74,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYE6GBQnjLk_V__Wzl_ecAP"
+    },
+    {
       "id": "PLFeRVs_dDivb1xT9-fsE3_zoSOOc66miE",
       "title": "Grindcore",
       "title_key": "grindcore",
-      "count": 75,
+      "count": 70,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb1xT9-fsE3_zoSOOc66miE"
     },
     {
@@ -129,18 +129,18 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb54wUBW-_84Dgjh9mDEWpo"
     },
     {
-      "id": "PLFeRVs_dDivZE2fNuw0LHA8BxP44Wtea9",
-      "title": "Goregrind",
-      "title_key": "goregrind",
-      "count": 52,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZE2fNuw0LHA8BxP44Wtea9"
-    },
-    {
       "id": "PLFeRVs_dDivZDlORk_HHs8jMZE7Vru3X_",
       "title": "2016",
       "title_key": "2016",
       "count": 50,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZDlORk_HHs8jMZE7Vru3X_"
+    },
+    {
+      "id": "PLFeRVs_dDivZE2fNuw0LHA8BxP44Wtea9",
+      "title": "Goregrind",
+      "title_key": "goregrind",
+      "count": 48,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZE2fNuw0LHA8BxP44Wtea9"
     },
     {
       "id": "PLFeRVs_dDivaKGzpbi9BuBPF2ShDCHgLu",
@@ -279,7 +279,7 @@
       "id": "PLFeRVs_dDivYjMU5HlIXqDK8xaLR0-UDO",
       "title": "Thrash Metal",
       "title_key": "thrash metal",
-      "count": 19,
+      "count": 17,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYjMU5HlIXqDK8xaLR0-UDO"
     },
     {
@@ -339,6 +339,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZs38coLCNMAZx1r9-H8w-l"
     },
     {
+      "id": "PLFeRVs_dDivZnxTc3bYhlDRKhtstXeAyW",
+      "title": "2008",
+      "title_key": "2008",
+      "count": 10,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZnxTc3bYhlDRKhtstXeAyW"
+    },
+    {
       "id": "PLFeRVs_dDivbWtRoFx4St7Izw9NgZHTqQ",
       "title": "Concerts/Conciertos",
       "title_key": "concerts/conciertos",
@@ -346,18 +353,11 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbWtRoFx4St7Izw9NgZHTqQ"
     },
     {
-      "id": "PLFeRVs_dDivZKiMD3TbrVlR6U8bfBI36o",
-      "title": "Crust",
-      "title_key": "crust",
-      "count": 10,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZKiMD3TbrVlR6U8bfBI36o"
-    },
-    {
-      "id": "PLFeRVs_dDivZnxTc3bYhlDRKhtstXeAyW",
-      "title": "2008",
-      "title_key": "2008",
+      "id": "PLFeRVs_dDivYL-oDLkPUnMyjzdczhU2G6",
+      "title": "2019",
+      "title_key": "2019",
       "count": 9,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZnxTc3bYhlDRKhtstXeAyW"
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYL-oDLkPUnMyjzdczhU2G6"
     },
     {
       "id": "PLFeRVs_dDivaCjUVchUGF9PlqL2T4yYj-",
@@ -374,18 +374,18 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYjAnw8Zrwp2h7Ow6GIs5qU"
     },
     {
+      "id": "PLFeRVs_dDivZKiMD3TbrVlR6U8bfBI36o",
+      "title": "Crust",
+      "title_key": "crust",
+      "count": 8,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZKiMD3TbrVlR6U8bfBI36o"
+    },
+    {
       "id": "PLFeRVs_dDivaypsvwMqyxPSiS_PT6z6NU",
       "title": "Rock",
       "title_key": "rock",
       "count": 7,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaypsvwMqyxPSiS_PT6z6NU"
-    },
-    {
-      "id": "PLFeRVs_dDivYL-oDLkPUnMyjzdczhU2G6",
-      "title": "2019",
-      "title_key": "2019",
-      "count": 6,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYL-oDLkPUnMyjzdczhU2G6"
     },
     {
       "id": "PLFeRVs_dDivbKlrAwF1hTdJKkp8w-jYRK",
@@ -430,13 +430,6 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb7m8sCjqNyBxVqkG3SLW-U"
     },
     {
-      "id": "PLFeRVs_dDivaZrWhMU_0lMxhh78fFWVzw",
-      "title": "Blasting Brutal Death Metal",
-      "title_key": "blasting brutal death metal",
-      "count": 5,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaZrWhMU_0lMxhh78fFWVzw"
-    },
-    {
       "id": "PLFeRVs_dDivawSrubET_Isu7oddM6cooK",
       "title": "Deathgrind",
       "title_key": "deathgrind",
@@ -456,6 +449,13 @@
       "title_key": "united kingdom",
       "count": 5,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYU5lIq8zs4a6FRBsFAxWIR"
+    },
+    {
+      "id": "PLFeRVs_dDivb83FU9n8Ebwcniw7Ubx1oG",
+      "title": "2003",
+      "title_key": "2003",
+      "count": 4,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb83FU9n8Ebwcniw7Ubx1oG"
     },
     {
       "id": "PLFeRVs_dDivYCCXTfy3vWrLsfEYms9O9_",
@@ -528,13 +528,6 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDiva_zZshFeNdAjk13zJ3mxdp"
     },
     {
-      "id": "PLFeRVs_dDivb83FU9n8Ebwcniw7Ubx1oG",
-      "title": "2003",
-      "title_key": "2003",
-      "count": 3,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb83FU9n8Ebwcniw7Ubx1oG"
-    },
-    {
       "id": "PLFeRVs_dDivZTA_UaBx61NmsOZtfp17rR",
       "title": "Albatros, Trauma y Xendra - En Concierto",
       "title_key": "albatros, trauma y xendra - en concierto",
@@ -554,6 +547,20 @@
       "title_key": "bestial devastion festival vol. 2",
       "count": 3,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZKcY_OKhgfA8yXfhPV1BsQ"
+    },
+    {
+      "id": "PLFeRVs_dDivZDtuPUYEno4RHXri_eDMYB",
+      "title": "Blackened Death Metal",
+      "title_key": "blackened death metal",
+      "count": 3,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZDtuPUYEno4RHXri_eDMYB"
+    },
+    {
+      "id": "PLFeRVs_dDivaZrWhMU_0lMxhh78fFWVzw",
+      "title": "Blasting Brutal Death Metal",
+      "title_key": "blasting brutal death metal",
+      "count": 3,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaZrWhMU_0lMxhh78fFWVzw"
     },
     {
       "id": "PLFeRVs_dDivaGcPPQzzGQk5P5vH8DWlwP",
@@ -596,13 +603,6 @@
       "title_key": "doors to hell",
       "count": 3,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaUkD-GcSeBhp_y6nj5Q0MJ"
-    },
-    {
-      "id": "PLFeRVs_dDivbjoIcgPrU2ATXetkJGbO0G",
-      "title": "Folk Metal",
-      "title_key": "folk metal",
-      "count": 3,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbjoIcgPrU2ATXetkJGbO0G"
     },
     {
       "id": "PLFeRVs_dDivbSMfZWd-N2dTDU305s70e3",
@@ -654,6 +654,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaAdr__m2eKHBzArT72Kcfo"
     },
     {
+      "id": "PLFeRVs_dDivbskzW4Th8LqXObEht4h8TH",
+      "title": "2004",
+      "title_key": "2004",
+      "count": 2,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbskzW4Th8LqXObEht4h8TH"
+    },
+    {
       "id": "PLFeRVs_dDivbYmp1-hL0T17TH9e0muzaV",
       "title": "Abitabyss",
       "title_key": "abitabyss",
@@ -661,11 +668,11 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbYmp1-hL0T17TH9e0muzaV"
     },
     {
-      "id": "PLFeRVs_dDivYS60wPEM7XLpZ1DeGIx4dn",
-      "title": "Atmospheric Death Metal",
-      "title_key": "atmospheric death metal",
+      "id": "PLFeRVs_dDivZ8Mqt31bJfrsWz-w2xVXhL",
+      "title": "Atomwinter",
+      "title_key": "atomwinter",
       "count": 2,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYS60wPEM7XLpZ1DeGIx4dn"
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZ8Mqt31bJfrsWz-w2xVXhL"
     },
     {
       "id": "PLFeRVs_dDivaY5LBVlbrRBVIa7E9xGrDh",
@@ -680,13 +687,6 @@
       "title_key": "black/thrash metal",
       "count": 2,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDiva1a50YmwVoJ_5ZIdqOWIhb"
-    },
-    {
-      "id": "PLFeRVs_dDivZDtuPUYEno4RHXri_eDMYB",
-      "title": "Blackened Death Metal",
-      "title_key": "blackened death metal",
-      "count": 2,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZDtuPUYEno4RHXri_eDMYB"
     },
     {
       "id": "PLFeRVs_dDivY0bBQZU2xgJdzlMAdmkuD4",
@@ -787,6 +787,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYJqPqdgJtmwhip3wrDzegf"
     },
     {
+      "id": "PLFeRVs_dDivbjoIcgPrU2ATXetkJGbO0G",
+      "title": "Folk Metal",
+      "title_key": "folk metal",
+      "count": 2,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbjoIcgPrU2ATXetkJGbO0G"
+    },
+    {
       "id": "PLFeRVs_dDivbBd6GWqK67auVbO1nxGt6i",
       "title": "Ghouls",
       "title_key": "ghouls",
@@ -850,13 +857,6 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivY4Tg1Ra9mcBYXQ_ZFDkv6Z"
     },
     {
-      "id": "PLFeRVs_dDivYDNnibvjlNsauO94aNr4_I",
-      "title": "Mutilation Rites",
-      "title_key": "mutilation rites",
-      "count": 2,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYDNnibvjlNsauO94aNr4_I"
-    },
-    {
       "id": "PLFeRVs_dDivYjE0IOHE81oUmEDXyJr47j",
       "title": "Natural Killer",
       "title_key": "natural killer",
@@ -899,13 +899,6 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaSd45-UXdt-mHMhH-4NRYA"
     },
     {
-      "id": "PLFeRVs_dDivaYl6j2D-v1IvibDgZ6o_MG",
-      "title": "Scrumptious Putrescence",
-      "title_key": "scrumptious putrescence",
-      "count": 2,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaYl6j2D-v1IvibDgZ6o_MG"
-    },
-    {
       "id": "PLFeRVs_dDivb_UwUDvnleMKqPYpM7vzNe",
       "title": "Suecia",
       "title_key": "suecia",
@@ -932,13 +925,6 @@
       "title_key": "tropa noise",
       "count": 2,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivatxOvsigRKd0JojEuD2udL"
-    },
-    {
-      "id": "PLFeRVs_dDivZiyRs6EBY4Lr7cs7pnoNPF",
-      "title": "Unblessed",
-      "title_key": "unblessed",
-      "count": 2,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZiyRs6EBY4Lr7cs7pnoNPF"
     },
     {
       "id": "PLFeRVs_dDivbaDzlTlNTmTyqrQMTDk-Zu",
@@ -983,13 +969,6 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZ7n5nbwiNw1Pnzj3YhYJI8"
     },
     {
-      "id": "PLFeRVs_dDivbskzW4Th8LqXObEht4h8TH",
-      "title": "2004",
-      "title_key": "2004",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbskzW4Th8LqXObEht4h8TH"
-    },
-    {
       "id": "PLFeRVs_dDivZuJt6u5F3zdV-LyHitvQfe",
       "title": "5 Stabbed 4 Corpses",
       "title_key": "5 stabbed 4 corpses",
@@ -1011,6 +990,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaTpd397buDW3SCK4Lvj39J"
     },
     {
+      "id": "PLFeRVs_dDivZIWBwarA_HUEZwPP6ZBpso",
+      "title": "A Distorted Utopia",
+      "title_key": "a distorted utopia",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZIWBwarA_HUEZwPP6ZBpso"
+    },
+    {
       "id": "PLFeRVs_dDivZldWttkIZ0JUpBb7wt6XY2",
       "title": "Aborted Christians",
       "title_key": "aborted christians",
@@ -1030,6 +1016,13 @@
       "title_key": "absorbed vegan dose",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivahJBI320DvKpNULiTC5JQ_"
+    },
+    {
+      "id": "PLFeRVs_dDivYURxDy7riizBODSx1LinBP",
+      "title": "Accidental Death Benefit",
+      "title_key": "accidental death benefit",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYURxDy7riizBODSx1LinBP"
     },
     {
       "id": "PLFeRVs_dDivZ3xCpbpZ5qnc-P0eII6wvY",
@@ -1102,6 +1095,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYk1yUiakyCKpF-fE3ee3I9"
     },
     {
+      "id": "PLFeRVs_dDivadguzdo9wSE7aWagv6hfjH",
+      "title": "Ancient Hymns",
+      "title_key": "ancient hymns",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivadguzdo9wSE7aWagv6hfjH"
+    },
+    {
       "id": "PLFeRVs_dDivZhTLt70tzkXPFEJzNuhw25",
       "title": "And the Kingdom Fell",
       "title_key": "and the kingdom fell",
@@ -1151,6 +1151,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYCb2BY7xiOSelP6rDD5jWX"
     },
     {
+      "id": "PLFeRVs_dDivYS60wPEM7XLpZ1DeGIx4dn",
+      "title": "Atmospheric Death Metal",
+      "title_key": "atmospheric death metal",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYS60wPEM7XLpZ1DeGIx4dn"
+    },
+    {
       "id": "PLFeRVs_dDivY_W7Unr8_jss0LvBD_GL43",
       "title": "Augurium",
       "title_key": "augurium",
@@ -1193,6 +1200,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivahzphtyQ27Y06qFeD8pM45"
     },
     {
+      "id": "PLFeRVs_dDivbR6-1njcbOnk799m-IFO6y",
+      "title": "BUM",
+      "title_key": "bum",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbR6-1njcbOnk799m-IFO6y"
+    },
+    {
       "id": "PLFeRVs_dDivaRzECJEDiSGML3zeokSnKS",
       "title": "Barrows",
       "title_key": "barrows",
@@ -1214,18 +1228,18 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYIRcLLRstF4hhOiIUfwnXq"
     },
     {
-      "id": "PLFeRVs_dDivZhZl10em36UavcjF8rdGGT",
-      "title": "Behemoth",
-      "title_key": "behemoth",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZhZl10em36UavcjF8rdGGT"
-    },
-    {
       "id": "PLFeRVs_dDiva5jXukSvdTM5hFkRkugSpU",
       "title": "Behold the Slitted Carcass",
       "title_key": "behold the slitted carcass",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDiva5jXukSvdTM5hFkRkugSpU"
+    },
+    {
+      "id": "PLFeRVs_dDivaVa116dtLnCT8RbF6tDx1x",
+      "title": "Betrayed Heaven",
+      "title_key": "betrayed heaven",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaVa116dtLnCT8RbF6tDx1x"
     },
     {
       "id": "PLFeRVs_dDivbPSjg0K2DMZhkIHF-IUpeN",
@@ -1249,25 +1263,11 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDiva5auuifKmK4yomQWtUvQdn"
     },
     {
-      "id": "PLFeRVs_dDivbONoW3hNDTHHUyg32gdelw",
-      "title": "Black Fucking Cancer",
-      "title_key": "black fucking cancer",
+      "id": "PLFeRVs_dDivZOPRc_d4N1EOG5-2807BXO",
+      "title": "Black Death Metal",
+      "title_key": "black death metal",
       "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbONoW3hNDTHHUyg32gdelw"
-    },
-    {
-      "id": "PLFeRVs_dDivaLumRAc53tXFbOVI9fTK2S",
-      "title": "Black Jesus",
-      "title_key": "black jesus",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaLumRAc53tXFbOVI9fTK2S"
-    },
-    {
-      "id": "PLFeRVs_dDivZ-MIwOyoUg7AeLVWCw9YXr",
-      "title": "Black Negative Domination",
-      "title_key": "black negative domination",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZ-MIwOyoUg7AeLVWCw9YXr"
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZOPRc_d4N1EOG5-2807BXO"
     },
     {
       "id": "PLFeRVs_dDivZYH3ELpKNUY1InDjtHsVb-",
@@ -1354,6 +1354,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivY7uZJAu0QtGAYc2H8i4Cky"
     },
     {
+      "id": "PLFeRVs_dDivY7dV4o5w0p_XKGiTA4Zpwv",
+      "title": "Bloodrainbow",
+      "title_key": "bloodrainbow",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivY7dV4o5w0p_XKGiTA4Zpwv"
+    },
+    {
       "id": "PLFeRVs_dDivZsD3GcfV5WBhO8QKQ0FjiJ",
       "title": "Bloody Anatomies",
       "title_key": "bloody anatomies",
@@ -1396,6 +1403,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb4YP_YFY1VynjbFzMLN2p8"
     },
     {
+      "id": "PLFeRVs_dDivb7THnqbrdT8_F2KQOHBNb-",
+      "title": "Brutal Death Metal | Grindcore",
+      "title_key": "brutal death metal | grindcore",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb7THnqbrdT8_F2KQOHBNb-"
+    },
+    {
       "id": "PLFeRVs_dDivbxcvO-VLJCrzFk-47NDK4A",
       "title": "Brutal Deathgrind",
       "title_key": "brutal deathgrind",
@@ -1422,13 +1436,6 @@
       "title_key": "burial in the sky",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaloW8qpICRNcv0PZzZQViF"
-    },
-    {
-      "id": "PLFeRVs_dDivadw1qVIhI6Sjb4J2YcVYHh",
-      "title": "CELL BLOCK AUTOPSY",
-      "title_key": "cell block autopsy",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivadw1qVIhI6Sjb4J2YcVYHh"
     },
     {
       "id": "PLFeRVs_dDivabkaHqOtUcjFnwAwK20jgy",
@@ -1459,6 +1466,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYqJjx-oOLZzhO6l5lpVknG"
     },
     {
+      "id": "PLFeRVs_dDivZKbMhFD4rqJxPQGqAjn79j",
+      "title": "Calm Hatchery",
+      "title_key": "calm hatchery",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZKbMhFD4rqJxPQGqAjn79j"
+    },
+    {
       "id": "PLFeRVs_dDivaCbjmFq9VbdHXFNltlUvXH",
       "title": "Carcariass",
       "title_key": "carcariass",
@@ -1485,13 +1499,6 @@
       "title_key": "cenotaph",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYfJTgm--xgCpCJJv46AFcV"
-    },
-    {
-      "id": "PLFeRVs_dDivaicPEsQna_ZBu70RQ9xEJZ",
-      "title": "Centuries of Decay",
-      "title_key": "centuries of decay",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaicPEsQna_ZBu70RQ9xEJZ"
     },
     {
       "id": "PLFeRVs_dDivYtXxRiK6ptvjQNA6TXaFvd",
@@ -1534,13 +1541,6 @@
       "title_key": "cloak of altering",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivatcsUtVfyRrb7IqAr0sKDh"
-    },
-    {
-      "id": "PLFeRVs_dDivabzF07IqFwteav9l4s_1Th",
-      "title": "Concrete Icon",
-      "title_key": "concrete icon",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivabzF07IqFwteav9l4s_1Th"
     },
     {
       "id": "PLFeRVs_dDivbLOtcdtNyRvFkITFLjq-8y",
@@ -1653,13 +1653,6 @@
       "title_key": "dark waters end",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivapyobRXXRBE61o_he5bGgJ"
-    },
-    {
-      "id": "PLFeRVs_dDivZm3u_2hXinGzscW_pacjlU",
-      "title": "Darkall Slaves",
-      "title_key": "darkall slaves",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZm3u_2hXinGzscW_pacjlU"
     },
     {
       "id": "PLFeRVs_dDivbCCPlDEl-PLT0O_VFBNFWO",
@@ -1802,11 +1795,11 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYiy2Gpnh7ygCwLoK8Ir2OL"
     },
     {
-      "id": "PLFeRVs_dDivY8YZsEh5yNdgerRjXbUNxP",
-      "title": "Diavolos",
-      "title_key": "diavolos",
+      "id": "PLFeRVs_dDivYSTIYCTGl2D3FjIPuccnpz",
+      "title": "Dh",
+      "title_key": "dh",
       "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivY8YZsEh5yNdgerRjXbUNxP"
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYSTIYCTGl2D3FjIPuccnpz"
     },
     {
       "id": "PLFeRVs_dDivYJ7tjYKjiPW-nK7sPNZ8IG",
@@ -1851,13 +1844,6 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZFREBK-yvwFnML43WsqESl"
     },
     {
-      "id": "PLFeRVs_dDivaVMFZsIe7uzwA8pppHMFon",
-      "title": "Distaste",
-      "title_key": "distaste",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaVMFZsIe7uzwA8pppHMFon"
-    },
-    {
       "id": "PLFeRVs_dDiva0EqocU15HIOALcTgrrsbQ",
       "title": "Distraught",
       "title_key": "distraught",
@@ -1870,6 +1856,13 @@
       "title_key": "djent",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZIr6KcLqXXmmPFSQJGIrvH"
+    },
+    {
+      "id": "PLFeRVs_dDivbtMBCdpdS3pPQWIjha4_x7",
+      "title": "Doom",
+      "title_key": "doom",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbtMBCdpdS3pPQWIjha4_x7"
     },
     {
       "id": "PLFeRVs_dDivbx7j9xOa1BRAO28GVVvOJf",
@@ -1942,6 +1935,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYsfjYIIRyt8n4xlaqZS2p4"
     },
     {
+      "id": "PLFeRVs_dDivYjEnY7JdO09o8XAduSrmfu",
+      "title": "Endless Distrust",
+      "title_key": "endless distrust",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYjEnY7JdO09o8XAduSrmfu"
+    },
+    {
       "id": "PLFeRVs_dDivZo6auIFTM6PKG__rIBIl83",
       "title": "Enema Shower",
       "title_key": "enema shower",
@@ -1984,11 +1984,11 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbUPQj1rll0xcXbEBOpzvXY"
     },
     {
-      "id": "PLFeRVs_dDivYZUXfICeCDBqVqivy6lDnh",
-      "title": "Erimha",
-      "title_key": "erimha",
+      "id": "PLFeRVs_dDivYvVwa1vhCzOoRG6D_uXLPm",
+      "title": "Erebos",
+      "title_key": "erebos",
       "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYZUXfICeCDBqVqivy6lDnh"
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYvVwa1vhCzOoRG6D_uXLPm"
     },
     {
       "id": "PLFeRVs_dDivahpF6WiSI_ak7EEzlWFDGk",
@@ -1996,6 +1996,13 @@
       "title_key": "eroded ashes",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivahpF6WiSI_ak7EEzlWFDGk"
+    },
+    {
+      "id": "PLFeRVs_dDivbGv_sBBFwRwXin42lAqlGI",
+      "title": "Errance",
+      "title_key": "errance",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbGv_sBBFwRwXin42lAqlGI"
     },
     {
       "id": "PLFeRVs_dDivYemp6h7c5iVXvjT3Bqx-xJ",
@@ -2033,13 +2040,6 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivY9k3-YynLr9TQHc8QbpE8f"
     },
     {
-      "id": "PLFeRVs_dDivadoHd2FUsJ2FjdPiSf_QCS",
-      "title": "FERALIMINAL LYCANTHROPIZER",
-      "title_key": "feraliminal lycanthropizer",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivadoHd2FUsJ2FjdPiSf_QCS"
-    },
-    {
       "id": "PLFeRVs_dDivaR6a06j5t2SQhmpOx07-2g",
       "title": "Facada",
       "title_key": "facada",
@@ -2061,11 +2061,25 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZvcnWMAGADJzx6efdOhBJP"
     },
     {
+      "id": "PLFeRVs_dDivZHAKjeTPuFLMuOakHAOcYp",
+      "title": "Filthy Notorious Grindcore",
+      "title_key": "filthy notorious grindcore",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZHAKjeTPuFLMuOakHAOcYp"
+    },
+    {
       "id": "PLFeRVs_dDivaVzOveTJgz37kcoELjqZw4",
       "title": "Flittering",
       "title_key": "flittering",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaVzOveTJgz37kcoELjqZw4"
+    },
+    {
+      "id": "PLFeRVs_dDivYMLTTnGQay8bWtRqy6Bmo1",
+      "title": "Forced Asphyxiation",
+      "title_key": "forced asphyxiation",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYMLTTnGQay8bWtRqy6Bmo1"
     },
     {
       "id": "PLFeRVs_dDivaWcKynnWhjU0MM6gl1r1gh",
@@ -2089,11 +2103,25 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb1feovJaA2B-5E6IodFt9z"
     },
     {
+      "id": "PLFeRVs_dDivZNy8MK_aVD0PejaqYL80C3",
+      "title": "Funeral Inception",
+      "title_key": "funeral inception",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZNy8MK_aVD0PejaqYL80C3"
+    },
+    {
       "id": "PLFeRVs_dDivbxpq_R-QvJetrHXyAXvijG",
       "title": "Funeral Rape",
       "title_key": "funeral rape",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbxpq_R-QvJetrHXyAXvijG"
+    },
+    {
+      "id": "PLFeRVs_dDivYFzo4hf_7P3yXaQE9CvnB7",
+      "title": "Fusion",
+      "title_key": "fusion",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYFzo4hf_7P3yXaQE9CvnB7"
     },
     {
       "id": "PLFeRVs_dDiva70hqdFeSZ9cyagAN2VVsU",
@@ -2145,20 +2173,6 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZqMm6sT7GlWHFAoaWClzKv"
     },
     {
-      "id": "PLFeRVs_dDivYffVXOLsiBdz7PN4fHQXiK",
-      "title": "Goath",
-      "title_key": "goath",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYffVXOLsiBdz7PN4fHQXiK"
-    },
-    {
-      "id": "PLFeRVs_dDivb75jU-kAZaz3qO-3zdlOxf",
-      "title": "God Dethroned",
-      "title_key": "god dethroned",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb75jU-kAZaz3qO-3zdlOxf"
-    },
-    {
       "id": "PLFeRVs_dDivbyEs4FiKXeZQlyMG8wBSqK",
       "title": "Gomory",
       "title_key": "gomory",
@@ -2208,18 +2222,18 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZ_5H5qCkBbbrLrdQoZxHqK"
     },
     {
-      "id": "PLFeRVs_dDivah3nHMwMPlo5XeycSJUDVB",
-      "title": "Grotesque Atrocity",
-      "title_key": "grotesque atrocity",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivah3nHMwMPlo5XeycSJUDVB"
-    },
-    {
       "id": "PLFeRVs_dDivYDIYCk5c9THUiO9HhYM8zs",
       "title": "Guttural Queef",
       "title_key": "guttural queef",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYDIYCk5c9THUiO9HhYM8zs"
+    },
+    {
+      "id": "PLFeRVs_dDivZuFxABQqsWX1IDgP6wWors",
+      "title": "HackxWhore",
+      "title_key": "hackxwhore",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZuFxABQqsWX1IDgP6wWors"
     },
     {
       "id": "PLFeRVs_dDivZB6471V6kI6BSVlSTnLtdh",
@@ -2262,13 +2276,6 @@
       "title_key": "hellbore",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYSm_nAG2NlkLmWVvVv3_QG"
-    },
-    {
-      "id": "PLFeRVs_dDivZYxdBBX560e-5pqi74tFki",
-      "title": "Hellknife",
-      "title_key": "hellknife",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZYxdBBX560e-5pqi74tFki"
     },
     {
       "id": "PLFeRVs_dDiva0kcTH0yz80pwX-loB66Tn",
@@ -2327,6 +2334,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivavs6-jXNLfiAlStdJqSNkY"
     },
     {
+      "id": "PLFeRVs_dDivb8lustcUr_7nZEfcPfpo1q",
+      "title": "IFested",
+      "title_key": "ifested",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb8lustcUr_7nZEfcPfpo1q"
+    },
+    {
       "id": "PLFeRVs_dDivZ7-1mWFNdyTeOE2pwdUiQ1",
       "title": "Impaled",
       "title_key": "impaled",
@@ -2346,6 +2360,13 @@
       "title_key": "infection",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb6T1-pd8au4K-ZKnivsXsr"
+    },
+    {
+      "id": "PLFeRVs_dDivYYtGmo38JemKGi_dvwNOFs",
+      "title": "Infectology",
+      "title_key": "infectology",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYYtGmo38JemKGi_dvwNOFs"
     },
     {
       "id": "PLFeRVs_dDivYpv38Yi0tCtSsju2rFW44T",
@@ -2453,6 +2474,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbP55Ffw9adO07O0WrLD7MM"
     },
     {
+      "id": "PLFeRVs_dDivbVMMBq-9281_f9UPNto7S1",
+      "title": "Knell",
+      "title_key": "knell",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbVMMBq-9281_f9UPNto7S1"
+    },
+    {
       "id": "PLFeRVs_dDivZmKgANm-7kns738T1UPAu7",
       "title": "Konqueror",
       "title_key": "konqueror",
@@ -2507,6 +2535,13 @@
       "title_key": "loath",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaq-L-lT_KCy2umoePU0Tjr"
+    },
+    {
+      "id": "PLFeRVs_dDivZd8KeLVo1s0ciinko4WQyA",
+      "title": "Lock Horns",
+      "title_key": "lock horns",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZd8KeLVo1s0ciinko4WQyA"
     },
     {
       "id": "PLFeRVs_dDivZ9R2wwaCTaL7yPMzKfZXy-",
@@ -2572,6 +2607,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb1UZgUcok1SKTsEX2VjpRX"
     },
     {
+      "id": "PLFeRVs_dDivZ0QAXGnmt-haVtBiw5n4Xw",
+      "title": "Mass Idolatry",
+      "title_key": "mass idolatry",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZ0QAXGnmt-haVtBiw5n4Xw"
+    },
+    {
       "id": "PLFeRVs_dDivY851Pm91GzxhihuyB7V3ST",
       "title": "Massacrator",
       "title_key": "massacrator",
@@ -2614,6 +2656,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbGBL1IKLEJ9KBiFkFWkE1C"
     },
     {
+      "id": "PLFeRVs_dDivYxcuYeeHe5sgU3TGBgdeu6",
+      "title": "Miazma",
+      "title_key": "miazma",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYxcuYeeHe5sgU3TGBgdeu6"
+    },
+    {
       "id": "PLFeRVs_dDivb7KPThUs9zjApbzPCkByIb",
       "title": "Milking The Goatmachine",
       "title_key": "milking the goatmachine",
@@ -2642,11 +2691,11 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZzIgK8gEnlFvbKVuhYJiGo"
     },
     {
-      "id": "PLFeRVs_dDivYMFFq7fUp0qq8am4YJZVGW",
-      "title": "Mivedantal",
-      "title_key": "mivedantal",
+      "id": "PLFeRVs_dDivYoxctk2BTQ5FTuhSjycN1a",
+      "title": "Monoliyth",
+      "title_key": "monoliyth",
       "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYMFFq7fUp0qq8am4YJZVGW"
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYoxctk2BTQ5FTuhSjycN1a"
     },
     {
       "id": "PLFeRVs_dDivaJaxKWvG3i6k-5r4WApVhM",
@@ -2712,13 +2761,6 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivauZm_7yNsCEsnPJyAJznAk"
     },
     {
-      "id": "PLFeRVs_dDivZqckKFENroQxe6CiBIub7l",
-      "title": "Muggeseggel",
-      "title_key": "muggeseggel",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZqckKFENroQxe6CiBIub7l"
-    },
-    {
       "id": "PLFeRVs_dDivZO9sELuQqWqBg-Ze0PiP0Q",
       "title": "Muntah Kawat",
       "title_key": "muntah kawat",
@@ -2726,11 +2768,11 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZO9sELuQqWqBg-Ze0PiP0Q"
     },
     {
-      "id": "PLFeRVs_dDivZ96nKSuymALvdRZr6AvnNe",
-      "title": "My Darkest Hate",
-      "title_key": "my darkest hate",
+      "id": "PLFeRVs_dDivYDNnibvjlNsauO94aNr4_I",
+      "title": "Mutilation Rites",
+      "title_key": "mutilation rites",
       "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZ96nKSuymALvdRZr6AvnNe"
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYDNnibvjlNsauO94aNr4_I"
     },
     {
       "id": "PLFeRVs_dDiva9_yPr3sLDc_bx0PbszM83",
@@ -2740,11 +2782,18 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDiva9_yPr3sLDc_bx0PbszM83"
     },
     {
-      "id": "PLFeRVs_dDivYlfpn8FSlkNu9Mu89hdwCj",
-      "title": "Nastergal",
-      "title_key": "nastergal",
+      "id": "PLFeRVs_dDivZXUNuoTbZKHIuusDXxqZvR",
+      "title": "Nalvage",
+      "title_key": "nalvage",
       "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYlfpn8FSlkNu9Mu89hdwCj"
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZXUNuoTbZKHIuusDXxqZvR"
+    },
+    {
+      "id": "PLFeRVs_dDivY30_WWcLBPSgPl9z9oqLe-",
+      "title": "Nasty Surgeons",
+      "title_key": "nasty surgeons",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivY30_WWcLBPSgPl9z9oqLe-"
     },
     {
       "id": "PLFeRVs_dDivbvaTcYX-MjCzlNJ3pDRCkv",
@@ -2754,6 +2803,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbvaTcYX-MjCzlNJ3pDRCkv"
     },
     {
+      "id": "PLFeRVs_dDivYQVz9DXQ3quIJ4FYXaWafH",
+      "title": "Necropsy Defecation",
+      "title_key": "necropsy defecation",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYQVz9DXQ3quIJ4FYXaWafH"
+    },
+    {
       "id": "PLFeRVs_dDivb8jn1dynQkxg0WSN4wEZqs",
       "title": "Neid",
       "title_key": "neid",
@@ -2761,25 +2817,11 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb8jn1dynQkxg0WSN4wEZqs"
     },
     {
-      "id": "PLFeRVs_dDivaBbTVMSZLgI1FrJ6rIUyiR",
-      "title": "Nekrokraft",
-      "title_key": "nekrokraft",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaBbTVMSZLgI1FrJ6rIUyiR"
-    },
-    {
       "id": "PLFeRVs_dDivZvTDZCw5HGPyfUvyQsCX8I",
       "title": "Neoplasia",
       "title_key": "neoplasia",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZvTDZCw5HGPyfUvyQsCX8I"
-    },
-    {
-      "id": "PLFeRVs_dDivaTuji5l_smUCGW4230C8pp",
-      "title": "Nethersphere",
-      "title_key": "nethersphere",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaTuji5l_smUCGW4230C8pp"
     },
     {
       "id": "PLFeRVs_dDivZ-7AEv7GY5M5LGb-mXYEtV",
@@ -2852,6 +2894,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZrTdialbdXPiWrbyhg8nw-"
     },
     {
+      "id": "PLFeRVs_dDivZXvRVWSsIVGBQ3H036nn4_",
+      "title": "Okult",
+      "title_key": "okult",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZXvRVWSsIVGBQ3H036nn4_"
+    },
+    {
       "id": "PLFeRVs_dDivau6dZfNEWlY0cvrWJhvc7P",
       "title": "Omniarch",
       "title_key": "omniarch",
@@ -2871,6 +2920,13 @@
       "title_key": "orgiastic defleshment",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZp2BNc9-q351llWXOgtqsi"
+    },
+    {
+      "id": "PLFeRVs_dDivZKTWMlpEZLjELV3Dvg7MnL",
+      "title": "Orphan Stomper",
+      "title_key": "orphan stomper",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZKTWMlpEZLjELV3Dvg7MnL"
     },
     {
       "id": "PLFeRVs_dDivbQjxekeH0M55xcap2dqBk1",
@@ -2943,11 +2999,11 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbTglbg-V-IFaUaXDHfkU9U"
     },
     {
-      "id": "PLFeRVs_dDivagk1xk37owecyvScH9dey8",
-      "title": "Pentagoat",
-      "title_key": "pentagoat",
+      "id": "PLFeRVs_dDivYuqFdAzSrOAYTq9eWMz8Aq",
+      "title": "Perfecitizen",
+      "title_key": "perfecitizen",
       "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivagk1xk37owecyvScH9dey8"
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYuqFdAzSrOAYTq9eWMz8Aq"
     },
     {
       "id": "PLFeRVs_dDivawTxbQ2UJXw-0VlGLEDeSP",
@@ -3027,6 +3083,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZ3YG3tT0oLkG97aOLDk0ac"
     },
     {
+      "id": "PLFeRVs_dDivbYOnpPL0OIZlgGKPa23jlU",
+      "title": "Progressive",
+      "title_key": "progressive",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbYOnpPL0OIZlgGKPa23jlU"
+    },
+    {
       "id": "PLFeRVs_dDivbISlOni47hs57qULmb5DAN",
       "title": "Progressive Death Metal | Deathcore",
       "title_key": "progressive death metal | deathcore",
@@ -3041,6 +3104,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaI-xHsQMfrTMKfpBWPgTZv"
     },
     {
+      "id": "PLFeRVs_dDivY3ytw4My2CZ1dTf96gg2Wr",
+      "title": "Progressive Metalcore",
+      "title_key": "progressive metalcore",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivY3ytw4My2CZ1dTf96gg2Wr"
+    },
+    {
       "id": "PLFeRVs_dDivY2tgD5dUrutqhVh2A_Nduj",
       "title": "Prohibitory",
       "title_key": "prohibitory",
@@ -3053,6 +3123,20 @@
       "title_key": "project 353",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbN7QKK1JZbSK7KI0PMFveI"
+    },
+    {
+      "id": "PLFeRVs_dDivYD1OzzvxuwPotnSoigMEdf",
+      "title": "Prophecy",
+      "title_key": "prophecy",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYD1OzzvxuwPotnSoigMEdf"
+    },
+    {
+      "id": "PLFeRVs_dDivZdSL0sp3IWJhEGRZ6sO_xB",
+      "title": "Psicovomitosis Sadinecrootitis",
+      "title_key": "psicovomitosis sadinecrootitis",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZdSL0sp3IWJhEGRZ6sO_xB"
     },
     {
       "id": "PLFeRVs_dDivZBvvElvF1IzGvfHGrxTcKZ",
@@ -3153,13 +3237,6 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYH-I8dDt7WcW9dgg2AKQ9l"
     },
     {
-      "id": "PLFeRVs_dDivZh3lyW8Pwu_bDQrXi1vSQS",
-      "title": "Resistant Culture",
-      "title_key": "resistant culture",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZh3lyW8Pwu_bDQrXi1vSQS"
-    },
-    {
       "id": "PLFeRVs_dDivaP98D6iRiQmEHE7iGYSxfQ",
       "title": "Ritual Killing",
       "title_key": "ritual killing",
@@ -3193,13 +3270,6 @@
       "title_key": "rottenperish",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbnVOSnSkbzET1SQ8yxUSIZ"
-    },
-    {
-      "id": "PLFeRVs_dDivaSJ0TLSSo_qLuH3GNI9gE0",
-      "title": "Rottenness",
-      "title_key": "rottenness",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaSJ0TLSSo_qLuH3GNI9gE0"
     },
     {
       "id": "PLFeRVs_dDivbLsb3ge6QS34Us86tyBnZF",
@@ -3244,25 +3314,18 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYghUBNR5PSCCT2HEF-DSHt"
     },
     {
+      "id": "PLFeRVs_dDivaYl6j2D-v1IvibDgZ6o_MG",
+      "title": "Scrumptious Putrescence",
+      "title_key": "scrumptious putrescence",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaYl6j2D-v1IvibDgZ6o_MG"
+    },
+    {
       "id": "PLFeRVs_dDivbZwyy5fXyrD8pB_xU6Vyf_",
       "title": "Sculpting Atrocity",
       "title_key": "sculpting atrocity",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbZwyy5fXyrD8pB_xU6Vyf_"
-    },
-    {
-      "id": "PLFeRVs_dDivYZUkdCVe5pO_1S1WlzzZ5J",
-      "title": "Scytherium",
-      "title_key": "scytherium",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYZUkdCVe5pO_1S1WlzzZ5J"
-    },
-    {
-      "id": "PLFeRVs_dDivbDNqZEXwPYkVCE0K6tEGpB",
-      "title": "Season Of The Dead",
-      "title_key": "season of the dead",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbDNqZEXwPYkVCE0K6tEGpB"
     },
     {
       "id": "PLFeRVs_dDivbYXo7ztRRT__TX_ugXagkn",
@@ -3284,6 +3347,13 @@
       "title_key": "separatist",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZmz7Krd1xBgCy3ZaJC3vaJ"
+    },
+    {
+      "id": "PLFeRVs_dDivZHGdRT23j86ORvyN36UE5N",
+      "title": "Septicem",
+      "title_key": "septicem",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZHGdRT23j86ORvyN36UE5N"
     },
     {
       "id": "PLFeRVs_dDivYTSuVpLXEtOV8FI7_24WfD",
@@ -3312,6 +3382,13 @@
       "title_key": "slamming brutal deathcore",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaBz0tAEj_krihc61LQIszD"
+    },
+    {
+      "id": "PLFeRVs_dDivbZ6cH9UsLzs700Uh6HEdds",
+      "title": "Slamming Goregrind",
+      "title_key": "slamming goregrind",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbZ6cH9UsLzs700Uh6HEdds"
     },
     {
       "id": "PLFeRVs_dDivZexgG6lRmmXkCppVEelNPP",
@@ -3391,6 +3468,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYKg0V0vJoNipCFTGbfvqb6"
     },
     {
+      "id": "PLFeRVs_dDivZBFjZnVgXx0kstD2aMpPsk",
+      "title": "Splattered Entrails",
+      "title_key": "splattered entrails",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZBFjZnVgXx0kstD2aMpPsk"
+    },
+    {
       "id": "PLFeRVs_dDivabyYGENkzpjG5YcBALgRg0",
       "title": "Staplecunt",
       "title_key": "staplecunt",
@@ -3433,6 +3517,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbjEXokdI262roOsSY2eUKk"
     },
     {
+      "id": "PLFeRVs_dDivZE9RQrMUtTNhkc-y-MvBTe",
+      "title": "Taste Hematic Chains",
+      "title_key": "taste hematic chains",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZE9RQrMUtTNhkc-y-MvBTe"
+    },
+    {
       "id": "PLFeRVs_dDivbTqYR-QJlIW2WTeADgsl45",
       "title": "Technical",
       "title_key": "technical",
@@ -3461,6 +3552,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZVEwOd7x539VEEilZOaNDn"
     },
     {
+      "id": "PLFeRVs_dDivZWbND_HGRQpgBf2PJdLRoy",
+      "title": "Terrorist",
+      "title_key": "terrorist",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZWbND_HGRQpgBf2PJdLRoy"
+    },
+    {
       "id": "PLFeRVs_dDivbbOUuJfxVIhk7VNZLSiv_6",
       "title": "The Amber Will",
       "title_key": "the amber will",
@@ -3473,13 +3571,6 @@
       "title_key": "the last twilight",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYDBLBAAkEYrdKZo8uBwlb5"
-    },
-    {
-      "id": "PLFeRVs_dDivZlnvr9hKxsQpA8pix2oUOi",
-      "title": "The Shiva Hypothesis",
-      "title_key": "the shiva hypothesis",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZlnvr9hKxsQpA8pix2oUOi"
     },
     {
       "id": "PLFeRVs_dDivaROwnpsIbTqmNO0E2J9Z3g",
@@ -3545,6 +3636,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZsNqnw1aTNPgDD3aBxhqTp"
     },
     {
+      "id": "PLFeRVs_dDivb5DvKlS2nnev_ExoWmWJrc",
+      "title": "Torturor",
+      "title_key": "torturor",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb5DvKlS2nnev_ExoWmWJrc"
+    },
+    {
       "id": "PLFeRVs_dDivZU0PG0a-9Hqmx80Z9g4FiL",
       "title": "Torturous Inception",
       "title_key": "torturous inception",
@@ -3601,13 +3699,6 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaPhMDjqf3hA3SvgaOfM2uw"
     },
     {
-      "id": "PLFeRVs_dDivbJMJ9xO6efM7_-FyzSL29j",
-      "title": "Tyrants Blood",
-      "title_key": "tyrants blood",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbJMJ9xO6efM7_-FyzSL29j"
-    },
-    {
       "id": "PLFeRVs_dDivblnOtSnYVlNB7YKe7NB_Bp",
       "title": "Tzolkin",
       "title_key": "tzolkin",
@@ -3622,18 +3713,25 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDiva6JoXx1sXgHheSoRXKqhqx"
     },
     {
+      "id": "PLFeRVs_dDivZiyRs6EBY4Lr7cs7pnoNPF",
+      "title": "Unblessed",
+      "title_key": "unblessed",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZiyRs6EBY4Lr7cs7pnoNPF"
+    },
+    {
+      "id": "PLFeRVs_dDivaGLBQ8mGW7I7JpF2kbhipb",
+      "title": "Uncured",
+      "title_key": "uncured",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaGLBQ8mGW7I7JpF2kbhipb"
+    },
+    {
       "id": "PLFeRVs_dDivYtuK1OK7xB1YqbaZyP_rsZ",
       "title": "Unfurl",
       "title_key": "unfurl",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYtuK1OK7xB1YqbaZyP_rsZ"
-    },
-    {
-      "id": "PLFeRVs_dDivakeHHTYjMY8igrBFs3hMij",
-      "title": "Uratsakidogi",
-      "title_key": "uratsakidogi",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivakeHHTYjMY8igrBFs3hMij"
     },
     {
       "id": "PLFeRVs_dDivbNEa4wzLWZsrn3eToQzx1x",
@@ -3655,13 +3753,6 @@
       "title_key": "vorarephilia",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaUpRKsWyBCnjYJsF8XKh2u"
-    },
-    {
-      "id": "PLFeRVs_dDivbiwZIpqD3dlDC7l_-gcJC-",
-      "title": "Veins Of Death",
-      "title_key": "veins of death",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbiwZIpqD3dlDC7l_-gcJC-"
     },
     {
       "id": "PLFeRVs_dDivaRriB6w9hhi06e8Vi1QH7h",
@@ -3741,13 +3832,6 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZgGWB9ffLxBJTC07T4ZWc-"
     },
     {
-      "id": "PLFeRVs_dDivbSn2OjycG4-gbOLTAlSfv2",
-      "title": "Willows Deceit",
-      "title_key": "willows deceit",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbSn2OjycG4-gbOLTAlSfv2"
-    },
-    {
       "id": "PLFeRVs_dDivY4ngHRNHO4PkfIzlFJNaj5",
       "title": "With All My Hate",
       "title_key": "with all my hate",
@@ -3774,13 +3858,6 @@
       "title_key": "worship",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbtQOItmWkMREkO2-yOvoyq"
-    },
-    {
-      "id": "PLFeRVs_dDivbDOOyTTQtUBr9lldcNXegO",
-      "title": "Wulfshon",
-      "title_key": "wulfshon",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbDOOyTTQtUBr9lldcNXegO"
     },
     {
       "id": "PLFeRVs_dDivaKdfYDuIs2-pN2JwvjLfAt",
@@ -3886,6 +3963,237 @@
       "title_key": "asphagor",
       "count": 0,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivblMxb3JXxPKZ_yqkQk9WYG"
+    },
+    {
+      "id": "PLFeRVs_dDivZhZl10em36UavcjF8rdGGT",
+      "title": "Behemoth",
+      "title_key": "behemoth",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZhZl10em36UavcjF8rdGGT"
+    },
+    {
+      "id": "PLFeRVs_dDivbONoW3hNDTHHUyg32gdelw",
+      "title": "Black Fucking Cancer",
+      "title_key": "black fucking cancer",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbONoW3hNDTHHUyg32gdelw"
+    },
+    {
+      "id": "PLFeRVs_dDivaLumRAc53tXFbOVI9fTK2S",
+      "title": "Black Jesus",
+      "title_key": "black jesus",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaLumRAc53tXFbOVI9fTK2S"
+    },
+    {
+      "id": "PLFeRVs_dDivZ-MIwOyoUg7AeLVWCw9YXr",
+      "title": "Black Negative Domination",
+      "title_key": "black negative domination",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZ-MIwOyoUg7AeLVWCw9YXr"
+    },
+    {
+      "id": "PLFeRVs_dDivadw1qVIhI6Sjb4J2YcVYHh",
+      "title": "CELL BLOCK AUTOPSY",
+      "title_key": "cell block autopsy",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivadw1qVIhI6Sjb4J2YcVYHh"
+    },
+    {
+      "id": "PLFeRVs_dDivaicPEsQna_ZBu70RQ9xEJZ",
+      "title": "Centuries of Decay",
+      "title_key": "centuries of decay",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaicPEsQna_ZBu70RQ9xEJZ"
+    },
+    {
+      "id": "PLFeRVs_dDivabzF07IqFwteav9l4s_1Th",
+      "title": "Concrete Icon",
+      "title_key": "concrete icon",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivabzF07IqFwteav9l4s_1Th"
+    },
+    {
+      "id": "PLFeRVs_dDivZm3u_2hXinGzscW_pacjlU",
+      "title": "Darkall Slaves",
+      "title_key": "darkall slaves",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZm3u_2hXinGzscW_pacjlU"
+    },
+    {
+      "id": "PLFeRVs_dDivY8YZsEh5yNdgerRjXbUNxP",
+      "title": "Diavolos",
+      "title_key": "diavolos",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivY8YZsEh5yNdgerRjXbUNxP"
+    },
+    {
+      "id": "PLFeRVs_dDivaVMFZsIe7uzwA8pppHMFon",
+      "title": "Distaste",
+      "title_key": "distaste",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaVMFZsIe7uzwA8pppHMFon"
+    },
+    {
+      "id": "PLFeRVs_dDivYZUXfICeCDBqVqivy6lDnh",
+      "title": "Erimha",
+      "title_key": "erimha",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYZUXfICeCDBqVqivy6lDnh"
+    },
+    {
+      "id": "PLFeRVs_dDivadoHd2FUsJ2FjdPiSf_QCS",
+      "title": "FERALIMINAL LYCANTHROPIZER",
+      "title_key": "feraliminal lycanthropizer",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivadoHd2FUsJ2FjdPiSf_QCS"
+    },
+    {
+      "id": "PLFeRVs_dDivYffVXOLsiBdz7PN4fHQXiK",
+      "title": "Goath",
+      "title_key": "goath",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYffVXOLsiBdz7PN4fHQXiK"
+    },
+    {
+      "id": "PLFeRVs_dDivb75jU-kAZaz3qO-3zdlOxf",
+      "title": "God Dethroned",
+      "title_key": "god dethroned",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb75jU-kAZaz3qO-3zdlOxf"
+    },
+    {
+      "id": "PLFeRVs_dDivah3nHMwMPlo5XeycSJUDVB",
+      "title": "Grotesque Atrocity",
+      "title_key": "grotesque atrocity",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivah3nHMwMPlo5XeycSJUDVB"
+    },
+    {
+      "id": "PLFeRVs_dDivZYxdBBX560e-5pqi74tFki",
+      "title": "Hellknife",
+      "title_key": "hellknife",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZYxdBBX560e-5pqi74tFki"
+    },
+    {
+      "id": "PLFeRVs_dDivYMFFq7fUp0qq8am4YJZVGW",
+      "title": "Mivedantal",
+      "title_key": "mivedantal",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYMFFq7fUp0qq8am4YJZVGW"
+    },
+    {
+      "id": "PLFeRVs_dDivZqckKFENroQxe6CiBIub7l",
+      "title": "Muggeseggel",
+      "title_key": "muggeseggel",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZqckKFENroQxe6CiBIub7l"
+    },
+    {
+      "id": "PLFeRVs_dDivZ96nKSuymALvdRZr6AvnNe",
+      "title": "My Darkest Hate",
+      "title_key": "my darkest hate",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZ96nKSuymALvdRZr6AvnNe"
+    },
+    {
+      "id": "PLFeRVs_dDivYlfpn8FSlkNu9Mu89hdwCj",
+      "title": "Nastergal",
+      "title_key": "nastergal",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYlfpn8FSlkNu9Mu89hdwCj"
+    },
+    {
+      "id": "PLFeRVs_dDivaBbTVMSZLgI1FrJ6rIUyiR",
+      "title": "Nekrokraft",
+      "title_key": "nekrokraft",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaBbTVMSZLgI1FrJ6rIUyiR"
+    },
+    {
+      "id": "PLFeRVs_dDivaTuji5l_smUCGW4230C8pp",
+      "title": "Nethersphere",
+      "title_key": "nethersphere",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaTuji5l_smUCGW4230C8pp"
+    },
+    {
+      "id": "PLFeRVs_dDivagk1xk37owecyvScH9dey8",
+      "title": "Pentagoat",
+      "title_key": "pentagoat",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivagk1xk37owecyvScH9dey8"
+    },
+    {
+      "id": "PLFeRVs_dDivZh3lyW8Pwu_bDQrXi1vSQS",
+      "title": "Resistant Culture",
+      "title_key": "resistant culture",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZh3lyW8Pwu_bDQrXi1vSQS"
+    },
+    {
+      "id": "PLFeRVs_dDivaSJ0TLSSo_qLuH3GNI9gE0",
+      "title": "Rottenness",
+      "title_key": "rottenness",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaSJ0TLSSo_qLuH3GNI9gE0"
+    },
+    {
+      "id": "PLFeRVs_dDivYZUkdCVe5pO_1S1WlzzZ5J",
+      "title": "Scytherium",
+      "title_key": "scytherium",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYZUkdCVe5pO_1S1WlzzZ5J"
+    },
+    {
+      "id": "PLFeRVs_dDivbDNqZEXwPYkVCE0K6tEGpB",
+      "title": "Season Of The Dead",
+      "title_key": "season of the dead",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbDNqZEXwPYkVCE0K6tEGpB"
+    },
+    {
+      "id": "PLFeRVs_dDivZlnvr9hKxsQpA8pix2oUOi",
+      "title": "The Shiva Hypothesis",
+      "title_key": "the shiva hypothesis",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZlnvr9hKxsQpA8pix2oUOi"
+    },
+    {
+      "id": "PLFeRVs_dDivbJMJ9xO6efM7_-FyzSL29j",
+      "title": "Tyrants Blood",
+      "title_key": "tyrants blood",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbJMJ9xO6efM7_-FyzSL29j"
+    },
+    {
+      "id": "PLFeRVs_dDivakeHHTYjMY8igrBFs3hMij",
+      "title": "Uratsakidogi",
+      "title_key": "uratsakidogi",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivakeHHTYjMY8igrBFs3hMij"
+    },
+    {
+      "id": "PLFeRVs_dDivbiwZIpqD3dlDC7l_-gcJC-",
+      "title": "Veins Of Death",
+      "title_key": "veins of death",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbiwZIpqD3dlDC7l_-gcJC-"
+    },
+    {
+      "id": "PLFeRVs_dDivbSn2OjycG4-gbOLTAlSfv2",
+      "title": "Willows Deceit",
+      "title_key": "willows deceit",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbSn2OjycG4-gbOLTAlSfv2"
+    },
+    {
+      "id": "PLFeRVs_dDivbDOOyTTQtUBr9lldcNXegO",
+      "title": "Wulfshon",
+      "title_key": "wulfshon",
+      "count": 0,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbDOOyTTQtUBr9lldcNXegO"
     }
   ]
 }
