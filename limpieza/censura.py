@@ -774,6 +774,20 @@ VOWELLESS_PATTERNS = {
     "plln": "pollon",
 }
 
+_COMPACT_PROFANITY_TOKENS = tuple(
+    sorted(
+        {
+            word
+            for word in PROFANITY_EXACT
+            if len(word) >= 4
+            and word not in WHITELIST
+            and word not in PROFANITY_WORD_BOUNDARY
+        },
+        key=len,
+        reverse=True,
+    )
+)
+
 # ============================================================================
 # FUNCIONES DE CENSURA
 # ============================================================================
@@ -782,6 +796,11 @@ VOWELLESS_PATTERNS = {
 def normalize_word(word: str) -> str:
     """Normaliza una palabra eliminando leetspeak y acentos."""
     return word.lower().translate(LEET_MAP)
+
+
+def normalize_compact_text(text: str) -> str:
+    """Normaliza un texto y elimina separadores para revisar slugs/URLs."""
+    return re.sub(r"[^a-z0-9]+", "", normalize_word(text))
 
 
 def is_whitelisted(word: str) -> bool:
@@ -885,6 +904,32 @@ def contains_profanity(text: str) -> bool:
 
     for match in _WORD_PATTERN.finditer(text):
         if should_censor(match.group(0)):
+            return True
+
+    return False
+
+
+def contains_profanity_fragment(text: str) -> bool:
+    """
+    Detecta groserías dentro de slugs o URLs compactas.
+
+    Ejemplos:
+        "fucking-death" -> True
+        "analcunt" -> True
+        "cannibalcorpse" -> False
+    """
+    if not text:
+        return False
+
+    if contains_profanity(text):
+        return True
+
+    compact = normalize_compact_text(text)
+    if not compact or compact in WHITELIST:
+        return False
+
+    for token in _COMPACT_PROFANITY_TOKENS:
+        if token in compact:
             return True
 
     return False

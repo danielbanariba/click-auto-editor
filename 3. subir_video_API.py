@@ -29,7 +29,7 @@ from mutagen import File as MutagenFile
 
 from config import AUDIO_FORMATS, DIR_UPLOAD, DIR_YA_SUBIDOS, RANDOMIZE_VIDEO_SELECTION
 from subir_video.authenticate import authenticate, authenticate_next
-from limpieza.censura import censor_profanity
+from limpieza.censura import censor_profanity, contains_profanity_fragment
 
 
 class QuotaExceededError(RuntimeError):
@@ -187,6 +187,8 @@ PLAYLIST_LINKS_CACHE_PATH = Path(
         str(Path(__file__).resolve().parent / "data" / "playlist_links_cache.json"),
     )
 )
+
+URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
 
 
 def cargar_env(env_path=".env"):
@@ -580,8 +582,8 @@ def load_playlist_links_cache():
             if not isinstance(item, dict):
                 continue
             title = str(item.get("title") or "").strip()
-            url = str(item.get("url") or "").strip()
-            if not title or not url:
+            url = clean_url(str(item.get("url") or "").strip())
+            if not title or not url or not is_allowed_public_url(url):
                 continue
             normalized.append(
                 {
@@ -1300,7 +1302,9 @@ def normalizar_link(item):
     name = get_link_value(item, ["name", "type", "title", "label", "text"])
     if not url:
         return None, None
-    url = str(url).strip()
+    url = clean_url(str(url).strip())
+    if not is_allowed_public_url(url):
+        return None, None
     url_lower = url.lower()
     service_key = None
     for key, patterns in SERVICE_MATCHERS.items():
@@ -2120,6 +2124,60 @@ def clean_url(url):
     return url.split("?")[0].split("#")[0]
 
 
+def is_allowed_public_url(url):
+    if not url:
+        return False
+    cleaned = clean_url(str(url).strip())
+    if not cleaned or not cleaned.startswith("http"):
+        return False
+    return not contains_profanity_fragment(cleaned)
+
+
+def censor_text_preserving_urls(text):
+    if text is None:
+        return ""
+
+    placeholders = {}
+
+    def replace_url(match):
+        placeholder = f"__URL_PLACEHOLDER_{len(placeholders)}__"
+        placeholders[placeholder] = match.group(0)
+        return placeholder
+
+    masked = URL_PATTERN.sub(replace_url, str(text))
+    masked = censor_profanity(masked)
+
+    for placeholder, url in placeholders.items():
+        masked = masked.replace(placeholder, url)
+
+    return masked
+
+
+def sanitize_description_lines(lines):
+    sanitized = []
+    for raw_line in lines:
+        if raw_line is None:
+            continue
+
+        line = str(raw_line)
+        if not line:
+            sanitized.append("")
+            continue
+
+        urls = URL_PATTERN.findall(line)
+        if any(not is_allowed_public_url(url) for url in urls):
+            continue
+
+        cleaned_line = censor_text_preserving_urls(line).strip()
+        if not cleaned_line:
+            continue
+        if urls and cleaned_line.endswith(":"):
+            continue
+        sanitized.append(cleaned_line)
+
+    return sanitized
+
+
 def extraer_links_band_api(session, band_id, band_data=None):
     links = {"stream": {}, "follow": {}}
     if DEATHGRIND_DISABLED:
@@ -2501,7 +2559,7 @@ def construir_descripcion(
             " ".join(hashtags),
         ]
     )
-    return "\n".join(lines)
+    return "\n".join(sanitize_description_lines(lines))
 
 
 def encontrar_video(folder_path):
@@ -2825,7 +2883,6 @@ def procesar_carpeta(
     description = ensure_description_limit(description)
     title = censor_profanity(title)
     title = truncar_titulo(title)
-    description = censor_profanity(description)
     description = truncar_descripcion(description)
     genres_list = split_genres(genre_text)
 

@@ -89,7 +89,7 @@ MAX_FOLDERS_TO_PROCESS = 9999  # Sin límite fijo, se detiene por espacio en dis
 # Selección de carpetas/videos en scripts 1, 2 y 3
 # True  = orden aleatorio
 # False = orden descendente por año (más reciente primero)
-RANDOMIZE_VIDEO_SELECTION = True
+RANDOMIZE_VIDEO_SELECTION = False
 
 # Control inteligente de espacio en disco
 # El renderizado se detiene cuando queda menos de este espacio libre en DIR_UPLOAD

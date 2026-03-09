@@ -9,6 +9,7 @@
 - Subidas por YouTube Data API con descripcion automatizada y playlists.
 - Automatizacion Playwright para impugnaciones y apelaciones en YouTube Studio.
 - Utilidades de limpieza y analisis de canal.
+- Filtro de portadas de riesgo: NSFW legacy y revisión de posibles cadáveres reales.
 
 ## Estructura del repo
 - `config.py`: rutas y parametros del pipeline.
@@ -18,6 +19,7 @@
 - `10. inpunar_video.py`: impugnaciones con Playwright.
 - `11. apelacion.py`: apelaciones con Playwright.
 - `12. mapear_playlists.py`: playlists por banda/genero.
+- `13. filtrar_portadas.py`: filtro de portadas de riesgo (NSFW / cadáver real).
 - `limpieza/`: utilidades para normalizar y limpiar carpetas.
 - `effects/`: utilidades de imagen (sombra de portada, etc.).
 - `subir_video/`: helpers de autenticacion y API de YouTube.
@@ -79,6 +81,9 @@ python "5. ffmpeg_render.py" --parallel       # paralelo explicito
 python "9. subir_video_API.py" --limite 1
 python "9. subir_video_API.py" --todo --cantidad-lote 24 --gap-horas 1
 python "9. subir_video_API.py" --modo-inmediato --limite 1
+
+python "13. filtrar_portadas.py" --politica cadaver-real --limite 20 --dry-run
+python "13. filtrar_portadas.py" --politica nsfw --auto-descargar --umbral 0.35
 
 python "10. inpunar_video.py" --aprender
 python "11. apelacion.py"

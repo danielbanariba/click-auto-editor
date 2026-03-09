@@ -128,6 +128,15 @@ def log_verbose(message: str):
         print(message)
 
 
+def cleanup_temp_folder(temp_folder_path: Path | None):
+    if not temp_folder_path or not temp_folder_path.exists():
+        return
+    try:
+        shutil.rmtree(temp_folder_path)
+    except Exception as exc:
+        log_verbose(f"[TEMP] No se pudo limpiar {temp_folder_path}: {exc}")
+
+
 def get_free_space_gb(path: Path) -> float:
     """
     Obtiene el espacio libre en GB del disco donde está ubicado el path.
@@ -2527,8 +2536,7 @@ def render_video(folder_path, folder_name, show_progress=False):
             cover_file = None
 
         if not audio_files or not cover_file:
-            if USE_SSD_TEMP and temp_folder_path and temp_folder_path.exists():
-                shutil.rmtree(temp_folder_path)
+            cleanup_temp_folder(temp_folder_path)
             return False
 
         if show_progress and len(audio_files) > 1:
@@ -2932,14 +2940,14 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
 
             if process.returncode == 0:
                 # Mover video de SSD a disco original si aplica
-                if USE_SSD_TEMP and temp_folder_path:
+                if temp_folder_path:
                     output_video = temp_folder_path / f"{folder_name}.mp4"
                     final_video = original_folder_path / f"{folder_name}.mp4"
                     if output_video.exists():
                         if show_progress:
                             log_verbose("[SSD] Moviendo video a disco destino...")
                         shutil.move(str(output_video), str(final_video))
-                        shutil.rmtree(temp_folder_path)  # Limpiar temporal
+                        cleanup_temp_folder(temp_folder_path)
                         if show_progress:
                             log_verbose("[SSD] Limpieza completada")
 
@@ -2954,8 +2962,7 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                 return True
             else:
                 # Limpiar temporales en caso de error
-                if USE_SSD_TEMP and temp_folder_path and temp_folder_path.exists():
-                    shutil.rmtree(temp_folder_path)
+                cleanup_temp_folder(temp_folder_path)
                 print(f"\n[ERROR] FFmpeg falló en {folder_name}")
                 log_verbose(f"STDERR: {stderr_output[-500:]}")
                 return False
@@ -2971,12 +2978,12 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
 
             if result.returncode == 0:
                 # Mover video de SSD a disco original si aplica
-                if USE_SSD_TEMP and temp_folder_path:
+                if temp_folder_path:
                     output_video = temp_folder_path / f"{folder_name}.mp4"
                     final_video = original_folder_path / f"{folder_name}.mp4"
                     if output_video.exists():
                         shutil.move(str(output_video), str(final_video))
-                        shutil.rmtree(temp_folder_path)
+                        cleanup_temp_folder(temp_folder_path)
 
                 elapsed = time.time() - start_time
                 destination_folder = move_folder_to_upload(
@@ -2987,16 +2994,14 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                 return True
             else:
                 # Limpiar temporales en caso de error
-                if USE_SSD_TEMP and temp_folder_path and temp_folder_path.exists():
-                    shutil.rmtree(temp_folder_path)
+                cleanup_temp_folder(temp_folder_path)
                 print(f"[ERROR] FFmpeg falló en {folder_name}")
                 log_verbose(f"STDERR: {result.stderr[-500:]}")
                 return False
 
     except Exception as e:
         # Limpiar temporales en caso de excepción
-        if USE_SSD_TEMP and temp_folder_path and temp_folder_path.exists():
-            shutil.rmtree(temp_folder_path)
+        cleanup_temp_folder(temp_folder_path)
         print(f"[EXCEPCIÓN] Error procesando {folder_name}: {e}")
         return False
 
