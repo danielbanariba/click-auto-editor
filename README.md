@@ -82,7 +82,7 @@ python "9. subir_video_API.py" --limite 1
 python "9. subir_video_API.py" --todo --cantidad-lote 24 --gap-horas 1
 python "9. subir_video_API.py" --modo-inmediato --limite 1
 
-python "13. filtrar_portadas.py" --politica cadaver-real --limite 20 --dry-run
+python "13. filtrar_portadas.py" --politica cadaver-real --backend ollama --limite 20 --dry-run
 python "13. filtrar_portadas.py" --politica nsfw --auto-descargar --umbral 0.35
 
 python "10. inpunar_video.py" --aprender

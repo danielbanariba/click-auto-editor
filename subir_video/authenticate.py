@@ -158,27 +158,29 @@ def authenticate_next(prefix=None):
     """
     Marca la credencial actual como agotada y autentica con la siguiente disponible.
     Re-escanea la carpeta para detectar nuevas credenciales agregadas.
+    Si no hay mas con el prefijo, prueba con TODAS las credenciales disponibles.
     Retorna None si no hay mas credenciales disponibles.
     """
     current = get_current_credential_path()
     if current:
         mark_credential_exhausted(current)
 
-    # Re-escanear carpeta para detectar nuevas credenciales
+    # Re-escanear carpeta para detectar nuevas credenciales con el prefijo
     pairs = get_credential_sets(prefix)
     available = [(s, t) for s, t in pairs if str(s) not in _exhausted_credentials]
 
-    if not available:
-        # Verificar si hay credenciales nuevas que no hemos visto
-        all_current = {str(s) for s, t in pairs}
-        nuevas = all_current - _exhausted_credentials
-        if nuevas:
-            # Hay credenciales nuevas, usarlas
-            for s, t in pairs:
-                if str(s) in nuevas:
-                    print(f"Nueva credencial detectada: {s.name}")
-                    return authenticate_with_credentials(s, t)
+    # Si no hay con el prefijo, probar con TODAS las credenciales
+    if not available and prefix and CREDENTIALS_DIR.exists():
+        all_pairs = []
+        for secrets_file in sorted(CREDENTIALS_DIR.glob("client_secrets_*.json")):
+            name = secrets_file.stem.replace("client_secrets_", "token_")
+            token_file = CREDENTIALS_DIR / f"{name}.json"
+            all_pairs.append((secrets_file, token_file))
+        available = [(s, t) for s, t in all_pairs if str(s) not in _exhausted_credentials]
+        if available:
+            print(f"Credenciales '{prefix}' agotadas. Probando credenciales alternativas.")
 
+    if not available:
         print("Todas las credenciales agotadas. Agrega mas en credentials/")
         return None
 
