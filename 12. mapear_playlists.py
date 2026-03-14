@@ -569,7 +569,16 @@ def auto_cleanup_playlists(
         for playlist_id in vacias_ids:
             info = info_por_id.get(playlist_id, {})
             titulo = info.get("title") or playlist_id
-            print(f"Se omite eliminar vacia: '{titulo}'.")
+            try:
+                delete_playlist(youtube, playlist_id)
+                print(f"Eliminada playlist vacia: '{titulo}'.")
+                key = normalize_title(titulo)
+                if key and playlist_cache.get(key) == playlist_id:
+                    del playlist_cache[key]
+            except Exception as exc:
+                print(f"No se pudo eliminar vacia '{titulo}': {exc}")
+            if pause:
+                time.sleep(pause)
 
 
 def limpiar_genero_texto(value):
@@ -1300,7 +1309,7 @@ def main(youtube=None):
 
 
 if __name__ == "__main__":
-    auto_wait = os.environ.get("YOUTUBE_AUTO_WAIT", "0") == "1"
+    auto_wait = os.environ.get("YOUTUBE_AUTO_WAIT", "1") == "1"
     auto_rotate = os.environ.get("YOUTUBE_AUTO_ROTATE", "1") == "1"
     quota_wait = int(os.environ.get("YOUTUBE_QUOTA_WAIT", "3600"))
     rate_wait = int(os.environ.get("YOUTUBE_RATE_WAIT", "60"))
