@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-03-14T17:53:27.494927Z",
-  "total": 749,
+  "generated_at": "2026-03-15T01:21:48.646190Z",
+  "total": 760,
   "items": [
     {
       "id": "PLFeRVs_dDivaZMxJDOziejzwI6Fa_nNkY",
@@ -262,6 +262,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbPLCWHWYf0P5kUe8eKL8ha"
     },
     {
+      "id": "PLFeRVs_dDivYL-oDLkPUnMyjzdczhU2G6",
+      "title": "2019",
+      "title_key": "2019",
+      "count": 22,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYL-oDLkPUnMyjzdczhU2G6"
+    },
+    {
       "id": "PLFeRVs_dDivZBIrXrAbuupxGCWkOB8hYL",
       "title": "Concierto completos",
       "title_key": "concierto completos",
@@ -274,13 +281,6 @@
       "title_key": "2009",
       "count": 21,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbKfaFHmMj7SvPo0OZRBKw4"
-    },
-    {
-      "id": "PLFeRVs_dDivYL-oDLkPUnMyjzdczhU2G6",
-      "title": "2019",
-      "title_key": "2019",
-      "count": 20,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYL-oDLkPUnMyjzdczhU2G6"
     },
     {
       "id": "PLFeRVs_dDivZF4ELbgN4xM5lE10PXLhTs",
@@ -689,6 +689,20 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaAdr__m2eKHBzArT72Kcfo"
     },
     {
+      "id": "PLFeRVs_dDivbMmM8zIUsnkKH6DcCZ5cJ3",
+      "title": "1999",
+      "title_key": "1999",
+      "count": 2,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbMmM8zIUsnkKH6DcCZ5cJ3"
+    },
+    {
+      "id": "PLFeRVs_dDivYw6h2vXu61O8baijK7oFVL",
+      "title": "2001",
+      "title_key": "2001",
+      "count": 2,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYw6h2vXu61O8baijK7oFVL"
+    },
+    {
       "id": "PLFeRVs_dDivbYmp1-hL0T17TH9e0muzaV",
       "title": "Abitabyss",
       "title_key": "abitabyss",
@@ -841,6 +855,13 @@
       "title_key": "grind/death metal",
       "count": 2,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivY5CvAjNVV18wz0D-7Sux_g"
+    },
+    {
+      "id": "PLFeRVs_dDivbJooChdu6H0utSMuH-SDYP",
+      "title": "Haunter",
+      "title_key": "haunter",
+      "count": 2,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbJooChdu6H0utSMuH-SDYP"
     },
     {
       "id": "PLFeRVs_dDivb7gjE1gT1kHB_wZsokSDGl",
@@ -1011,6 +1032,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDiva8s4_c6Buh88PnfSGqGf9v"
     },
     {
+      "id": "PLFeRVs_dDivZWTBnIu8NAjHJEQdqZgPmM",
+      "title": "Throne ov Shiva",
+      "title_key": "throne ov shiva",
+      "count": 2,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZWTBnIu8NAjHJEQdqZgPmM"
+    },
+    {
       "id": "PLFeRVs_dDivatxOvsigRKd0JojEuD2udL",
       "title": "Tropa Noise",
       "title_key": "tropa noise",
@@ -1079,20 +1107,6 @@
       "title_key": "1998",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZ7n5nbwiNw1Pnzj3YhYJI8"
-    },
-    {
-      "id": "PLFeRVs_dDivbMmM8zIUsnkKH6DcCZ5cJ3",
-      "title": "1999",
-      "title_key": "1999",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbMmM8zIUsnkKH6DcCZ5cJ3"
-    },
-    {
-      "id": "PLFeRVs_dDivYw6h2vXu61O8baijK7oFVL",
-      "title": "2001",
-      "title_key": "2001",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYw6h2vXu61O8baijK7oFVL"
     },
     {
       "id": "PLFeRVs_dDivZuJt6u5F3zdV-LyHitvQfe",
@@ -1550,6 +1564,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZF-TrO5kJfMyih605dq0e9"
     },
     {
+      "id": "PLFeRVs_dDivbqWEpK_OGG3gaXFfIPKOUH",
+      "title": "Blast Perversion",
+      "title_key": "blast perversion",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbqWEpK_OGG3gaXFfIPKOUH"
+    },
+    {
       "id": "PLFeRVs_dDivawQzEVOXsJ5VaMFv62oYRU",
       "title": "Bleeders Lament",
       "title_key": "bleeders lament",
@@ -1898,6 +1919,13 @@
       "title_key": "corpse carving",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYioEKbQRcMPk6x3Y0AJBPs"
+    },
+    {
+      "id": "PLFeRVs_dDiva3AIm3Iu6qa2WGQFN0TqYL",
+      "title": "Corpse Grinder",
+      "title_key": "corpse grinder",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDiva3AIm3Iu6qa2WGQFN0TqYL"
     },
     {
       "id": "PLFeRVs_dDivbuBnmVn3uUrGJRP3-egPfo",
@@ -2304,6 +2332,13 @@
       "title_key": "display of decay",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZFREBK-yvwFnML43WsqESl"
+    },
+    {
+      "id": "PLFeRVs_dDivb86G9DWRxg8ko3XM-y9C4n",
+      "title": "Dispyt",
+      "title_key": "dispyt",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb86G9DWRxg8ko3XM-y9C4n"
     },
     {
       "id": "PLFeRVs_dDiva0EqocU15HIOALcTgrrsbQ",
@@ -2878,13 +2913,6 @@
       "title_key": "hatred slave",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZxTwcDNhfMmfDSXFNq9VLg"
-    },
-    {
-      "id": "PLFeRVs_dDivbJooChdu6H0utSMuH-SDYP",
-      "title": "Haunter",
-      "title_key": "haunter",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbJooChdu6H0utSMuH-SDYP"
     },
     {
       "id": "PLFeRVs_dDivbOoGhJTrJYm5j1adpSfj3P",
@@ -3713,6 +3741,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYKM66rjiz49yA9lAfbRu_x"
     },
     {
+      "id": "PLFeRVs_dDivZLRdYUaV2dWwpFX-GYXNKM",
+      "title": "Occult",
+      "title_key": "occult",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZLRdYUaV2dWwpFX-GYXNKM"
+    },
+    {
       "id": "PLFeRVs_dDivZRz8FzYjDL5K5_iCDsQiDP",
       "title": "Odetosun",
       "title_key": "odetosun",
@@ -3837,6 +3872,13 @@
       "title_key": "panssarituho",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYOaHhN6qBn6l40n9sG9xcP"
+    },
+    {
+      "id": "PLFeRVs_dDivaEQfasUJLQ9PtFre9Gt-pX",
+      "title": "Panzergod",
+      "title_key": "panzergod",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaEQfasUJLQ9PtFre9Gt-pX"
     },
     {
       "id": "PLFeRVs_dDivYkLkLeydJoRo1X9t4zBjO3",
@@ -4203,6 +4245,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbj1uC6mdQrE6wwgHvXhhXW"
     },
     {
+      "id": "PLFeRVs_dDivaq44S0vVO3-lV5HdM30Kn6",
+      "title": "Rotten Poodle",
+      "title_key": "rotten poodle",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaq44S0vVO3-lV5HdM30Kn6"
+    },
+    {
       "id": "PLFeRVs_dDivbnVOSnSkbzET1SQ8yxUSIZ",
       "title": "RottenPerish",
       "title_key": "rottenperish",
@@ -4434,6 +4483,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbV0JrgTupdVwe_W2iBvf0o"
     },
     {
+      "id": "PLFeRVs_dDivbdJhDfaI2E3K_jtMpgVWSF",
+      "title": "Sngehel",
+      "title_key": "sngehel",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbdJhDfaI2E3K_jtMpgVWSF"
+    },
+    {
       "id": "PLFeRVs_dDivY4gVtP3QJDTCos8ks1bdww",
       "title": "Socavn",
       "title_key": "socavn",
@@ -4460,6 +4516,13 @@
       "title_key": "soul rape",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb8TVagoiyOilmX6jjqiqI5"
+    },
+    {
+      "id": "PLFeRVs_dDivaCMBukHd0ucKsUHzQhbc5Y",
+      "title": "Soulphureus",
+      "title_key": "soulphureus",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaCMBukHd0ucKsUHzQhbc5Y"
     },
     {
       "id": "PLFeRVs_dDivZbRm4fKqj-esqfEQrQR84V",
@@ -4882,6 +4945,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZF7zNdbpijIGx8HBlfKUtP"
     },
     {
+      "id": "PLFeRVs_dDivbHRaFEIjhUm67mF0mUDTyN",
+      "title": "Tsar Bomb",
+      "title_key": "tsar bomb",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbHRaFEIjhUm67mF0mUDTyN"
+    },
+    {
       "id": "PLFeRVs_dDivYYptRn9hRRpxHUvTSKySOc",
       "title": "Tsidkenu",
       "title_key": "tsidkenu",
@@ -5048,6 +5118,13 @@
       "title_key": "visceral hatred",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbCCp2fPXEmdJzIng_YebQo"
+    },
+    {
+      "id": "PLFeRVs_dDivZL8Es4fOq7ZOEbuWIpGV5y",
+      "title": "Visions",
+      "title_key": "visions",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZL8Es4fOq7ZOEbuWIpGV5y"
     },
     {
       "id": "PLFeRVs_dDivanjETxIbOiqMPfZl7yjG2S",
