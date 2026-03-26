@@ -62,7 +62,7 @@ from config import DIR_AUDIO_SCRIPTS, DIR_NEED_CENSURED
 
 
 LEGACY_CENSORED_DIR = Path(
-    "/run/media/banar/Entretenimiento/01_edicion_automatizada/Censurado"
+    "/mnt/Entretenimiento/01_edicion_automatizada/Censurado"
 )
 DEFAULT_REVIEW_DIR = DIR_NEED_CENSURED
 DEFAULT_EXTS = {".png", ".jpg", ".jpeg"}

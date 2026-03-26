@@ -106,7 +106,7 @@ DELAY_BASE_429 = 30
 MAX_RETRIES_429 = int(os.environ.get("DEATHGRIND_MAX_429", "1"))
 
 CENSORED_DIR = Path(
-    "/run/media/banar/Entretenimiento/01_edicion_automatizada/Censurado"
+    "/mnt/Entretenimiento/01_edicion_automatizada/Censurado"
 )
 
 

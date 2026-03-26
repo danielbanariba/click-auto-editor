@@ -10,7 +10,7 @@ from pathlib import Path
 # ============================================================================
 
 # Directorio raíz donde está montado el disco externo
-DEFAULT_BASE_DIR = Path("/run/media/banar/Entretenimiento/01_edicion_automatizada")
+DEFAULT_BASE_DIR = Path("/mnt/Entretenimiento/01_edicion_automatizada")
 # Opcional: usar un base_dir rápido (NVMe) con variables de entorno
 FAST_BASE_DIR = os.environ.get("FAST_BASE_DIR")
 USE_FAST_BASE = os.environ.get("USE_FAST_BASE", "0") == "1"

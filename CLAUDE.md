@@ -92,7 +92,7 @@ Multiple OAuth credential pairs in `credentials/`:
 ### Configuration (`config.py`)
 
 Central config for all scripts. Key settings:
-- `BASE_DIR`: root data directory (external drive at `/run/media/banar/Entretenimiento/01_edicion_automatizada`)
+- `BASE_DIR`: root data directory (external drive at `/mnt/Entretenimiento/01_edicion_automatizada`)
 - `USE_CPP_VHS`: enable C++/CUDA VHS renderer (default `True`)
 - `USE_GPU` / `USE_RAMDISK`: GPU and ramdisk flags
 - `ALLOW_FFMPEG_FALLBACK`: fall back to FFmpeg if CUDA fails

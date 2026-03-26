@@ -1393,7 +1393,7 @@ DESCRIPTION_MAX_BYTES = 5000
 FULL_ALBUM_MARKER = "full album"
 
 CENSORED_DIR = Path(
-    "/run/media/banar/Entretenimiento/01_edicion_automatizada/Censurado"
+    "/mnt/Entretenimiento/01_edicion_automatizada/Censurado"
 )
 
 
