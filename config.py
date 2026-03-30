@@ -35,7 +35,7 @@ USE_SSD_TEMP = True  # Copiar a almacenamiento rápido antes de renderizar
 # Ramdisk (tmpfs) - Máxima velocidad de I/O
 # El script monta/desmonta automáticamente si USE_RAMDISK=True
 USE_RAMDISK = True  # Usar RAM en lugar de SSD (requiere sudo sin password para mount)
-RAMDISK_SIZE_GB = 48  # Tamaño del ramdisk en GB (soporta videos 4K de hasta ~4 horas)
+RAMDISK_SIZE_GB = 20  # Tamaño del ramdisk en GB (soporta videos 4K de hasta ~4 horas)
 RAMDISK_PATH = Path("/mnt/ramdisk_render")  # Punto de montaje del tmpfs
 
 # Staging por lotes en NVMe (desactivado - usamos RAM directamente)
