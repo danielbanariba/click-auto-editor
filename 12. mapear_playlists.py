@@ -267,6 +267,16 @@ def run_with_backoff(
     while True:
         try:
             return action()
+        except (BrokenPipeError, ConnectionError, ConnectionResetError, OSError) as exc:
+            attempt += 1
+            if attempt >= max_retries:
+                raise
+            wait = min(max_delay, base_delay * (2 ** (attempt - 1)))
+            print(
+                f"Error de red al intentar {descripcion}: {exc}. "
+                f"Esperando {wait:.1f}s y reintentando ({attempt}/{max_retries})."
+            )
+            time.sleep(wait)
         except HttpError as exc:
             if is_access_not_configured_error(exc):
                 raise CredentialNotConfiguredError(descripcion) from exc

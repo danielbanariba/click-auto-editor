@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-04-03T01:01:43.511093Z",
-  "total": 1027,
+  "generated_at": "2026-04-04T00:39:51.790698Z",
+  "total": 1042,
   "items": [
     {
       "id": "PLFeRVs_dDivaZMxJDOziejzwI6Fa_nNkY",
@@ -507,6 +507,20 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivajq0utt3VSOd2tU7qytMnj"
     },
     {
+      "id": "PLFeRVs_dDivZzrymFPQ5KkVXNUXLJx8q0",
+      "title": "Poland",
+      "title_key": "poland",
+      "count": 5,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZzrymFPQ5KkVXNUXLJx8q0"
+    },
+    {
+      "id": "PLFeRVs_dDivZy0MBJfVmVPUUAPru1pfxc",
+      "title": "Polonia",
+      "title_key": "polonia",
+      "count": 5,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZy0MBJfVmVPUUAPru1pfxc"
+    },
+    {
       "id": "PLFeRVs_dDivaStb3GGEAvo1f-rZ2s8gH_",
       "title": "Reino Unido",
       "title_key": "reino unido",
@@ -612,20 +626,6 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYqOSAHQCyRe2aNgyqUc4jy"
     },
     {
-      "id": "PLFeRVs_dDivZzrymFPQ5KkVXNUXLJx8q0",
-      "title": "Poland",
-      "title_key": "poland",
-      "count": 4,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZzrymFPQ5KkVXNUXLJx8q0"
-    },
-    {
-      "id": "PLFeRVs_dDivZy0MBJfVmVPUUAPru1pfxc",
-      "title": "Polonia",
-      "title_key": "polonia",
-      "count": 4,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZy0MBJfVmVPUUAPru1pfxc"
-    },
-    {
       "id": "PLFeRVs_dDivZSOsww4nIXX7mnXzqw_Qz3",
       "title": "Por la Lucha de los Pueblos",
       "title_key": "por la lucha de los pueblos",
@@ -703,6 +703,20 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaZrWhMU_0lMxhh78fFWVzw"
     },
     {
+      "id": "PLFeRVs_dDiva_d7glgoV3P_7frI-PPwEl",
+      "title": "Brasil",
+      "title_key": "brasil",
+      "count": 3,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDiva_d7glgoV3P_7frI-PPwEl"
+    },
+    {
+      "id": "PLFeRVs_dDivZnELtlVQcis-iLsjxofzqE",
+      "title": "Brazil",
+      "title_key": "brazil",
+      "count": 3,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZnELtlVQcis-iLsjxofzqE"
+    },
+    {
       "id": "PLFeRVs_dDivY0bBQZU2xgJdzlMAdmkuD4",
       "title": "Brutal Death",
       "title_key": "brutal death",
@@ -778,6 +792,13 @@
       "title_key": "hollow kingdom",
       "count": 3,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbsCi0nVUv9SGLRvPt9Djeo"
+    },
+    {
+      "id": "PLFeRVs_dDivZlRzT5bn44Sa8yCk4Bq53A",
+      "title": "Indonesia",
+      "title_key": "indonesia",
+      "count": 3,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZlRzT5bn44Sa8yCk4Bq53A"
     },
     {
       "id": "PLFeRVs_dDivZTrVWLjbrpPPpT41Rc7_4-",
@@ -890,20 +911,6 @@
       "title_key": "black/thrash metal",
       "count": 2,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDiva1a50YmwVoJ_5ZIdqOWIhb"
-    },
-    {
-      "id": "PLFeRVs_dDiva_d7glgoV3P_7frI-PPwEl",
-      "title": "Brasil",
-      "title_key": "brasil",
-      "count": 2,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDiva_d7glgoV3P_7frI-PPwEl"
-    },
-    {
-      "id": "PLFeRVs_dDivZnELtlVQcis-iLsjxofzqE",
-      "title": "Brazil",
-      "title_key": "brazil",
-      "count": 2,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZnELtlVQcis-iLsjxofzqE"
     },
     {
       "id": "PLFeRVs_dDivaBEOhcrtS1mcyIlVvDM2ji",
@@ -1025,6 +1032,20 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYJqPqdgJtmwhip3wrDzegf"
     },
     {
+      "id": "PLFeRVs_dDivZR9a_1YTreXLOP8JdPFj-B",
+      "title": "Finland",
+      "title_key": "finland",
+      "count": 2,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZR9a_1YTreXLOP8JdPFj-B"
+    },
+    {
+      "id": "PLFeRVs_dDivYGDq2ummL8Kdb4DVJoOv1S",
+      "title": "Finlandia",
+      "title_key": "finlandia",
+      "count": 2,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYGDq2ummL8Kdb4DVJoOv1S"
+    },
+    {
       "id": "PLFeRVs_dDivbjoIcgPrU2ATXetkJGbO0G",
       "title": "Folk Metal",
       "title_key": "folk metal",
@@ -1093,13 +1114,6 @@
       "title_key": "indie rock",
       "count": 2,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbhkE4FB8MKIknNnS41jb7R"
-    },
-    {
-      "id": "PLFeRVs_dDivZlRzT5bn44Sa8yCk4Bq53A",
-      "title": "Indonesia",
-      "title_key": "indonesia",
-      "count": 2,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZlRzT5bn44Sa8yCk4Bq53A"
     },
     {
       "id": "PLFeRVs_dDivZvN-CDHsq2YL6Qr4KezWQn",
@@ -2054,6 +2068,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZjvB5aeySqj873KvCJThIb"
     },
     {
+      "id": "PLFeRVs_dDivYprGNvVuO6FocMOoR-RZf1",
+      "title": "Bloodcrusher",
+      "title_key": "bloodcrusher",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYprGNvVuO6FocMOoR-RZf1"
+    },
+    {
       "id": "PLFeRVs_dDivZhEYg2__idlZraU8cFXoj8",
       "title": "Bloodeat",
       "title_key": "bloodeat",
@@ -2654,6 +2675,13 @@
       "title_key": "david",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbCCPlDEl-PLT0O_VFBNFWO"
+    },
+    {
+      "id": "PLFeRVs_dDivaDVIgsNxyET-Tsqmn4fND6",
+      "title": "Dead Cry",
+      "title_key": "dead cry",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaDVIgsNxyET-Tsqmn4fND6"
     },
     {
       "id": "PLFeRVs_dDivYGX8cnbjZWTKClRdGdL5dY",
@@ -3342,6 +3370,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivajfoscEVfn0z63w-zhHX8K"
     },
     {
+      "id": "PLFeRVs_dDivYd3ESRRyiYDxwUNY8EbvWJ",
+      "title": "FESTERING EXPLOSION",
+      "title_key": "festering explosion",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYd3ESRRyiYDxwUNY8EbvWJ"
+    },
+    {
       "id": "PLFeRVs_dDivaR6a06j5t2SQhmpOx07-2g",
       "title": "Facada",
       "title_key": "facada",
@@ -3410,20 +3445,6 @@
       "title_key": "filthy notorious grindcore",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZHAKjeTPuFLMuOakHAOcYp"
-    },
-    {
-      "id": "PLFeRVs_dDivZR9a_1YTreXLOP8JdPFj-B",
-      "title": "Finland",
-      "title_key": "finland",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZR9a_1YTreXLOP8JdPFj-B"
-    },
-    {
-      "id": "PLFeRVs_dDivYGDq2ummL8Kdb4DVJoOv1S",
-      "title": "Finlandia",
-      "title_key": "finlandia",
-      "count": 1,
-      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYGDq2ummL8Kdb4DVJoOv1S"
     },
     {
       "id": "PLFeRVs_dDivZghqP1AMkXMSketJVMFIps",
@@ -4105,6 +4126,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYx2XuAgevITZUwrGzoloVl"
     },
     {
+      "id": "PLFeRVs_dDivaFFzRIjx_D-Py3nDg6odi5",
+      "title": "Inherited Production",
+      "title_key": "inherited production",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaFFzRIjx_D-Py3nDg6odi5"
+    },
+    {
       "id": "PLFeRVs_dDivZcriYVr1vVqvO-tdjubCoj",
       "title": "Inhuman Depravity",
       "title_key": "inhuman depravity",
@@ -4278,6 +4306,13 @@
       "title_key": "khaml",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYKIeeqNO47LKEfX56ap3zg"
+    },
+    {
+      "id": "PLFeRVs_dDiva94hu9TKkVxkeG0xyh0gU9",
+      "title": "Khaos of Death",
+      "title_key": "khaos of death",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDiva94hu9TKkVxkeG0xyh0gU9"
     },
     {
       "id": "PLFeRVs_dDiva_568vWsSvc__qR1MHmAAO",
@@ -5372,6 +5407,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaMDrAaLhLsLUQRngpAL6YZ"
     },
     {
+      "id": "PLFeRVs_dDivY3YNTvqNUnxxhxok-C9_vl",
+      "title": "Pornthegore",
+      "title_key": "pornthegore",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivY3YNTvqNUnxxhxok-C9_vl"
+    },
+    {
       "id": "PLFeRVs_dDivb5nPkRUrtwzu0hHszvGAc-",
       "title": "Portugal",
       "title_key": "portugal",
@@ -5391,6 +5433,13 @@
       "title_key": "powerviolence",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZ7uUTrHlm2DOhq5bWLyBGj"
+    },
+    {
+      "id": "PLFeRVs_dDivaF67kvpx6o8YnmeImLEH37",
+      "title": "Premethius",
+      "title_key": "premethius",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaF67kvpx6o8YnmeImLEH37"
     },
     {
       "id": "PLFeRVs_dDivZ0fD3IpfxaWn9A_-FW4DQ6",
@@ -5433,6 +5482,13 @@
       "title_key": "progressive death metal | deathcore",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbISlOni47hs57qULmb5DAN"
+    },
+    {
+      "id": "PLFeRVs_dDivb7Gtf5bJy3JFFzZ6bvaQGT",
+      "title": "Progressive Decay Of Mankind",
+      "title_key": "progressive decay of mankind",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivb7Gtf5bJy3JFFzZ6bvaQGT"
     },
     {
       "id": "PLFeRVs_dDivY3ytw4My2CZ1dTf96gg2Wr",
@@ -5750,6 +5806,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivY83cJtoHjFY2lu2Ty0L5Vt"
     },
     {
+      "id": "PLFeRVs_dDivakBQPabUaREAvYkf4odugr",
+      "title": "Romania",
+      "title_key": "romania",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivakBQPabUaREAvYkf4odugr"
+    },
+    {
       "id": "PLFeRVs_dDivbj1uC6mdQrE6wwgHvXhhXW",
       "title": "Rotten Evisceration",
       "title_key": "rotten evisceration",
@@ -5783,6 +5846,13 @@
       "title_key": "round up ultra",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbVYRL9ZkRfnlYZOCdJWC0k"
+    },
+    {
+      "id": "PLFeRVs_dDivarLGlhN2YjGE1ugk05S7Wf",
+      "title": "Rumanía",
+      "title_key": "rumanía",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivarLGlhN2YjGE1ugk05S7Wf"
     },
     {
       "id": "PLFeRVs_dDivbLsb3ge6QS34Us86tyBnZF",
@@ -6014,6 +6084,13 @@
       "title_key": "skinfather",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbx788ryl_aX6ooLWuRrFAW"
+    },
+    {
+      "id": "PLFeRVs_dDivbTRO4mjGpeVTTplW1eTIuA",
+      "title": "Skulding",
+      "title_key": "skulding",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbTRO4mjGpeVTTplW1eTIuA"
     },
     {
       "id": "PLFeRVs_dDivZJRFeV39SsmFB3wrskwBm6",
@@ -6261,6 +6338,13 @@
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivaaoj3ZTnOfRiU198a3_Nz4"
     },
     {
+      "id": "PLFeRVs_dDivYm6NFQ1WO2TcTSY0oj1cRN",
+      "title": "Spume",
+      "title_key": "spume",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYm6NFQ1WO2TcTSY0oj1cRN"
+    },
+    {
       "id": "PLFeRVs_dDivabyYGENkzpjG5YcBALgRg0",
       "title": "Staplecunt",
       "title_key": "staplecunt",
@@ -6280,6 +6364,13 @@
       "title_key": "steel freight",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbO2gU8wMHDg4TaL4CybEMK"
+    },
+    {
+      "id": "PLFeRVs_dDivYZkWqBGRpLfuQNSFEPba1B",
+      "title": "Stillborn Heretic",
+      "title_key": "stillborn heretic",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYZkWqBGRpLfuQNSFEPba1B"
     },
     {
       "id": "PLFeRVs_dDivaiujzR-w3jZrF-WLSE_Bt3",
@@ -6322,6 +6413,13 @@
       "title_key": "swamp beast",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivZHjf5-70Ix8p7jhUi8s3mp"
+    },
+    {
+      "id": "PLFeRVs_dDiva7tcIA8fU7roUK8z7wIY3N",
+      "title": "Switzerland",
+      "title_key": "switzerland",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDiva7tcIA8fU7roUK8z7wIY3N"
     },
     {
       "id": "PLFeRVs_dDivajTwkx0cfXMKy4YhRwp_1f",
@@ -7085,6 +7183,13 @@
       "title_key": "xenosis",
       "count": 1,
       "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivbA_c3g0y4RPDDOKJ_7Rpqa"
+    },
+    {
+      "id": "PLFeRVs_dDivYjay_WKFSlCRd-hJIzcK5A",
+      "title": "Yandere Chainsaw Regurgitation Factory",
+      "title_key": "yandere chainsaw regurgitation factory",
+      "count": 1,
+      "url": "https://www.youtube.com/playlist?list=PLFeRVs_dDivYjay_WKFSlCRd-hJIzcK5A"
     },
     {
       "id": "PLFeRVs_dDivYsv6zstGsj8efzb8SiVXoz",
