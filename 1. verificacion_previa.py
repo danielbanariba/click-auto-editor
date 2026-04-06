@@ -49,7 +49,7 @@ def verificacion_manual(folder_path, repertorio, helpers, base_dir):
         if helpers.safe_delete_folder(folder_path, base_dir):
             print(f"Carpeta eliminada: {folder_path.name}")
         else:
-            print(f"No se pudo eliminar: {folder_path.name}")
+            print(f"La carpeta sigue en disco: {folder_path.name}")
         return True
     if normalizada and normalizada not in {"n", "no"}:
         print("Entrada no valida, se continua con la verificacion.")
@@ -118,7 +118,7 @@ def elegir_origen_interactivo():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Verificacion manual sin eliminar carpetas."
+        description="Verificacion manual con opcion de eliminar carpetas ya subidas."
     )
     parser.add_argument(
         "--origen",
@@ -171,6 +171,13 @@ def main():
     if not upload_dir.exists():
         print(f"No existe la carpeta: {upload_dir}")
         return
+
+    if hasattr(helpers, "is_path_on_read_only_filesystem"):
+        if helpers.is_path_on_read_only_filesystem(upload_dir):
+            print(
+                "⚠️ El disco base está en modo solo lectura. "
+                "Si marcas una carpeta como ya subida, no se podrá eliminar."
+            )
 
     if args.carpeta:
         folders = [upload_dir]
