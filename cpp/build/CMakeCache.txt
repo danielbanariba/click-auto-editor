@@ -92,8 +92,8 @@ CMAKE_EXE_LINKER_FLAGS_RELEASE:STRING=
 //Flags used by the linker during RELWITHDEBINFO builds.
 CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO:STRING=
 
-//Enable/Disable output of compile commands during generation.
-CMAKE_EXPORT_COMPILE_COMMANDS:BOOL=
+//No help, variable specified on the command line.
+CMAKE_EXPORT_COMPILE_COMMANDS:UNINITIALIZED=ON
 
 //Value Computed by CMake.
 CMAKE_FIND_PACKAGE_REDIRECTS_DIR:STATIC=/home/banar/Desktop/click-auto-editor/cpp/build/CMakeFiles/pkgRedirects
@@ -227,6 +227,9 @@ CUDA_CUDART:FILEPATH=/opt/cuda/targets/x86_64-linux/lib/libcudart.so
 
 //Path to a library.
 CUDA_OpenCL_LIBRARY:FILEPATH=/opt/cuda/targets/x86_64-linux/lib/libOpenCL.so
+
+//Path to a program.
+CUDA_bin2c_EXECUTABLE:FILEPATH=/opt/cuda/bin/bin2c
 
 //Path to a library.
 CUDA_cuFile_LIBRARY:FILEPATH=/opt/cuda/targets/x86_64-linux/lib/libcufile.so
@@ -485,9 +488,9 @@ CMAKE_CACHEFILE_DIR:INTERNAL=/home/banar/Desktop/click-auto-editor/cpp/build
 //Major version of cmake used to create the current loaded cache
 CMAKE_CACHE_MAJOR_VERSION:INTERNAL=4
 //Minor version of cmake used to create the current loaded cache
-CMAKE_CACHE_MINOR_VERSION:INTERNAL=2
+CMAKE_CACHE_MINOR_VERSION:INTERNAL=3
 //Patch version of cmake used to create the current loaded cache
-CMAKE_CACHE_PATCH_VERSION:INTERNAL=3
+CMAKE_CACHE_PATCH_VERSION:INTERNAL=1
 //ADVANCED property for variable: CMAKE_COLOR_MAKEFILE
 CMAKE_COLOR_MAKEFILE-ADVANCED:INTERNAL=1
 //Path to CMake executable.
@@ -776,7 +779,7 @@ CUDA_nvtx3_interop_LIBRARY-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CUDA_pcsamplingutil_LIBRARY
 CUDA_pcsamplingutil_LIBRARY-ADVANCED:INTERNAL=1
 //Details about finding CUDAToolkit
-FIND_PACKAGE_MESSAGE_DETAILS_CUDAToolkit:INTERNAL=[/opt/cuda/targets/x86_64-linux/include;/opt/cuda/targets/x86_64-linux/include/cccl][/opt/cuda/targets/x86_64-linux/lib/libcudart.so][/opt/cuda/bin][v13.1.115()]
+FIND_PACKAGE_MESSAGE_DETAILS_CUDAToolkit:INTERNAL=[/opt/cuda/targets/x86_64-linux/include;/opt/cuda/targets/x86_64-linux/include/cccl][/opt/cuda/targets/x86_64-linux/lib/libcudart.so][/opt/cuda/bin][v13.2.51()]
 //Details about finding PkgConfig
 FIND_PACKAGE_MESSAGE_DETAILS_PkgConfig:INTERNAL=[/usr/bin/pkg-config][v2.5.1()]
 //Details about finding Threads
