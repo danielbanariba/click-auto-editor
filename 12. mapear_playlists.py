@@ -423,174 +423,6 @@ def add_video_to_playlist(youtube, playlist_id, video_id):
     )
 
 
-def set_playlist_privacy(youtube, playlist_id, privacy="private"):
-    if not playlist_id:
-        return
-    body = {"id": playlist_id, "status": {"privacyStatus": privacy}}
-    run_with_backoff(
-        lambda: youtube.playlists().update(part="status", body=body).execute(),
-        descripcion=f"actualizar privacidad de playlist {playlist_id}",
-    )
-
-
-def delete_playlist(youtube, playlist_id):
-    if not playlist_id:
-        return
-    run_with_backoff(
-        lambda: youtube.playlists().delete(id=playlist_id).execute(),
-        descripcion=f"eliminar playlist {playlist_id}",
-    )
-
-
-def merge_duplicate_playlists(
-    youtube,
-    canonical_id,
-    duplicate_id,
-    max_items=None,
-    cache=None,
-    pause=None,
-):
-    if not canonical_id or not duplicate_id or canonical_id == duplicate_id:
-        return 0, False
-    try:
-        canonical_ids, canonical_trunc = get_playlist_video_ids(
-            youtube,
-            canonical_id,
-            max_items=max_items,
-            cache=cache,
-        )
-    except HttpError as exc:
-        if is_playlist_not_found(exc):
-            print(f"Aviso: playlist canonica {canonical_id} no encontrada, saltando fusion.")
-            return 0, False
-        raise
-    try:
-        duplicate_ids, duplicate_trunc = get_playlist_video_ids(
-            youtube,
-            duplicate_id,
-            max_items=max_items,
-            cache=cache,
-        )
-    except HttpError as exc:
-        if is_playlist_not_found(exc):
-            print(f"Aviso: playlist duplicada {duplicate_id} no encontrada, saltando fusion.")
-            return 0, False
-        raise
-    nuevos = duplicate_ids - canonical_ids
-    added = 0
-    skipped_missing = 0
-    for video_id in nuevos:
-        try:
-            add_video_to_playlist(youtube, canonical_id, video_id)
-            canonical_ids.add(video_id)
-            added += 1
-            if pause:
-                time.sleep(pause)
-        except HttpError as exc:
-            if is_video_not_found(exc):
-                skipped_missing += 1
-                continue
-            raise
-    if skipped_missing:
-        print(f"Aviso: {skipped_missing} videos no encontrados al fusionar playlists.")
-    return added, canonical_trunc or duplicate_trunc
-
-
-def auto_cleanup_playlists(
-    youtube,
-    duplicadas,
-    todas_playlists,
-    playlist_cache,
-    playlist_items_cache,
-    pause=None,
-    merge_scan=None,
-):
-    if not duplicadas and not todas_playlists:
-        return
-    info_por_id = {item["id"]: item for item in todas_playlists}
-    duplicadas_ids = set()
-    canon_ids = set()
-    grupos_con_videos = set()
-
-    for data in duplicadas.values():
-        canonical = data["canonical"]
-        canon_ids.add(canonical["id"])
-        group_has_videos = (canonical.get("count") or 0) > 0
-        for extra in data["extras"]:
-            duplicadas_ids.add(extra["id"])
-            if (extra.get("count") or 0) > 0:
-                group_has_videos = True
-        if group_has_videos:
-            grupos_con_videos.add(canonical["id"])
-
-    if duplicadas:
-        print(f"Limpieza: fusionando {len(duplicadas)} titulos duplicados.")
-        for data in duplicadas.values():
-            canonical = data["canonical"]
-            truncado = False
-            for extra in data["extras"]:
-                added_count, was_truncated = merge_duplicate_playlists(
-                    youtube,
-                    canonical["id"],
-                    extra["id"],
-                    max_items=merge_scan,
-                    cache=playlist_items_cache,
-                    pause=pause,
-                )
-                truncado = truncado or was_truncated
-                msg = (
-                    f"Fusion: '{extra['title']}' -> '{canonical['title']}'. "
-                    f"Agregados: {added_count}."
-                )
-                if was_truncated:
-                    msg += " Aviso: fusion truncada."
-                print(msg)
-            if truncado:
-                print(
-                    "Aviso: no se eliminaran duplicadas de '"
-                    + canonical["title"]
-                    + "' por fusion incompleta."
-                )
-                continue
-            for extra in data["extras"]:
-                titulo = extra.get("title") or extra["id"]
-                try:
-                    delete_playlist(youtube, extra["id"])
-                    print(f"Eliminada playlist duplicada: '{titulo}'.")
-                    key = normalize_title(titulo)
-                    if key and playlist_cache.get(key) == extra["id"]:
-                        playlist_cache[key] = canonical["id"]
-                except Exception as exc:
-                    print(f"No se pudo eliminar duplicada '{titulo}': {exc}")
-
-    vacias_ids = []
-    for item in todas_playlists:
-        if (item.get("count") or 0) != 0:
-            continue
-        playlist_id = item["id"]
-        if playlist_id in duplicadas_ids:
-            continue
-        if playlist_id in grupos_con_videos:
-            continue
-        vacias_ids.append(playlist_id)
-
-    if vacias_ids:
-        print(f"Limpieza: playlists vacias detectadas: {len(vacias_ids)}.")
-        for playlist_id in vacias_ids:
-            info = info_por_id.get(playlist_id, {})
-            titulo = info.get("title") or playlist_id
-            try:
-                delete_playlist(youtube, playlist_id)
-                print(f"Eliminada playlist vacia: '{titulo}'.")
-                key = normalize_title(titulo)
-                if key and playlist_cache.get(key) == playlist_id:
-                    del playlist_cache[key]
-            except Exception as exc:
-                print(f"No se pudo eliminar vacia '{titulo}': {exc}")
-            if pause:
-                time.sleep(pause)
-
-
 def limpiar_genero_texto(value):
     if value is None:
         return None
@@ -995,11 +827,6 @@ def main(youtube=None):
         help="Solo playlists por genero/ano/pais",
     )
     parser.add_argument(
-        "--sin-limpieza",
-        action="store_true",
-        help="No limpiar playlists duplicadas o vacias.",
-    )
-    parser.add_argument(
         "--salir-si-no-hay-nuevos",
         action="store_true",
         help="Salida rapida si no hay nuevos videos ni pendientes (o pendientes omitidos).",
@@ -1072,9 +899,6 @@ def main(youtube=None):
     state = load_state(state_path)
     last_full_scan = bool(state.get("last_full_scan_completed"))
     stop_at_video_id = state.get("last_newest_video_id") if last_full_scan else None
-    auto_limpieza = (
-        not args.sin_limpieza and os.environ.get("YOUTUBE_AUTO_CLEAN", "1") == "1"
-    )
     fast_exit = (
         args.salir_si_no_hay_nuevos or os.environ.get("YOUTUBE_FAST_EXIT", "0") == "1"
     )
@@ -1083,7 +907,6 @@ def main(youtube=None):
         youtube = authenticate(prefix="playlists")
 
     uploads_playlist_id = None
-    skip_video_processing = False
     if (
         fast_exit
         and args.limite is None
@@ -1096,15 +919,11 @@ def main(youtube=None):
             youtube, uploads_playlist_id=uploads_playlist_id
         )
         if latest_video_id and latest_video_id == stop_at_video_id:
-            if auto_limpieza:
-                print("Sin nuevos videos ni pendientes. Se ejecutara solo limpieza.")
-                skip_video_processing = True
-            else:
-                print("Sin nuevos videos ni pendientes. Salida rapida.")
-                return
+            print("Sin nuevos videos ni pendientes. Salida rapida.")
+            return
 
     playlist_cache, duplicadas, todas_playlists = list_playlists(
-        youtube, include_counts=auto_limpieza
+        youtube, include_counts=False
     )
     save_playlist_links_cache(
         DEFAULT_PLAYLIST_LINKS_CACHE,
@@ -1116,17 +935,6 @@ def main(youtube=None):
         print("Modo --solo-cache-links: finalizado sin mapear videos.")
         return
     playlist_items_cache = {}
-    if auto_limpieza:
-        print("Limpieza automatica: fusionar duplicadas (sin eliminar playlists).")
-        auto_cleanup_playlists(
-            youtube,
-            duplicadas,
-            todas_playlists,
-            playlist_cache,
-            playlist_items_cache,
-            pause=pause,
-            merge_scan=None,
-        )
     crear_playlists_bloqueado = False
 
     total = 0
@@ -1283,30 +1091,29 @@ def main(youtube=None):
                 checkpointed += 1
 
     scan_state = {}
-    if not skip_video_processing:
-        if pending_ids:
-            print(f"Reintentando pendientes: {len(pending_ids)}.")
-            for video in iter_videos_by_ids(
-                youtube, pending_ids, include_unlisted=args.incluir_no_listado
-            ):
-                procesar_video(video)
-
-        videos_iter, scan_state = iter_public_videos(
-            youtube,
-            limit=args.limite,
-            include_unlisted=args.incluir_no_listado,
-            stop_at_video_id=stop_at_video_id,
-            uploads_playlist_id=uploads_playlist_id,
-        )
-        for video in videos_iter:
+    if pending_ids:
+        print(f"Reintentando pendientes: {len(pending_ids)}.")
+        for video in iter_videos_by_ids(
+            youtube, pending_ids, include_unlisted=args.incluir_no_listado
+        ):
             procesar_video(video)
 
-        if scan_state.get("first_video_id") and not scan_state.get("limited"):
-            if scan_state.get("completed") or scan_state.get("stopped_at"):
-                state["last_newest_video_id"] = scan_state.get("first_video_id")
-                if scan_state.get("completed"):
-                    state["last_full_scan_completed"] = True
-                save_state(state_path, state)
+    videos_iter, scan_state = iter_public_videos(
+        youtube,
+        limit=args.limite,
+        include_unlisted=args.incluir_no_listado,
+        stop_at_video_id=stop_at_video_id,
+        uploads_playlist_id=uploads_playlist_id,
+    )
+    for video in videos_iter:
+        procesar_video(video)
+
+    if scan_state.get("first_video_id") and not scan_state.get("limited"):
+        if scan_state.get("completed") or scan_state.get("stopped_at"):
+            state["last_newest_video_id"] = scan_state.get("first_video_id")
+            if scan_state.get("completed"):
+                state["last_full_scan_completed"] = True
+            save_state(state_path, state)
 
     omitted = skipped_no_data + skipped_checkpoint
     if checkpoint_path:
