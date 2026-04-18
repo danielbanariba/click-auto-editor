@@ -1,0 +1,438 @@
+# ============================================================================
+# Groserías en inglés — organizadas por categoría y severidad
+# ============================================================================
+# severity:
+#   explicit  — siempre censurable
+#   moderate  — reservado para futuro modo estricto
+#   mild      — reservado para futuro modo muy estricto
+# ============================================================================
+
+language: en
+
+categories:
+
+  # --- Vulgaridades sexuales / insultos -----------------------------------
+  sexual_vulgarity:
+    severity: explicit
+    words:
+      - fuck
+      - fucking
+      - fucked
+      - fucker
+      - fucks
+      - motherfucker
+      - motherfucking
+      - mf
+      - shit
+      - shitty
+      - shitting
+      - bullshit
+      - bitch
+      - bitches
+      - bitchy
+      - asshole
+      - arsehole
+      - dick
+      - dickhead
+      - dicks
+      - cock
+      - cocks
+      - cockring
+      - cockrings
+      - pussy
+      - pussies
+      - pussys
+      - cunt
+      - cunts
+      - slut
+      - sluts
+      - slutty
+      - whore
+      - whores
+      - whorecraft
+      - whorrified
+      - bastard
+      - bastards
+      - piss
+      - pissing
+
+  # --- Contenido sexual explícito -----------------------------------------
+  sexual_explicit:
+    severity: explicit
+    words:
+      - porn
+      - porno
+      - pornstar
+      - blowjob
+      - handjob
+      - rimjob
+      - fisting
+      - fisted
+      - tits
+      - titty
+      - titties
+      - boobs
+      - boob
+      - nudes
+      - nude
+      - orgy
+      - orgies
+      - squirting
+      - squirt
+      - onlyfans
+      - femboy
+      - femboys
+      - stepsis
+      - stepbro
+      - stepmom
+      - stepdad
+      - incest
+      - hentai
+      - furry
+      - furries
+      - yiff
+      - creampie
+      - gangbang
+      - threesome
+      - foursome
+      - bdsm
+      - bondage
+      - dildo
+      - dildos
+      - vibrator
+      - masturbate
+      - masturbating
+      - masturbation
+      - ejaculate
+      - ejaculation
+      - orgasm
+      - orgasms
+      - fellatio
+      - cunnilingus
+      - doggystyle
+      - missionary
+      - cowgirl
+      - bukake
+      - bukkake
+      - xxx
+      - nsfw
+      - lewd
+      - kinky
+      - kink
+      - fetish
+      - fetishes
+
+  # --- Actos sexuales compuestos ------------------------------------------
+  sexual_compound_acts:
+    severity: explicit
+    words:
+      - skullfuck
+      - skullfucked
+      - skullfucking
+      - facefuck
+      - facefucked
+      - facefucking
+      - throatfuck
+      - throatfucked
+      - throatfucking
+      - assfuck
+      - assfucked
+      - assfucking
+      - buttfuck
+      - buttfucked
+      - buttfucking
+      - mindfuck
+      - mindfucked
+      - mindfucking
+      - clusterfuck
+      - insemination
+      - inseminated
+      - inseminate
+      - impregnate
+      - impregnated
+      - impregnation
+
+  # --- Prostitución / explotación -----------------------------------------
+  prostitution:
+    severity: explicit
+    words:
+      - hooker
+      - hookers
+      - prostitute
+      - prostitutes
+      - prostitution
+      - pimp
+      - pimps
+      - pimping
+
+  # --- Anatomía sexual explícita ------------------------------------------
+  anatomy_explicit:
+    severity: explicit
+    words:
+      - erection
+      - erect
+      - testicle
+      - testicles
+      - testicular
+      - susticles
+      - balls
+      - ballsack
+      - nutsack
+      - privates
+      - scrotum
+      - clitoris
+      - clit
+      - vagina
+      - vaginal
+      - penis
+      - penises
+      - anus
+      - anal
+      - rectum
+      - rectal
+      - sodomy
+      - sodomize
+      - sodomized
+      - genital
+      - genitals
+      - genitalia
+      - boner
+      - boners
+      - womb
+      - uterus
+      - uterine
+      - ovary
+      - ovaries
+      - umbilical
+      - amniotic
+      - facial
+
+  # --- Fluidos corporales sexuales ----------------------------------------
+  bodily_sexual:
+    severity: explicit
+    words:
+      - cum
+      - cumming
+      - cumshot
+      - cums
+      - semen
+      - sperm
+      - spermatic
+      - precum
+      - horny
+      - horniest
+      - aroused
+      - arousal
+      - erotic
+      - erotica
+      - sexy
+      - sexiest
+
+  # --- Fluidos corporales ofensivos ---------------------------------------
+  bodily_waste:
+    severity: explicit
+    words:
+      - faeces
+      - feces
+      - faecal
+      - fecal
+      - faecaloma
+      - diarrhoea
+      - diarrhea
+      - vomit
+      - vomiting
+      - urine
+      - urinate
+      - urinating
+      - excrement
+      - defecate
+      - defecating
+      - defecation
+
+  # --- Violencia / abuso --------------------------------------------------
+  violence_abuse:
+    severity: explicit
+    words:
+      - rape
+      - raped
+      - raping
+      - rapist
+      - pedophile
+      - pedophilia
+      - pedo
+      - molest
+      - molested
+      - molesting
+      - molester
+      - torture
+      - tortured
+      - torturing
+      - crucifixion
+      - crucified
+      - crucify
+      - mutilating
+      - dismember
+      - dismembered
+      - dismemberment
+      - decapitate
+      - decapitated
+      - decapitation
+      - disembowel
+      - disemboweled
+      - disembowelment
+      - eviscerate
+      - eviscerated
+      - evisceration
+      - fetal
+      - abortion
+      - aborted
+      - infanticide
+      - genocide
+      - holocaust
+      - terrorist
+      - terrorism
+      - beheaded
+      - behead
+      - beheading
+      - impale
+      - impaled
+      - impalement
+      - castrate
+      - castrated
+      - castration
+      - amputation
+      - amputate
+      - amputated
+      - lacerate
+      - lacerated
+      - laceration
+      - sever
+      - severed
+      - severing
+      - hack
+      - hacked
+      - hacking
+      - slash
+      - slashed
+      - slashing
+      - stab
+      - stabbed
+      - stabbing
+      - massacred
+      - carnage
+      - bloodbath
+      - gory
+      - goriest
+
+  # --- Necrofilia / canibalismo (explícito, no solo temático) -------------
+  extreme_deviancy:
+    severity: explicit
+    words:
+      - snuff
+      - necro
+      - necrophilia
+      - necrophiliac
+      - necroparty
+      - cannibalism
+      - cannibalistic
+      - anthropophagy
+      - anthropophagous
+      - anthropophagia
+      - devour
+      - devoured
+      - devouring
+
+  # --- Gore médico / anatómico gráfico ------------------------------------
+  gore_medical:
+    severity: explicit
+    words:
+      - cadaver
+      - cadaveric
+      - cadavers
+      - corpses
+      - carcasses
+      - carrion
+      - putrid
+      - putridity
+      - putrefaction
+      - putrefied
+      - putrescent
+      - rotten
+      - rotting
+      - rot
+      - decompose
+      - decomposed
+      - decomposing
+      - decomposition
+      - decay
+      - decayed
+      - decaying
+      - necrotic
+      - necrosis
+      - necrotizing
+      - gangrene
+      - gangrenous
+      - septic
+      - sepsis
+      - septicemia
+      - septicemic
+      - suppurate
+      - suppurated
+      - suppuration
+      - pus
+      - purulent
+      - pustule
+      - pustules
+      - abscess
+      - abscesses
+      - lesion
+      - lesions
+      - maggot
+      - maggots
+      - vermin
+      - verminous
+      - infest
+      - infested
+      - infestation
+      - viscera
+      - visceral
+      - entrails
+      - intestine
+      - intestines
+      - intestinal
+      - bowel
+      - bowels
+
+  # --- Enfermedades ofensivas ---------------------------------------------
+  disease_offensive:
+    severity: explicit
+    words:
+      - syphilis
+      - syphilitic
+      - herpes
+      - gonorrhea
+      - chlamydia
+      - plague
+      - leprosy
+      - leper
+      - cholera
+      - typhoid
+      - anthrax
+      - ebola
+      - smallpox
+
+  # --- Slurs / términos de abuso ------------------------------------------
+  slurs:
+    severity: explicit
+    words:
+      - retard
+      - retarded
+      - cripple
+      - crippled
+
+# --- Censura solo cuando aparece como palabra aislada --------------------
+# Estas palabras son demasiado comunes como subcadena, así que solo se
+# censuran si aparecen rodeadas de límites de palabra.
+word_boundary_only:
+  - ass    # assassin, class, bass, grass, mass, pass
+  - suck   # sucker (contexto musical ok)

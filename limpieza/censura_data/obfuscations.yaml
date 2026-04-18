@@ -1,0 +1,68 @@
+# ============================================================================
+# Variantes ofuscadas curadas → palabra canónica
+# ============================================================================
+# Estas son variantes que NO siempre se auto-generan solo quitando vocales.
+# Cubren censura con asteriscos (f***, sh*t) y abreviaciones populares.
+#
+# El loader ADEMÁS auto-genera la versión "sin vocales" de cada palabra base
+# de las blacklists (fuck → fck, shit → sht, etc.), así que acá solo van
+# las variantes que no surgen de esa regla.
+# ============================================================================
+
+obfuscations:
+
+  # fuck
+  fk: fuck
+  fuc: fuck
+  fuk: fuck
+  fkng: fucking
+  fukng: fucking
+  fkd: fucked
+  fukd: fucked
+  fkr: fucker
+
+  # shit
+  shtt: shit
+  shtting: shitting
+  shttng: shitting
+
+  # bitch
+  bch: bitch
+  btc: bitch
+
+  # dick
+  dk: dick
+  dc: dick
+
+  # cock
+  ck: cock
+  cc: cock
+
+  # pussy
+  psy: pussy
+  ps: pussy
+
+  # cunt
+  ct: cunt
+  cn: cunt
+  cts: cunts
+
+  # cum
+  cmmng: cumming
+  cmmg: cumming
+
+  # slut / whore
+  slts: sluts
+  whrs: whores
+
+  # anal / ass
+  nl: anal
+  ss: ass
+
+  # español
+  pt: puta
+  pts: putas
+  mrd: mierda
+  vrg: verga
+  clo: culo
+  plln: pollon

@@ -1,0 +1,175 @@
+# ============================================================================
+# Whitelist global — palabras que NUNCA se censuran
+# ============================================================================
+# La whitelist tiene prioridad sobre la blacklist. Si una palabra está
+# aquí, no se censura aunque coincida con una regla de censura.
+# ============================================================================
+
+# --- Falsos positivos por subcadena ---------------------------------------
+# Palabras técnicas/comunes que contienen substrings de groserías pero son válidas.
+false_positives:
+
+  # Contienen "ass" (no relacionadas con el culo en inglés)
+  - assassin
+  - assassins
+  - assassination
+  - assassinate
+  - class
+  - classic
+  - classical
+  - classify
+  - classification
+  - bass
+  - bassist
+  - bassline
+  - basshead
+  - grass
+  - grassroots
+  - mass
+  - massive
+  - masses
+  - pass
+  - passed
+  - passing
+  - passage
+  - passenger
+  - compass
+  - trespass
+  - surpass
+  - bypass
+  - embassy
+  - embarrass
+  - harass
+  - harassment
+  - crass
+  - brass
+  - cassette
+  - cassandra
+  - assault
+
+  # Contienen "anal"
+  - analysis
+  - analyze
+  - analytical
+  - analyst
+  - banal
+  - canal
+  - analgesia
+  - analog
+  - analogue
+  - finale
+  - final
+  - finals
+
+  # Contienen "cum"
+  - document
+  - documents
+  - documentary
+  - accumulate
+  - circumstance
+  - circumstances
+  - cucumber
+  - cumulative
+  - vacuum
+
+  # Contienen "gore"
+  - category
+  - categories
+  - gorgeous
+  - allegory
+  - gregory
+
+  # Contienen "kill" (falsos positivos no-metal)
+  - skill
+  - skilled
+  - skillful
+  - skills
+
+# --- Metal / bandas y términos temáticos ----------------------------------
+# En contexto de death/black/grindcore/metal, estos términos son temáticos
+# válidos. Si más adelante querés un modo "strict" sin whitelist metal,
+# se puede filtrar esta sección.
+metal_bands_and_themes:
+  # Nombres de bandas reconocibles
+  - cannibal      # Cannibal Corpse
+  - corpse        # Cannibal Corpse
+  - carcass       # Carcass (grindcore)
+  - napalm        # Napalm Death
+  - obituary      # Obituary
+  - slayer        # Slayer
+  - exodus        # Exodus
+  - massacre      # Massacre
+  - autopsy       # Autopsy
+  - morbid        # Morbid Angel
+  - dying         # Dying Fetus
+  - fetus         # Dying Fetus
+
+  # Temática letal (común en death metal, no se censura)
+  - kill
+  - killed
+  - killer
+  - killers
+  - killing
+  - overkill
+  - roadkill
+  - murder
+  - murdered
+  - murderer
+  - murderous
+
+  # Anatomía/violencia temática (whitelist gana sobre blacklist para metal)
+  - butcher
+  - butchered
+  - butchering
+  - slaughter
+  - slaughtered
+  - slaughtering
+  - mutilate
+  - mutilated
+  - mutilation
+  - fist
+  - fists
+
+  # Términos atmosféricos
+  - blood
+  - bloody
+  - bleeding
+  - dead
+  - deadly
+  - death
+  - deathly
+  - demon
+  - demons
+  - demonic
+  - satan
+  - satanic
+  - satanism
+  - hell
+  - hellish
+  - infernal
+  - inferno
+  - abyss
+  - evil
+  - dark
+  - darkness
+  - doom
+  - doomed
+  - grave
+  - graveyard
+  - tomb
+  - tombs
+  - chaos
+  - chaotic
+  - brutal
+  - brutality
+  - extreme
+  - savage
+  - vicious
+  - violent
+  - violence
+  - war
+  - warfare
+  - destruction
+  - destructive
+  - annihilation
+  - annihilate

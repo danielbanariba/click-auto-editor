@@ -1,0 +1,99 @@
+# ============================================================================
+# Groserías en alemán
+# ============================================================================
+
+language: de
+
+categories:
+
+  # --- Vulgaridades / insultos --------------------------------------------
+  sexual_vulgarity:
+    severity: explicit
+    words:
+      - scheiße
+      - scheisse
+      - scheiss
+      - scheißkerl
+      - scheisskerl
+      - scheißdreck
+      - fotze
+      - fotzen
+      - schlampe
+      - schlampen
+      - hure
+      - huren
+      - hurensohn
+      - hurensöhne
+      - arschloch
+      - arschlöcher
+      - arsch
+      - arschficker
+      - arschgeige
+      - wichser
+      - wichsen
+      - mistkerl
+      - miststück
+      - depp
+      - deppen
+      - trottel
+      - idiot
+      - idioten
+
+  # --- Anatomía sexual ----------------------------------------------------
+  anatomy_explicit:
+    severity: explicit
+    words:
+      - schwanz
+      - schwänze
+      - pimmel
+      - muschi
+      - möse
+      - möpse
+      - titten
+      - nutten
+
+  # --- Actos sexuales -----------------------------------------------------
+  sexual_acts:
+    severity: explicit
+    words:
+      - ficken
+      - fickt
+      - fickte
+      - fickend
+      - gefickt
+      - ficker
+      - vögeln
+      - blasen   # vulgar en contexto sexual
+      - bumsen
+      - bumst
+      - gebumst
+
+  # --- Fluidos corporales sexuales ----------------------------------------
+  bodily_sexual:
+    severity: explicit
+    words:
+      - sperma
+      - wichse
+      - porno
+      - pornos
+
+  # --- Fluidos corporales ofensivos ---------------------------------------
+  bodily_waste:
+    severity: explicit
+    words:
+      - kacken
+      - kacke
+      - gekackt
+      - pissen
+      - pisse
+      - gepisst
+
+  # --- Violencia / abuso --------------------------------------------------
+  violence_abuse:
+    severity: explicit
+    words:
+      - vergewaltigen
+      - vergewaltigt
+      - vergewaltigung
+      - vergewaltiger
+      - vergewaltigerin

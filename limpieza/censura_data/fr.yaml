@@ -1,0 +1,126 @@
+# ============================================================================
+# Groserías en francés
+# ============================================================================
+# Notas de curación:
+# - "con" (sustantivo vulgar) es EVITADO aquí por colisión con ES "con" (conector).
+#   Se cubren los compuestos: connard, connasse, connerie, etc.
+# - "queue", "chatte" tienen significados no-groseros frecuentes (cola, gata)
+#   y se dejan fuera por ambigüedad. Se activarán en Fase 3 con language detection.
+# ============================================================================
+
+language: fr
+
+categories:
+
+  # --- Vulgaridades / insultos --------------------------------------------
+  sexual_vulgarity:
+    severity: explicit
+    words:
+      - merde
+      - merdes
+      - merdique
+      - putain
+      - putains
+      - salope
+      - salopes
+      - salaud
+      - salauds
+      - pute
+      - putes
+      - connard
+      - connards
+      - connasse
+      - connasses
+      - connerie
+      - conneries
+      - enculé
+      - encule
+      - enculée
+      - enculees
+      - enculer
+      - enculeur
+      - foutre
+      - foutu
+      - foutue
+      - foutus
+      - foutues
+      - ordure
+      - raclure
+      - salopard
+
+  # --- Anatomía sexual ----------------------------------------------------
+  anatomy_explicit:
+    severity: explicit
+    words:
+      - bite
+      - bites
+      - nichon
+      - nichons
+      - nibards
+      - téton
+      - tétons
+      - couilles
+      - couille
+
+  # --- Actos sexuales -----------------------------------------------------
+  sexual_acts:
+    severity: explicit
+    words:
+      - baiser       # vulgar en sentido sexual moderno
+      - baise
+      - baisé
+      - baisée
+      - niquer
+      - niqué
+      - niquée
+      - nique
+      - sucer
+      - sucé
+      - sucée
+
+  # --- Fluidos corporales sexuales ----------------------------------------
+  bodily_sexual:
+    severity: explicit
+    words:
+      - sperme
+      - porno
+      - pornos
+
+  # --- Fluidos corporales ofensivos ---------------------------------------
+  bodily_waste:
+    severity: explicit
+    words:
+      - chier
+      - chié
+      - chiée
+      - pisser
+      - pissé
+      - pissée
+      - pisse
+
+  # --- Violencia / abuso --------------------------------------------------
+  violence_abuse:
+    severity: explicit
+    words:
+      - violer
+      - violé
+      - violée
+      - viol
+      - viols
+      - violeur
+      - pédophile
+      - pédophilie
+
+# --- Palabras ambiguas cross-idioma ---------------------------------------
+# Solo se activan si lingua-language-detector confirma que el texto es FR.
+# Sin eso, se dejan dormir — evita falsos positivos en otros idiomas.
+ambiguous_categories:
+
+  # Anatomía con significado no-grosero en otros idiomas.
+  sexual_anatomy_ambiguous:
+    severity: explicit
+    words:
+      - queue      # FR vulgar (polla) / EN/ES "cola"
+      - chatte     # FR vulgar (vulva) / EN/PT/IT "gata"
+      - bitte      # FR dialectal (polla) / DE "request"
+

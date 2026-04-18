@@ -1,0 +1,99 @@
+# ============================================================================
+# Mapeo de normalización para detección de groserías ofuscadas
+# ============================================================================
+# Estos mapeos se aplican al normalizar palabras antes de buscar coincidencias.
+# Se comparten entre todos los idiomas.
+# ============================================================================
+
+# Leetspeak: números y símbolos usados para sustituir letras
+leetspeak:
+  "@": a
+  "4": a
+  "$": s
+  "5": s
+  "!": i
+  "1": i
+  "0": o
+  "3": e
+  "7": t
+
+# Homóglifos Unicode: caracteres de otros alfabetos que se parecen a letras latinas
+# Evita evasión del tipo: fυck (ypsilon griega), fаck (a cirílica)
+homoglyphs:
+  # Griego
+  "α": a
+  "Α": a
+  "ο": o
+  "Ο": o
+  "ε": e
+  "Ε": e
+  "ι": i
+  "Ι": i
+  "ρ": p
+  "Ρ": p
+  "υ": u
+  "ν": v
+  "ϲ": c
+  "τ": t
+  # Cirílico (lookalikes más comunes)
+  "а": a
+  "А": a
+  "о": o
+  "О": o
+  "е": e
+  "Е": e
+  "с": c
+  "С": c
+  "р": p
+  "Р": p
+  "у": y
+  "х": x
+  "Х": x
+  "к": k
+  "К": k
+  "м": m
+  "М": m
+  "Т": t
+  "Н": h
+  "В": b
+
+# Acentos y diacríticos latinos
+accents:
+  "á": a
+  "à": a
+  "â": a
+  "ä": a
+  "å": a
+  "ã": a
+  "æ": a
+  "é": e
+  "è": e
+  "ê": e
+  "ë": e
+  "í": i
+  "ì": i
+  "î": i
+  "ï": i
+  "ó": o
+  "ò": o
+  "ô": o
+  "ö": o
+  "õ": o
+  "ø": o
+  "ú": u
+  "ù": u
+  "û": u
+  "ü": u
+  "ñ": n
+  "ç": c
+
+# Caracteres de relleno que se eliminan (obfuscación con separadores)
+# Ejemplo: f.u.c.k, f-u-c-k, f*u*c*k
+fillers:
+  - "*"
+  - "-"
+  - "_"
+  - "."
+  - "'"
+  - "`"
+  - "´"

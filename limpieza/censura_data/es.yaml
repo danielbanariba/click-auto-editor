@@ -1,0 +1,113 @@
+# ============================================================================
+# Groserías en español — organizadas por categoría y severidad
+# ============================================================================
+
+language: es
+
+categories:
+
+  # --- Vulgaridades / insultos --------------------------------------------
+  sexual_vulgarity:
+    severity: explicit
+    words:
+      - puta
+      - putas
+      - putita
+      - puteria
+      - puto
+      - putos
+      - pendejo
+      - pendejos
+      - pendeja
+      - pendejas
+      - cabron
+      - cabrones
+      - cabrona
+      - cabronas
+      - mierda
+      - mierdas
+      - joder
+      - jodas
+      - jode
+      - jodes
+      - joden
+      - jodemos
+      - jodan
+      - jodido
+      - jodida
+      - carajo
+      - hostia
+      - hostias
+
+  # --- Anatomía sexual ----------------------------------------------------
+  anatomy_explicit:
+    severity: explicit
+    words:
+      - verga
+      - vergas
+      - polla
+      - pollas
+      - pene
+      - penes
+      - culo
+      - culos
+      - ano
+      - anos
+      - coño
+      - coños
+      - nalgas
+      - tetas
+      - panocha
+      - concha
+      - huevos
+      - cojones
+      - ojete
+      - culero
+      - culera
+
+  # --- Actos sexuales -----------------------------------------------------
+  sexual_acts:
+    severity: explicit
+    words:
+      - follar
+      - follando
+      - follada
+      - follado
+      - chingar
+      - chingada
+      - chingado
+      - chingados
+      - chingadera
+      - coger
+      - cogida
+      - cogiendo
+      - mamar
+      - mamada
+      - mamadas
+      - chupar
+      - chupada
+      - polvo
+
+  # --- Fluidos corporales -------------------------------------------------
+  bodily_waste:
+    severity: explicit
+    words:
+      - cagar
+      - cagada
+      - cagando
+      - mear
+      - meada
+      - meando
+      - pedo
+      - pedos
+      - porra
+
+  # --- Violencia / abuso --------------------------------------------------
+  violence_abuse:
+    severity: explicit
+    words:
+      - violacion
+      - violador
+      - violada
+      - violado
+      - violar

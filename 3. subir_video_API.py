@@ -2308,6 +2308,30 @@ def abrir_busqueda_youtube(titulo):
     print(f"Abriendo busqueda en YouTube: {titulo}")
 
 
+def is_read_only_filesystem_error(error):
+    if isinstance(error, OSError) and error.errno == errno.EROFS:
+        return True
+    return "read-only file system" in str(error).lower()
+
+
+def is_path_on_read_only_filesystem(path):
+    if not hasattr(os, "statvfs"):
+        return False
+    try:
+        flags = os.statvfs(path).f_flag
+    except OSError:
+        return False
+    readonly_flag = getattr(os, "ST_RDONLY", 0)
+    return bool(readonly_flag and flags & readonly_flag)
+
+
+def log_read_only_storage_error(path, action):
+    print(
+        f"No se pudo {action} {path}: el disco está en modo solo lectura. "
+        "Remóntalo en modo escritura y vuelve a intentar."
+    )
+
+
 def safe_delete_folder(folder_path, root_path):
     try:
         folder_resolved = folder_path.resolve()
@@ -2320,9 +2344,18 @@ def safe_delete_folder(folder_path, root_path):
         print(f"Se omite borrar carpeta fuera de {root_resolved}: {folder_resolved}")
         return False
 
+    if is_path_on_read_only_filesystem(folder_resolved):
+        log_read_only_storage_error(folder_resolved, "eliminar")
+        return False
+
     try:
         shutil.rmtree(folder_resolved)
         return True
+    except OSError as exc:
+        if is_read_only_filesystem_error(exc):
+            log_read_only_storage_error(folder_resolved, "eliminar")
+            return False
+        print(f"No se pudo eliminar {folder_resolved}: {exc}")
     except Exception as exc:
         print(f"No se pudo eliminar {folder_resolved}: {exc}")
     return False
@@ -2340,6 +2373,10 @@ def mover_carpeta_subida(folder_path, destino_root):
         print(f"Se omite mover carpeta fuera de {upload_root}: {folder_resolved}")
         return None
 
+    if is_path_on_read_only_filesystem(folder_resolved):
+        log_read_only_storage_error(folder_resolved, "mover")
+        return None
+
     destino_root.mkdir(parents=True, exist_ok=True)
     destino = destino_root / folder_resolved.name
     if destino.exists():
@@ -2349,6 +2386,12 @@ def mover_carpeta_subida(folder_path, destino_root):
     try:
         shutil.move(str(folder_resolved), str(destino))
         return destino
+    except OSError as exc:
+        if is_read_only_filesystem_error(exc):
+            log_read_only_storage_error(folder_resolved, "mover")
+            return None
+        print(f"No se pudo mover {folder_resolved}: {exc}")
+        return None
     except Exception as exc:
         print(f"No se pudo mover {folder_resolved}: {exc}")
         return None
@@ -2362,6 +2405,8 @@ def verificacion_manual(folder_path, repertorio):
     if normalizada.startswith(("y", "s")):
         if safe_delete_folder(folder_path, DIR_UPLOAD):
             print(f"Carpeta eliminada: {folder_path}")
+        else:
+            print(f"La carpeta sigue en disco: {folder_path}")
         return True
     if normalizada and normalizada not in {"n", "no"}:
         print("Entrada no valida, se continua con la subida.")

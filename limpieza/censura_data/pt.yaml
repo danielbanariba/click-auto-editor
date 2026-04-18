@@ -1,0 +1,125 @@
+# ============================================================================
+# Groserías en portugués (foco Brasil, también aplicable a PT-PT)
+# ============================================================================
+
+language: pt
+
+categories:
+
+  # --- Vulgaridades / insultos --------------------------------------------
+  sexual_vulgarity:
+    severity: explicit
+    words:
+      - caralho
+      - caralhos
+      - porra
+      - cacete
+      - cacetes
+      - foda
+      - foder
+      - fodeu
+      - fodendo
+      - fodido
+      - fodida
+      - fodase
+      - merda
+      - merdas
+      - puto
+      - puta
+      - putas
+      - putaria
+      - putinha
+      - putinho
+      - vadia
+      - vadias
+      - cadela      # insulto vulgar
+      - viado
+      - viadinho
+      - babaca
+      - escroto
+      - otário
+      - otaria
+
+  # --- Anatomía sexual ----------------------------------------------------
+  anatomy_explicit:
+    severity: explicit
+    words:
+      - rola
+      - rolas
+      - pinto
+      - pintos
+      - pica
+      - picas
+      - cu
+      - cus
+      - buceta
+      - bucetas
+      - boceta
+      - xoxota
+      - xota
+      - peitos
+      - peitudo
+      - peitudas
+      - bunda
+      - bundas
+      - bundão
+      - bundona
+      - cuzão
+      - cuzinho
+      - cuzudo
+
+  # --- Actos sexuales -----------------------------------------------------
+  sexual_acts:
+    severity: explicit
+    words:
+      - trepar
+      - trepada
+      - trepando
+      - transar
+      - transando
+      - chupar
+      - chupada
+      - chupando
+      - chupador
+      - gozar
+      - gozada
+      - gozando
+      - meter
+      - metida
+      - metendo   # vulgar en contexto sexual
+
+  # --- Fluidos corporales sexuales ----------------------------------------
+  bodily_sexual:
+    severity: explicit
+    words:
+      - esporra
+      - esporrada
+      - pornô
+      - pornografia
+
+  # --- Fluidos corporales ofensivos ---------------------------------------
+  bodily_waste:
+    severity: explicit
+    words:
+      - cagar
+      - cagada
+      - cagando
+      - cagão
+      - mijar
+      - mijada
+      - mijando
+      - mijão
+
+  # --- Violencia / abuso --------------------------------------------------
+  violence_abuse:
+    severity: explicit
+    words:
+      - estupro
+      - estupros
+      - estuprar
+      - estuprador
+      - estuprada
+      - estuprado
+      - pedofilia
+      - pedófilo
+      - pedofilos

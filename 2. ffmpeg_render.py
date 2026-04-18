@@ -1,10 +1,12 @@
 import os
+import errno
 import random
 import subprocess
 import csv
 import ast
 import json
 import uuid
+from dataclasses import dataclass
 import requests
 import numpy as np
 import io
@@ -123,9 +125,160 @@ CPP_SPEED_FALLBACK = 2.5
 MINIMAL_OUTPUT = True
 
 
+@dataclass
+class RenderResult:
+    success: bool
+    reason: str | None = None
+    stop_requested: bool = False
+    move_to_error: bool = True
+
+
 def log_verbose(message: str):
     if not MINIMAL_OUTPUT:
         print(message)
+
+
+def normalize_render_result(result) -> RenderResult:
+    if isinstance(result, RenderResult):
+        return result
+    return RenderResult(success=bool(result), reason=None if result else "render_failed")
+
+
+def is_read_only_filesystem_error(error) -> bool:
+    if isinstance(error, OSError) and error.errno == errno.EROFS:
+        return True
+    return "read-only file system" in str(error).lower()
+
+
+def is_no_space_error(error) -> bool:
+    if isinstance(error, OSError) and error.errno == errno.ENOSPC:
+        return True
+    return "no space left on device" in str(error).lower()
+
+
+def detect_storage_failure(stderr_text: str | None) -> str | None:
+    if not stderr_text:
+        return None
+
+    lowered = stderr_text.lower()
+    if "read-only file system" in lowered or "sistema de archivos de solo lectura" in lowered or "sistema de archivos de sólo lectura" in lowered:
+        return "read_only"
+    if "no space left on device" in lowered or "no queda espacio en el dispositivo" in lowered:
+        return "no_space"
+    return None
+
+
+def build_storage_stop_result(folder_name: str, reason: str, details: str | None = None):
+    if reason == "read_only":
+        print(
+            f"[FATAL] {folder_name}: el disco destino quedó en modo solo lectura. "
+            "Se detiene el lote."
+        )
+    elif reason == "no_space":
+        print(
+            f"[FATAL] {folder_name}: el almacenamiento temporal se quedó sin espacio. "
+            "Se detiene el lote."
+        )
+    else:
+        print(
+            f"[FATAL] {folder_name}: ocurrió un error crítico de almacenamiento. "
+            "Se detiene el lote."
+        )
+
+    if details:
+        log_verbose(f"[FATAL] Detalle: {details[-500:]}")
+
+    return RenderResult(
+        success=False,
+        reason=reason,
+        stop_requested=True,
+        move_to_error=False,
+    )
+
+
+def parse_bitrate_to_bps(value: str, default_bps: int) -> int:
+    if not value:
+        return default_bps
+
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([kKmMgG]?)\s*", value)
+    if not match:
+        return default_bps
+
+    number = float(match.group(1))
+    unit = match.group(2).lower()
+    multiplier = 1
+    if unit == "k":
+        multiplier = 1_000
+    elif unit == "m":
+        multiplier = 1_000_000
+    elif unit == "g":
+        multiplier = 1_000_000_000
+    return int(number * multiplier)
+
+
+def estimate_temp_render_bytes(total_duration: float, cpp_pipeline: bool) -> int:
+    video_bps = parse_bitrate_to_bps(VIDEO_BITRATE, 45_000_000)
+    audio_bps = parse_bitrate_to_bps(AUDIO_BITRATE, 384_000)
+    total_bps = video_bps + audio_bps
+    base_bytes = max(1, int((total_bps * max(total_duration, 1.0)) / 8))
+
+    if cpp_pipeline:
+        # En C++/CUDA coexistirán video_only + final_video durante el mux.
+        required_bytes = int(base_bytes * 2.4)
+    else:
+        required_bytes = int(base_bytes * 1.3)
+
+    return required_bytes + (512 * 1024 * 1024)
+
+
+def maybe_move_temp_folder_to_ssd(
+    temp_folder_path: Path | None,
+    folder_name: str,
+    estimated_bytes: int,
+    show_progress: bool,
+) -> Path | None:
+    if (
+        not temp_folder_path
+        or not USE_RAMDISK
+        or not RAMDISK_MOUNTED
+        or not USE_SSD_TEMP
+        or temp_folder_path.parent != RAMDISK_PATH
+    ):
+        return temp_folder_path
+
+    try:
+        free_bytes = shutil.disk_usage(RAMDISK_PATH).free
+    except Exception:
+        return temp_folder_path
+
+    reserve_bytes = 1 * 1024 * 1024 * 1024
+    if estimated_bytes <= max(0, free_bytes - reserve_bytes):
+        return temp_folder_path
+
+    SSD_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    ssd_temp_folder = SSD_TEMP_DIR / folder_name
+
+    if show_progress:
+        log_verbose(
+            "[RAM] Espacio temporal insuficiente para este render. "
+            "Cambiando a SSD para evitar fallo de mux..."
+        )
+    else:
+        log_verbose(
+            f"[RAM] {folder_name} requiere más espacio del disponible en ramdisk. "
+            "Usando SSD temporal."
+        )
+
+    if ssd_temp_folder.exists():
+        shutil.rmtree(ssd_temp_folder)
+
+    try:
+        shutil.move(str(temp_folder_path), str(ssd_temp_folder))
+    except Exception:
+        if ssd_temp_folder.exists():
+            shutil.rmtree(ssd_temp_folder, ignore_errors=True)
+        raise
+    return ssd_temp_folder
 
 
 def cleanup_temp_folder(temp_folder_path: Path | None):
@@ -706,6 +859,15 @@ def move_folder_to_error(source_folder: Path, folder_name: str, reason=None):
         else:
             print(f"[ERROR] {folder_name} movida a Error404")
         return destination
+    except OSError as exc:
+        if is_read_only_filesystem_error(exc):
+            print(
+                f"[FATAL] No se pudo mover {folder_name} a Error404: "
+                "el disco está en modo solo lectura."
+            )
+            raise
+        print(f"[ERROR] No se pudo mover {folder_name} a Error404: {exc}")
+        return None
     except Exception as exc:
         print(f"[ERROR] No se pudo mover {folder_name} a Error404: {exc}")
         return None
@@ -2215,6 +2377,9 @@ def render_video_with_cpp(
         audio_cmd, False, 0, folder_name, start_time
     )
     if not audio_success:
+        storage_reason = detect_storage_failure(audio_stderr)
+        if storage_reason:
+            return fail_cpp(storage_reason)
         print(f"\n[ERROR] FFmpeg falló generando audio en {folder_name}")
         log_verbose(f"STDERR: {audio_stderr[-500:]}")
         return fail_cpp("audio")
@@ -2287,6 +2452,9 @@ def render_video_with_cpp(
                 cpp_stderr = retry_stderr
                 cpp_returncode = retry_code
         else:
+            storage_reason = detect_storage_failure(cpp_stderr)
+            if storage_reason:
+                return fail_cpp(storage_reason)
             return fail_cpp("cpp")
 
     if cpp_returncode != 0 and is_cuda_failure(cpp_stderr):
@@ -2366,6 +2534,9 @@ def render_video_with_cpp(
         else:
             if not show_progress and retry_stderr:
                 log_verbose(f"STDERR: {retry_stderr[-500:]}")
+            storage_reason = detect_storage_failure(retry_stderr)
+            if storage_reason:
+                return fail_cpp(storage_reason)
             return fail_cpp("cuda")
 
     if show_progress:
@@ -2398,6 +2569,9 @@ def render_video_with_cpp(
         mux_cmd, False, 0, folder_name, start_time
     )
     if not mux_success:
+        storage_reason = detect_storage_failure(mux_stderr)
+        if storage_reason:
+            return fail_cpp(storage_reason)
         print(f"[ERROR] Mux de audio falló en {folder_name}")
         log_verbose(f"STDERR: {mux_stderr[-500:]}")
         return fail_cpp("mux")
@@ -2506,6 +2680,31 @@ def render_video(folder_path, folder_name, show_progress=False):
         # Ordenar audios por nombre (01. xxx, 02. xxx, etc.)
         audio_files.sort(key=lambda x: x.name.lower())
 
+        if audio_files:
+            audio_duration = sum(get_audio_duration(af) for af in audio_files)
+            total_duration = INTRO_DURATION + audio_duration
+        else:
+            audio_duration = 0
+            total_duration = 0
+
+        if temp_folder_path:
+            estimated_temp_bytes = estimate_temp_render_bytes(
+                total_duration=total_duration,
+                cpp_pipeline=USE_CPP_VHS,
+            )
+            relocated_temp_folder = maybe_move_temp_folder_to_ssd(
+                temp_folder_path=temp_folder_path,
+                folder_name=folder_name,
+                estimated_bytes=estimated_temp_bytes,
+                show_progress=show_progress,
+            )
+            if relocated_temp_folder and relocated_temp_folder != temp_folder_path:
+                temp_folder_path = relocated_temp_folder
+                folder_path = relocated_temp_folder
+                audio_files = [folder_path / audio_file.name for audio_file in audio_files]
+                if cover_file:
+                    cover_file = folder_path / cover_file.name
+
         if cover_file and not is_valid_image(cover_file):
             log_verbose(
                 f"[COVER] Portada dañada: {cover_file.name}, intentando otra..."
@@ -2537,7 +2736,7 @@ def render_video(folder_path, folder_name, show_progress=False):
 
         if not audio_files or not cover_file:
             cleanup_temp_folder(temp_folder_path)
-            return False
+            return RenderResult(success=False, reason="missing_inputs")
 
         if show_progress and len(audio_files) > 1:
             log_verbose(
@@ -2590,10 +2789,6 @@ def render_video(folder_path, folder_name, show_progress=False):
                     height=VIDEO_HEIGHT,
                 )
 
-        # Obtener duración total de todos los audios (para la barra de progreso)
-        audio_duration = sum(get_audio_duration(af) for af in audio_files)
-        total_duration = INTRO_DURATION + audio_duration  # Duración total del video
-
         output_audio_bitrate = pick_output_audio_bitrate(audio_files)
 
         if show_progress:
@@ -2629,14 +2824,16 @@ def render_video(folder_path, folder_name, show_progress=False):
                     use_gpu=use_gpu,
                 )
                 if cpp_success:
-                    return True
+                    return RenderResult(success=True)
+                if cpp_error in {"read_only", "no_space"}:
+                    return build_storage_stop_result(folder_name, cpp_error)
                 if cpp_error == "cuda" and DISABLE_CPP_ON_CUDA:
                     try:
                         CUDA_ERROR_FLAG.touch()
                     except Exception:
                         pass
                 if cpp_error != "cuda" or not ALLOW_FFMPEG_FALLBACK:
-                    return False
+                    return RenderResult(success=False, reason=cpp_error or "cpp")
                 if show_progress:
                     log_verbose(
                         "[FALLBACK] CUDA falló, usando FFmpeg para este álbum..."
@@ -2959,13 +3156,18 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                     f"\n[ÉXITO] {folder_name} renderizado en {format_time(elapsed)}"
                 )
                 log_verbose(f"[UPLOAD] Carpeta movida a: {destination_folder}")
-                return True
+                return RenderResult(success=True)
             else:
                 # Limpiar temporales en caso de error
                 cleanup_temp_folder(temp_folder_path)
+                storage_reason = detect_storage_failure(stderr_output)
+                if storage_reason:
+                    return build_storage_stop_result(
+                        folder_name, storage_reason, stderr_output
+                    )
                 print(f"\n[ERROR] FFmpeg falló en {folder_name}")
                 log_verbose(f"STDERR: {stderr_output[-500:]}")
-                return False
+                return RenderResult(success=False, reason="ffmpeg")
         else:
             # Modo sin progreso (para renderizado paralelo)
             result = subprocess.run(
@@ -2991,19 +3193,32 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                 )
                 log_verbose(f"[ÉXITO] {folder_name} renderizado en {elapsed:.1f}s")
                 log_verbose(f"[UPLOAD] Carpeta movida a: {destination_folder}")
-                return True
+                return RenderResult(success=True)
             else:
                 # Limpiar temporales en caso de error
                 cleanup_temp_folder(temp_folder_path)
+                storage_reason = detect_storage_failure(result.stderr)
+                if storage_reason:
+                    return build_storage_stop_result(
+                        folder_name, storage_reason, result.stderr
+                    )
                 print(f"[ERROR] FFmpeg falló en {folder_name}")
                 log_verbose(f"STDERR: {result.stderr[-500:]}")
-                return False
+                return RenderResult(success=False, reason="ffmpeg")
 
-    except Exception as e:
+    except OSError as e:
         # Limpiar temporales en caso de excepción
         cleanup_temp_folder(temp_folder_path)
+        if is_read_only_filesystem_error(e):
+            return build_storage_stop_result(folder_name, "read_only", str(e))
+        if is_no_space_error(e):
+            return build_storage_stop_result(folder_name, "no_space", str(e))
         print(f"[EXCEPCIÓN] Error procesando {folder_name}: {e}")
-        return False
+        return RenderResult(success=False, reason="os_error")
+    except Exception as e:
+        cleanup_temp_folder(temp_folder_path)
+        print(f"[EXCEPCIÓN] Error procesando {folder_name}: {e}")
+        return RenderResult(success=False, reason="exception")
 
 
 def process_folders_parallel(folders_override=None, staging_ctx=None):
@@ -3047,6 +3262,7 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
     successful = 0
     failed = 0
     stopped_by_space = False
+    stopped_by_storage = False
     processed = 0
 
     executor = ProcessPoolExecutor(max_workers=MAX_PARALLEL_RENDERS)
@@ -3087,16 +3303,43 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
                 folder_path, folder_name = pending_futures.pop(future)
                 processed += 1
                 try:
-                    success = future.result()
-                    if success:
+                    result = normalize_render_result(future.result())
+                    if result.success:
                         successful += 1
                     else:
                         failed += 1
-                        move_folder_to_error(folder_path, folder_name)
+                        if result.move_to_error:
+                            try:
+                                move_folder_to_error(
+                                    folder_path, folder_name, result.reason
+                                )
+                            except OSError as exc:
+                                if is_read_only_filesystem_error(exc):
+                                    stopped_by_storage = True
+                                    break
+                                raise
+                        if result.stop_requested:
+                            stopped_by_storage = True
+                            break
                 except Exception as e:
                     print(f"[EXCEPCIÓN] Error en {folder_name}: {e}")
                     failed += 1
-                    move_folder_to_error(folder_path, folder_name)
+                    try:
+                        move_folder_to_error(folder_path, folder_name)
+                    except OSError as exc:
+                        if is_read_only_filesystem_error(exc):
+                            stopped_by_storage = True
+                            break
+                        raise
+
+            if stopped_by_storage:
+                print(
+                    "\n[ALMACENAMIENTO] Se detectó un error crítico de escritura. "
+                    "Deteniendo el renderizado."
+                )
+                for future in pending_futures:
+                    future.cancel()
+                break
 
             # Verificar espacio antes de lanzar más trabajos
             if not has_enough_disk_space():
@@ -3157,6 +3400,8 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
     log_verbose(f"\n{'=' * 60}")
     if stopped_by_space:
         log_verbose("RENDERIZADO DETENIDO POR ESPACIO EN DISCO")
+    elif stopped_by_storage:
+        log_verbose("RENDERIZADO DETENIDO POR ERROR DE ALMACENAMIENTO")
     else:
         log_verbose("RENDERIZADO COMPLETADO")
     log_verbose(
@@ -3210,6 +3455,7 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
     total_start_time = time.time()
     cancelled = False
     stopped_by_space = False
+    stopped_by_storage = False
     processed = 0
 
     try:
@@ -3227,14 +3473,32 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
                 break
 
             print(f"\n[INICIO] ({i}/{total}) Procesando: {folder_name}")
-            success = render_video(folder_path, folder_name, show_progress=True)
+            result = normalize_render_result(
+                render_video(folder_path, folder_name, show_progress=True)
+            )
             processed += 1
 
-            if success:
+            if result.success:
                 successful += 1
             else:
                 failed += 1
-                move_folder_to_error(folder_path, folder_name)
+                if result.move_to_error:
+                    try:
+                        move_folder_to_error(folder_path, folder_name, result.reason)
+                    except OSError as exc:
+                        if is_read_only_filesystem_error(exc):
+                            stopped_by_storage = True
+                        else:
+                            raise
+                if result.stop_requested:
+                    stopped_by_storage = True
+
+                if stopped_by_storage:
+                    print(
+                        "\n[ALMACENAMIENTO] Se detectó un error crítico de escritura. "
+                        "Deteniendo el renderizado."
+                    )
+                    break
 
             # Mostrar estadísticas parciales con espacio libre
             free_gb = get_free_space_gb(DIR_UPLOAD)
@@ -3260,6 +3524,8 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
     print(f"\n{'=' * 60}")
     if stopped_by_space:
         print("RENDERIZADO DETENIDO POR ESPACIO EN DISCO")
+    elif stopped_by_storage:
+        print("RENDERIZADO DETENIDO POR ERROR DE ALMACENAMIENTO")
     else:
         print("RENDERIZADO COMPLETADO")
     print(f"Procesados: {processed} | Exitosos: {successful} | Fallidos: {failed}")
@@ -3299,17 +3565,24 @@ def render_single_video(specific_folder=None):
     print(f"{'=' * 60}")
 
     # Renderizar con barra de progreso
-    success = render_video(folder_path, folder_name, show_progress=True)
+    result = normalize_render_result(
+        render_video(folder_path, folder_name, show_progress=True)
+    )
 
     print(f"\n{'=' * 60}")
-    if success:
+    if result.success:
         print(f"PRUEBA COMPLETADA EXITOSAMENTE")
         log_verbose(
             f"Carpeta final: {DIR_UPLOAD} (revisa [UPLOAD] para el nombre final)"
         )
     else:
         print(f"PRUEBA FALLIDA")
-        move_folder_to_error(folder_path, folder_name)
+        if result.move_to_error:
+            try:
+                move_folder_to_error(folder_path, folder_name, result.reason)
+            except OSError as exc:
+                if not is_read_only_filesystem_error(exc):
+                    raise
     print(f"{'=' * 60}\n")
 
 

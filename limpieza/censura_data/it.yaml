@@ -1,0 +1,107 @@
+# ============================================================================
+# Groserías en italiano
+# ============================================================================
+
+language: it
+
+categories:
+
+  # --- Vulgaridades / insultos --------------------------------------------
+  sexual_vulgarity:
+    severity: explicit
+    words:
+      - cazzo
+      - cazzi
+      - cazzata
+      - cazzate
+      - merda
+      - merde
+      - stronzo
+      - stronza
+      - stronzi
+      - stronze
+      - troia
+      - troie
+      - puttana
+      - puttane
+      - puttaniere
+      - fottere
+      - fottuto
+      - fottuta
+      - fottuti
+      - fottute
+      - fanculo
+      - vaffanculo
+      - porca
+      - porco       # vulgar en ciertos usos (porco dio, etc.)
+      - bastardo
+      - bastarda
+      - coglione
+      - coglioni
+      - imbecille
+
+  # --- Anatomía sexual ----------------------------------------------------
+  anatomy_explicit:
+    severity: explicit
+    words:
+      - culo
+      - culi
+      - fica
+      - figa
+      - fiche
+      - pisello
+      - piselli
+      - tette
+      - tetta
+      - uccello   # vulgar en argot
+      - minchia
+      - minchie
+
+  # --- Actos sexuales -----------------------------------------------------
+  sexual_acts:
+    severity: explicit
+    words:
+      - scopare
+      - scopata
+      - scopando
+      - scopato
+      - succhiare
+      - succhiata
+      - succhiando
+      - chiavare
+      - chiavata
+      - pompino
+      - pompini
+
+  # --- Fluidos corporales sexuales ----------------------------------------
+  bodily_sexual:
+    severity: explicit
+    words:
+      - sborra
+      - sborrare
+      - sborrata
+      - porno
+      - pornografia
+
+  # --- Fluidos corporales ofensivos ---------------------------------------
+  bodily_waste:
+    severity: explicit
+    words:
+      - cacare
+      - cagare
+      - cagata
+      - cagate
+      - pisciare
+      - piscio
+
+  # --- Violencia / abuso --------------------------------------------------
+  violence_abuse:
+    severity: explicit
+    words:
+      - stupro
+      - stuprare
+      - stuprato
+      - stuprata
+      - stupratore
+      - pedofilia
+      - pedofilo
