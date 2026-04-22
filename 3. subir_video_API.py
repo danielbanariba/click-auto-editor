@@ -14,7 +14,7 @@ import sys
 import time
 import unicodedata
 import webbrowser
-from urllib.parse import quote, unquote
+from urllib.parse import parse_qs, quote, unquote, urlparse
 import uuid
 from datetime import datetime, timedelta, time as dtime, timezone
 from pathlib import Path
@@ -345,6 +345,8 @@ def api_get(session, endpoint, params=None, max_retries=MAX_RETRIES_ERROR):
                 print(f"Rate limit DeathGrind, esperando {wait_time}s...")
                 time.sleep(wait_time)
                 continue
+            if response.status_code == 404:
+                return None
             if response.status_code != 200:
                 retries_error += 1
                 if retries_error >= max_retries:
@@ -511,6 +513,65 @@ def normalize_lookup_text(value):
     return re.sub(r"\s+", " ", "".join(normalized_chars)).strip()
 
 
+COUNTRY_FALLBACKS = {
+    "russia": ("Russia", "RU"),
+    "russian federation": ("Russia", "RU"),
+    "ru": ("Russia", "RU"),
+    "united states": ("United States", "US"),
+    "united states of america": ("United States", "US"),
+    "usa": ("United States", "US"),
+    "us": ("United States", "US"),
+    "united kingdom": ("United Kingdom", "GB"),
+    "uk": ("United Kingdom", "GB"),
+    "great britain": ("United Kingdom", "GB"),
+    "england": ("United Kingdom", "GB"),
+    "germany": ("Germany", "DE"),
+    "de": ("Germany", "DE"),
+    "france": ("France", "FR"),
+    "fr": ("France", "FR"),
+    "spain": ("Spain", "ES"),
+    "es": ("Spain", "ES"),
+    "italy": ("Italy", "IT"),
+    "it": ("Italy", "IT"),
+    "japan": ("Japan", "JP"),
+    "jp": ("Japan", "JP"),
+    "china": ("China", "CN"),
+    "cn": ("China", "CN"),
+    "canada": ("Canada", "CA"),
+    "ca": ("Canada", "CA"),
+    "brazil": ("Brazil", "BR"),
+    "br": ("Brazil", "BR"),
+    "mexico": ("Mexico", "MX"),
+    "mx": ("Mexico", "MX"),
+    "argentina": ("Argentina", "AR"),
+    "ar": ("Argentina", "AR"),
+    "chile": ("Chile", "CL"),
+    "cl": ("Chile", "CL"),
+    "colombia": ("Colombia", "CO"),
+    "co": ("Colombia", "CO"),
+    "peru": ("Peru", "PE"),
+    "pe": ("Peru", "PE"),
+    "finland": ("Finland", "FI"),
+    "fi": ("Finland", "FI"),
+    "sweden": ("Sweden", "SE"),
+    "se": ("Sweden", "SE"),
+    "norway": ("Norway", "NO"),
+    "no": ("Norway", "NO"),
+    "denmark": ("Denmark", "DK"),
+    "dk": ("Denmark", "DK"),
+    "poland": ("Poland", "PL"),
+    "pl": ("Poland", "PL"),
+    "ukraine": ("Ukraine", "UA"),
+    "ua": ("Ukraine", "UA"),
+}
+
+
+def lookup_country_fallback(value):
+    if not value:
+        return None
+    return COUNTRY_FALLBACKS.get(normalize_lookup_text(value))
+
+
 def tokenize_lookup_text(value):
     text = normalize_lookup_text(value)
     if not text:
@@ -547,7 +608,10 @@ def resolve_country_meta(country_name):
         }
 
     text = str(country_name).strip()
-    if len(text) == 2 and text.isalpha():
+    fallback = lookup_country_fallback(text)
+    if fallback:
+        normalized_name, code = fallback
+    elif len(text) == 2 and text.isalpha():
         code = text.upper()
     else:
         try:
@@ -601,33 +665,62 @@ def find_best_playlist_link(playlist_cache, query_texts, required_texts=None):
     if not playlist_cache:
         return None
 
+    normalized_queries = []
     query_tokens = []
     for query in query_texts or []:
-        query_tokens.extend(tokenize_lookup_text(query))
+        query_key = normalize_lookup_text(query)
+        if not query_key:
+            continue
+        normalized_queries.append(query_key)
+        query_tokens.extend(tokenize_lookup_text(query_key))
     if not query_tokens:
         return None
+    query_token_set = set(query_tokens)
     required_tokens = []
     for text in required_texts or []:
         required_tokens.extend(tokenize_lookup_text(text))
 
+    # 1) Preferir match exacto por titulo normalizado en el orden recibido.
+    for query_key in normalized_queries:
+        for item in playlist_cache:
+            title_key = item.get("title_key") or ""
+            if not title_key or title_key != query_key:
+                continue
+            if required_tokens and not all(token in title_key for token in required_tokens):
+                continue
+            return item
+
+    # 2) Si no existe exacto, usar scoring que favorezca el titulo mas especifico.
     best_item = None
-    best_score = -1
+    best_score = None
     for item in playlist_cache:
         title_key = item.get("title_key") or ""
         if not title_key:
             continue
         if required_tokens and not all(token in title_key for token in required_tokens):
             continue
-        score = 0
-        for token in query_tokens:
-            if token in title_key:
-                score += 3
-        for token in required_tokens:
-            if token in title_key:
-                score += 5
-        if title_key == normalize_lookup_text(" ".join(query_texts or [])):
-            score += 10
-        if score > best_score:
+
+        item_tokens = set(tokenize_lookup_text(title_key))
+        overlap = len(query_token_set & item_tokens)
+        if overlap <= 0:
+            continue
+
+        required_overlap = len(set(required_tokens) & item_tokens)
+        extra_tokens = len(item_tokens - query_token_set - set(required_tokens))
+        exact_token_set = item_tokens == query_token_set
+        contains_all_query_tokens = query_token_set.issubset(item_tokens)
+
+        score = (
+            overlap * 10,
+            required_overlap * 5,
+            1 if exact_token_set else 0,
+            1 if contains_all_query_tokens else 0,
+            -extra_tokens,
+            -len(item_tokens),
+            -(len(title_key)),
+        )
+
+        if best_score is None or score > best_score:
             best_score = score
             best_item = item
     return best_item
@@ -962,6 +1055,10 @@ def normalizar_pais(pais):
         lookup_candidates.insert(0, inferred_from_location)
 
     for candidate in lookup_candidates:
+        fallback = lookup_country_fallback(candidate)
+        if fallback:
+            text, code = fallback
+            break
         if len(candidate) == 2 and candidate.isalpha():
             code = candidate.upper()
             break
@@ -1152,7 +1249,7 @@ def buscar_release_en_api(
     query = f"{band_name} {album_search}".strip()
     max_pages = deathgrind_search_page_limit()
     page_count = 0
-    data = api_get(session, "/posts/filter", params={"search": query})
+    data = api_get(session, "/posts/search", params={"q": query})
     if data:
         page_count += 1
         posts = data.get("posts", [])
@@ -1169,7 +1266,7 @@ def buscar_release_en_api(
                 break
             seen_offsets.add(offset)
             data = api_get(
-                session, "/posts/filter", params={"search": query, "offset": offset}
+                session, "/posts/search", params={"q": query, "offset": offset}
             )
             if not data:
                 break
@@ -1237,7 +1334,7 @@ def esperar_release_en_api(
 
         # Si la API responde pero no hay match, no esperar en bucle.
         health_query = f"{band_name} {album_name}".strip()
-        health = api_get(session, "/posts/filter", params={"search": health_query})
+        health = api_get(session, "/posts/search", params={"q": health_query})
         if health is not None:
             print(
                 f"Release no encontrado en API para {band_name} - {album_name}. "
@@ -1520,10 +1617,9 @@ def ensure_description_limit(full_description):
 
     trimmed = full_description
     steps = [
-        ("💼 LABELS: Promotional Packages Available", "Eliminar bloque LABELS"),
-        ("🎸 BANDS: Submit Your Album (FREE)", "Eliminar bloque BANDS"),
-        ("╔════════════════════════════════════════════╗", "Eliminar bloque SUBSCRIBE"),
-        ("🔥 MORE SLAM", "Eliminar bloque MORE SLAM"),
+        ("🎸 BANDS / 💼 LABELS", "Eliminar bloque BANDS/LABELS"),
+        ("💀 SUPPORT THE CHANNEL", "Eliminar bloque SUPPORT"),
+        ("🔥 MORE ", "Eliminar bloque MORE"),
         ("🔗 FOLLOW", "Eliminar bloque FOLLOW"),
         ("🎧 STREAM & DOWNLOAD", "Eliminar bloque STREAM"),
     ]
@@ -2035,6 +2131,8 @@ def resolve_schedule_scan_limit(max_per_day, max_days):
 def prompt_confirm_schedule_date(schedule_date, latest_slot):
     if not sys.stdin.isatty():
         return schedule_date, False
+    tz_local = datetime.now().astimezone().tzinfo
+    min_date = (datetime.now(tz_local) + timedelta(days=1)).date()
     if latest_slot:
         print(f"Ultima programacion detectada: {format_local_datetime(latest_slot)}")
     else:
@@ -2054,6 +2152,14 @@ def prompt_confirm_schedule_date(schedule_date, latest_slot):
                 return schedule_date, False
         date_override = parse_user_date(resp)
         if date_override:
+            if date_override < min_date:
+                print(
+                    "La fecha indicada no es valida para programar. "
+                    f"Hoy es {min_date - timedelta(days=1):%Y-%m-%d} y la fecha minima segura es "
+                    f"{min_date.isoformat()}. "
+                    "Si envias una fecha/hora pasada, YouTube puede publicarlo de inmediato."
+                )
+                continue
             return date_override, True
         print("Formato invalido. Usa YYYY-MM-DD (ej: 2026-01-31).")
 
@@ -2116,6 +2222,11 @@ def clean_url(url):
         if "/album/" in url or "/artist/" in url:
             return url.split("?")[0].split("#")[0]
     if "youtube.com" in url:
+        parsed = urlparse(url)
+        if parsed.path == "/playlist":
+            playlist_id = parse_qs(parsed.query).get("list", [None])[0]
+            if playlist_id:
+                return f"https://www.youtube.com/playlist?list={playlist_id}"
         if "watch?v=" in url:
             video_id = url.split("watch?v=")[1].split("&")[0]
             return f"https://www.youtube.com/watch?v={video_id}"
@@ -2192,10 +2303,6 @@ def extraer_links_band_api(session, band_id, band_data=None):
         data = api_get(session, f"/bands/{band_id}")
         if data:
             links = merge_links(links, extraer_links_desde_data(data))
-
-    data = api_get(session, f"/bands/{band_id}/links")
-    if data:
-        links = merge_links(links, extraer_links_desde_data(data))
 
     tiene_links = any(links["stream"].values()) or any(links["follow"].values())
     if not tiene_links:
@@ -2429,6 +2536,7 @@ def format_tracklist_for_description(tracklist):
 
 
 def construir_descripcion(
+    video_title,
     band,
     genre,
     year,
@@ -2442,6 +2550,7 @@ def construir_descripcion(
     genre_display = format_genre_text(genre)
     country_display = country_name or ""
     year_display = str(year) if year else ""
+    summary_tipo = tipo_full or "Full Album"
     tipo_display = (tipo_full or "Full Album").upper()
 
     genre_parts = split_genres(genre_display)
@@ -2464,7 +2573,7 @@ def construir_descripcion(
         country_display or None,
         year_display or None,
         tipo_display,
-    )
+    )[:6]
 
     tracklist_lines = format_tracklist_for_description(tracklist)
 
@@ -2481,6 +2590,7 @@ def construir_descripcion(
         if value:
             follow_lines.append(f"{icon} {label}: {value}")
 
+    support_band_line = None
     stream_lines = []
     stream_map = [
         ("🟢", "Spotify", "spotify", False),
@@ -2495,8 +2605,13 @@ def construir_descripcion(
             continue
         line = f"{icon} {label}: {value}"
         if support_band:
-            line += " ← SUPPORT THE BAND!"
+            support_band_line = value
+            continue
         stream_lines.append(line)
+
+    more_label = "EXTREME METAL"
+    if genre_parts:
+        more_label = " / ".join(part.upper() for part in genre_parts[:2])
 
     more_slam_lines = ["▸ Browse 1000+ albums: https://danielbanariba.com/metal-archive"]
     used_playlist_urls = set()
@@ -2519,15 +2634,22 @@ def construir_descripcion(
     if regional_playlist_url and regional_playlist_url not in used_playlist_urls:
         more_slam_lines.append(f"▸ {regional_playlist_title}: {regional_playlist_url}")
 
-    lines = [
-        divider,
-        f"🔗 FOLLOW {band.upper()}",
-        divider,
-    ]
-    if follow_lines:
-        lines.extend(["", *follow_lines, ""])
-    else:
-        lines.append("")
+    summary_parts = [summary_tipo]
+    if genre_display:
+        summary_parts.append(genre_display)
+    if country_display:
+        country_summary = country_display
+        if country_flag:
+            country_summary += f" {country_flag}"
+        summary_parts.append(country_summary)
+
+    lines = []
+    if video_title:
+        lines.append(video_title)
+    if summary_parts:
+        lines.append(" • ".join(summary_parts))
+    if support_band_line:
+        lines.extend(["", "🔵 Support the band on Bandcamp:", support_band_line, ""])
 
     if stream_lines:
         lines.extend(
@@ -2537,6 +2659,18 @@ def construir_descripcion(
                 divider,
                 "",
                 *stream_lines,
+                "",
+            ]
+        )
+
+    if follow_lines:
+        lines.extend(
+            [
+                divider,
+                f"🔗 FOLLOW {band.upper()}",
+                divider,
+                "",
+                *follow_lines,
                 "",
             ]
         )
@@ -2571,33 +2705,29 @@ def construir_descripcion(
         [
             "",
             divider,
-            "🔥 MORE SLAM",
+            f"🔥 MORE {more_label}",
             divider,
             "",
             *more_slam_lines,
             "",
-            "╔════════════════════════╗",
-            "║       💀 SUBSCRIBE FOR MORE 💀        ║",
-            "╚════════════════════════╝",
+            divider,
+            "💀 SUPPORT THE CHANNEL",
+            divider,
             "",
             "🔔 Daily underground extreme metal uploads",
-            "👍 LIKE if this crushes your skull",
-            "💬 COMMENT your favorite track",
-            "🔄 SHARE with metalheads",
+            "👍 Like, comment and subscribe",
+            "💬 Comment your favorite track",
+            "🔄 Share with metalheads",
             "",
             divider,
-            "🎸 BANDS: Submit Your Album (FREE)",
+            "🎸 BANDS / 💼 LABELS",
             divider,
             "",
-            "Get featured on our channel (13,000+ monthly listeners)",
-            "→ https://danielbanariba.com/metal-archive/submit",
+            "Submit your album:",
+            "https://danielbanariba.com/metal-archive/submit",
             "",
-            divider,
-            "💼 LABELS: Promotional Packages Available",
-            divider,
-            "",
-            "Reach highly engaged extreme metal audience",
-            "→ https://danielbanariba.com/metal-archive/promo",
+            "Promo:",
+            "https://danielbanariba.com/metal-archive/promo",
             "",
             divider,
             "",
@@ -2780,6 +2910,7 @@ def procesar_carpeta(
         band = context["band"]
     if context["album"]:
         album = context["album"]
+    album = strip_album_suffix(album)
 
     csv_path = get_repertorio_csv_path()
 
@@ -2915,6 +3046,7 @@ def procesar_carpeta(
     safe_tracklist = [censor_profanity(line) for line in tracklist]
     playlist_cache = load_playlist_links_cache()
     description = construir_descripcion(
+        video_title=title,
         band=band,
         genre=genre_text,
         year=release_year,

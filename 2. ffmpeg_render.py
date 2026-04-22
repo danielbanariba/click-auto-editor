@@ -1216,6 +1216,8 @@ def api_get(session, endpoint, params=None, max_retries=5):
                 )
                 time.sleep(wait_time)
                 continue
+            if response.status_code == 404:
+                return None
             if response.status_code != 200:
                 retries_error += 1
                 if retries_error >= max_retries:
@@ -1316,7 +1318,7 @@ def match_post(post, band_name, album_name):
 def buscar_post_id_en_api(session, band_name, album_name):
     album_search = strip_album_suffix(album_name or "")
     query = f"{band_name} {album_search}".strip()
-    data = api_get(session, "/posts/filter", params={"search": query})
+    data = api_get(session, "/posts/search", params={"q": query})
     if not data:
         return None
     posts = data.get("posts", [])
@@ -1327,7 +1329,7 @@ def buscar_post_id_en_api(session, band_name, album_name):
     offset = data.get("offset")
     while data.get("hasMore") and offset is not None:
         data = api_get(
-            session, "/posts/filter", params={"search": query, "offset": offset}
+            session, "/posts/search", params={"q": query, "offset": offset}
         )
         if not data:
             break

@@ -86,9 +86,21 @@ python "13. filtrar_portadas.py" --politica cadaver-real --backend ollama --limi
 python "13. filtrar_portadas.py" --politica nsfw --auto-descargar --umbral 0.35
 
 python "10. inpunar_video.py" --aprender
+python "10. inpunar_video.py" --auto-detect --max 5
+python "10. inpunar_video.py" --auto-detect --solo-detectar
 python "11. apelacion.py"
+python "11. apelacion.py" --auto-detect --max 5
 python "12. mapear_playlists.py" --limite 200
 ```
+
+## Reclamos automáticos en Studio
+- `10. inpunar_video.py --auto-detect`: abre `Contenido`, escanea la tabla y detecta filas con `Derechos de autor`.
+- Guarda una cola JSON en `data/impugnar_claims_queue.json` o `data/apelacion_claims_queue.json`.
+- Guarda checkpoint en `data/impugnar_claims_checkpoint.txt` o `data/apelacion_claims_checkpoint.txt` para no repetir videos ya procesados.
+- Si el perfil interno no tiene sesion, intenta reutilizar cookies activas de Brave/Chromium automaticamente.
+- `--solo-detectar`: solo escanea y arma la cola para revision manual.
+- `--max-scan`: limita cuantos videos con reclamo detectar en el escaneo.
+- `--max`: limita cuantos videos procesar en esa corrida.
 
 ## Credenciales y entorno
 - YouTube: `client_secrets.json` (o `YOUTUBE_CLIENT_SECRETS`) + `token.json`.
