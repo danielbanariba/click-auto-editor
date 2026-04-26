@@ -14,3 +14,7 @@ content/vhs_noise.mp4
 .env
 
 .playwright_profile
+
+.runtime_browser_profiles
+
+data/impugnar_evidencia/

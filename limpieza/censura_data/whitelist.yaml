@@ -103,6 +103,9 @@ metal_bands_and_themes:
   - morbid        # Morbid Angel
   - dying         # Dying Fetus
   - fetus         # Dying Fetus
+  - infest        # Infest (Serbia, Death/Thrash)
+  - infested      # temática metal válida (Malevolent Creation, etc.)
+  - infestation   # temática metal válida
 
   # Temática letal (común en death metal, no se censura)
   - kill

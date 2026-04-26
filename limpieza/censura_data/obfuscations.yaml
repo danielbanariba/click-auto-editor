@@ -30,17 +30,15 @@ obfuscations:
   bch: bitch
   btc: bitch
 
-  # dick
-  dk: dick
-  dc: dick
+  # dick — entradas de 2 chars removidas (dk, dc) por falsos positivos
+  # (DC Comics, AC/DC, Donkey Kong, etc.)
 
-  # cock
-  ck: cock
-  cc: cock
+  # cock — entradas de 2 chars removidas (ck, cc) por falsos positivos
+  # (Calvin Klein, CC'd, copia carbónica, etc.)
 
   # pussy
   psy: pussy
-  ps: pussy
+  # ps removido: PlayStation, postdata, Photoshop
 
   # cunt
   ct: cunt

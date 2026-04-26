@@ -20,12 +20,16 @@ _WORD_PATTERN = re.compile(
     re.UNICODE,
 )
 
-# Detecta palabras obfuscadas con separadores tipo "f-u-c-k", "s.h.i.t", "b_i_t_c_h".
-# Requiere al menos 3 letras separadas por [-._] para evitar falsos positivos con
-# abreviaciones cortas ("A.I.", "U.S."). Todas las letras individuales de 1 char.
+# Detecta palabras obfuscadas con separadores tipo "f-u-c-k", "s.h.i.t",
+# "b_i_t_c_h", y también casos con segmentos multi-letra como "fu.ck" o
+# "di.ck". El pattern captura cualquier secuencia de letras con 1+ separador
+# entre segmentos; la verificación real se hace en should_censor(joined),
+# así que si el resultado colapsado no está en blacklist no hay censura.
+# Se excluyen casos triviales de 1 separador con segmentos de 1 letra
+# (para no matchear "A.I." o "U.S.") exigiendo longitud total >= 4.
 _SPLIT_WORD_PATTERN = re.compile(
     r"(?<![A-Za-z0-9])"
-    r"[A-Za-z](?:[-._][A-Za-z]){2,}"
+    r"[A-Za-z]+(?:[-._][A-Za-z]+)+"
     r"(?![A-Za-z0-9])",
     re.UNICODE,
 )
