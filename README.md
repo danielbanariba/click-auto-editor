@@ -101,6 +101,34 @@ python "12. mapear_playlists.py" --limite 200
 - `--solo-detectar`: solo escanea y arma la cola para revision manual.
 - `--max-scan`: limita cuantos videos con reclamo detectar en el escaneo.
 - `--max`: limita cuantos videos procesar en esa corrida.
+- `--reintentos-modal`: reintenta abrir el modal por video cuando Studio responde lento o queda estado residual en corridas largas.
+
+## MCP de navegador (para que cualquier IA lo controle)
+- Archivo: `mcp_browser_server.py`
+- Objetivo: exponer herramientas MCP para que un agente (Codex/Claude/Desktop, etc.) pueda abrir navegador real, inspeccionar UI y hacer clicks/typing.
+- Transporte por defecto: `stdio`.
+
+### Ejecutar el servidor MCP
+```sh
+./env/bin/python mcp_browser_server.py
+```
+
+### Herramientas MCP incluidas
+- Navegador general:
+  - `browser_start`, `browser_stop`, `browser_status`
+  - `browser_goto`, `browser_click`, `browser_type`, `browser_press`
+  - `browser_snapshot`, `browser_screenshot`, `browser_eval_js`
+- Helpers YouTube Studio:
+  - `youtube_ensure_content`
+  - `youtube_scan_claims`
+  - `youtube_open_claim_modal`
+  - `youtube_close_claim_modal`
+  - `youtube_dismiss_overlays`
+
+### Notas
+- Reutiliza perfil con sesión activa (Brave/Chromium) y cookies Google para entrar a Studio.
+- Clona a un runtime profile temporal para evitar bloquear tu perfil principal.
+- Para acciones sensibles (impugnaciones), recomienda validar estado visual + logs de respuesta.
 
 ## Credenciales y entorno
 - YouTube: `client_secrets.json` (o `YOUTUBE_CLIENT_SECRETS`) + `token.json`.
