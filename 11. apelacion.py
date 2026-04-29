@@ -10,7 +10,25 @@ from pathlib import Path
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
+from browser_profiles import (
+    describe_profile_source,
+    discover_signed_in_profile,
+    load_google_cookies_for_playwright,
+    prepare_runtime_profile,
+)
 from config import PLAYWRIGHT_PROFILE_DIR, PLAYWRIGHT_SELECTORS_DIR
+from studio_claims import (
+    claim_dialog_is_open,
+    claim_item_key,
+    dismiss_claim_dialog,
+    ensure_content_list,
+    load_checkpoint,
+    open_claim_modal_with_recovery,
+    reset_content_scroll,
+    save_queue,
+    scan_claim_rows,
+    update_checkpoint,
+)
 
 mensaje = (
     "Hola nuevamente! Lastima que rechazaron mi solicitud, la razon por la cual creo que deberian "
@@ -34,6 +52,9 @@ DEFAULT_CHANNEL = os.environ.get("PLAYWRIGHT_CHANNEL", "chrome")
 DEFAULT_EXECUTABLE_PATH = os.environ.get("PLAYWRIGHT_EXECUTABLE_PATH")
 SELECTORS_PATH = PLAYWRIGHT_SELECTORS_DIR / "apelacion.json"
 ACTIONS_PATH = PLAYWRIGHT_SELECTORS_DIR / "apelacion_acciones.json"
+DEFAULT_QUEUE_PATH = Path(__file__).resolve().parent / "data" / "apelacion_claims_queue.json"
+DEFAULT_CHECKPOINT_PATH = Path(__file__).resolve().parent / "data" / "apelacion_claims_checkpoint.txt"
+DEFAULT_RUNTIME_PROFILE_DIR = Path(__file__).resolve().parent / ".runtime_browser_profiles" / "apelacion"
 
 P_CONTINUAR = re.compile(r"(continuar|siguiente|next|continue|submit|enviar|send)", re.IGNORECASE)
 P_APELAR = re.compile(r"(apelar|appeal|apelaci[oó]n)", re.IGNORECASE)
@@ -742,6 +763,100 @@ def apelar_una_reclamacion(page, delay_s, espera_envio_s, selectors):
     return True
 
 
+def procesar_cola_automatica(page, args, selectors, queue_path, checkpoint_path):
+    if not ensure_content_list(page):
+        print("No se pudo abrir la tabla de Contenido en YouTube Studio.")
+        return False
+
+    limite_escaneo = args.max_scan or args.max
+    print("Escaneando videos con restriccion 'Derechos de autor'...")
+    items = scan_claim_rows(page, delay_s=max(0.8, min(args.delay, 1.5)), max_items=limite_escaneo)
+    save_queue(queue_path, items)
+
+    if not items:
+        print("No se detectaron videos con reclamos en la lista actual.")
+        return True
+
+    processed = load_checkpoint(checkpoint_path)
+    pendientes = [item for item in items if processed.get(claim_item_key(item)) != "ok"]
+    print(f"Videos detectados: {len(items)} | Pendientes: {len(pendientes)}")
+
+    if args.solo_detectar:
+        print(f"Cola guardada en: {queue_path}")
+        return True
+
+    total = 0
+    errores_consecutivos = 0
+    reset_content_scroll(page)
+
+    for index, item in enumerate(pendientes, start=1):
+        if args.max and total >= args.max:
+            break
+
+        key = claim_item_key(item)
+        titulo = item.get("title") or key
+        print(f"\n[{index}/{len(pendientes)}] Abriendo reclamo: {titulo}")
+        page.goto(args.url, wait_until="domcontentloaded")
+        if not dismiss_claim_dialog(page, delay_s=min(args.delay, 1.0)):
+            print("No se pudo cerrar un modal previo. Se intentara limpiar estado recargando Studio.")
+            page.goto(args.url, wait_until="domcontentloaded")
+        if not ensure_content_list(page):
+            print("No se pudo volver a la tabla de Contenido antes de abrir el siguiente video.")
+            return False
+        reset_content_scroll(page)
+        time.sleep(min(args.delay, 1.0))
+
+        if not open_claim_modal_with_recovery(
+            page,
+            item,
+            delay_s=args.delay,
+            studio_url=args.url,
+            max_attempts=max(1, args.reintentos_modal),
+        ):
+            print("No se pudo abrir el modal de derechos de autor para este video.")
+            item["status"] = "error_modal"
+            save_queue(queue_path, items)
+            update_checkpoint(checkpoint_path, processed, key, "error_modal")
+            errores_consecutivos += 1
+            if errores_consecutivos >= 3:
+                print("Se detuvo el proceso por demasiados errores consecutivos al abrir modales.")
+                return False
+            continue
+
+        errores_consecutivos = 0
+        apelaciones_video = 0
+
+        for _ in range(10):
+            ok = apelar_una_reclamacion(page, args.delay, args.espera_envio, selectors)
+            if not ok:
+                break
+            apelaciones_video += 1
+            time.sleep(args.espera_entre)
+            if not claim_dialog_is_open(page):
+                break
+
+        dismiss_claim_dialog(page, delay_s=args.delay)
+
+        if apelaciones_video == 0:
+            print("El video no tenia apelaciones disponibles dentro del modal.")
+            item["status"] = "sin_accion"
+            save_queue(queue_path, items)
+            update_checkpoint(checkpoint_path, processed, key, "sin_accion")
+            continue
+
+        total += 1
+        item["status"] = "ok"
+        item["apelaciones_procesadas"] = apelaciones_video
+        save_queue(queue_path, items)
+        update_checkpoint(checkpoint_path, processed, key, "ok")
+        print(f"Apelaciones completadas para el video: {apelaciones_video}")
+        time.sleep(args.espera_entre)
+
+    print(f"Proceso automatico finalizado. Videos procesados: {total}")
+    print(f"Cola actualizada en: {queue_path}")
+    return True
+
+
 def normalize_channel(channel):
     if not channel:
         return None
@@ -808,31 +923,71 @@ def find_chrome_user_data_dir():
     return None
 
 
+def profile_name_from_args(args):
+    profile_name = (args.profile or os.environ.get("PLAYWRIGHT_PROFILE_NAME") or "Default").strip()
+    return profile_name or "Default"
+
+
 def resolve_user_data_dir(args):
+    profile_name = profile_name_from_args(args)
+    source = None
+    allow_create = False
+
     if args.user_data_dir:
-        return Path(args.user_data_dir), True
+        source = describe_profile_source(Path(args.user_data_dir), profile_name=profile_name, name="manual")
+        allow_create = True
 
     env_dir = os.environ.get("PLAYWRIGHT_USER_DATA_DIR")
-    if env_dir:
-        return Path(env_dir), True
+    if source is None and env_dir:
+        source = describe_profile_source(Path(env_dir), profile_name=profile_name, name="env")
+        allow_create = True
 
     env_profile_dir = os.environ.get("PLAYWRIGHT_PROFILE_DIR")
-    if env_profile_dir:
-        return Path(env_profile_dir), True
+    if source is None and env_profile_dir:
+        source = describe_profile_source(Path(env_profile_dir), profile_name=profile_name, name="env")
+        allow_create = True
 
-    if args.usar_perfil_chrome:
+    if source is None and args.usar_perfil_chrome:
         chrome_dir = find_chrome_user_data_dir()
         if not chrome_dir:
-            return None, False
-        return chrome_dir, False
+            return None, False, None
+        source = describe_profile_source(chrome_dir, profile_name=profile_name, name="chrome-local")
+        allow_create = False
 
-    return PLAYWRIGHT_PROFILE_DIR, True
+    if source is None:
+        candidates = [describe_profile_source(PLAYWRIGHT_PROFILE_DIR, profile_name=profile_name, name="repo")]
+        candidates.append(discover_signed_in_profile(profile_name=profile_name))
+        candidates = [item for item in candidates if item is not None]
+        if not candidates:
+            return None, False, None
+        source = max(candidates, key=lambda item: item.get("cookie_count", 0))
+        allow_create = source.get("name") == "repo"
+        source["detected"] = source.get("name") != "repo"
+
+    launch_dir = source["user_data_dir"]
+
+    try:
+        is_repo_profile = launch_dir.resolve() == PLAYWRIGHT_PROFILE_DIR.resolve()
+    except Exception:
+        is_repo_profile = launch_dir == PLAYWRIGHT_PROFILE_DIR
+
+    if not is_repo_profile and launch_dir.exists():
+        runtime_dir = DEFAULT_RUNTIME_PROFILE_DIR / f"{source['name']}_{profile_name.lower().replace(' ', '_')}"
+        launch_dir = prepare_runtime_profile(launch_dir, profile_name, runtime_dir)
+        source["cloned_from"] = str(source["user_data_dir"])
+        source["runtime_user_data_dir"] = launch_dir
+        allow_create = False
+
+    return launch_dir, allow_create, source
 
 
-def resolve_launch_config(args):
+def resolve_launch_config(args, profile_source=None):
     executable_path = args.executable_path or DEFAULT_EXECUTABLE_PATH
     if executable_path:
         return None, executable_path
+
+    if profile_source and profile_source.get("executable_path"):
+        return None, profile_source["executable_path"]
 
     channel = normalize_channel(args.channel)
     if channel:
@@ -876,6 +1031,12 @@ def parse_args():
     parser.add_argument("--selectores", default=None, help="Ruta del archivo JSON de selectores.")
     parser.add_argument("--grabar", action="store_true", help="Grabar todas las acciones para esta pantalla.")
     parser.add_argument("--acciones", default=None, help="Ruta del archivo JSON de acciones grabadas.")
+    parser.add_argument("--auto-detect", action="store_true", help="Escanear la tabla de Contenido y abrir automaticamente los videos con reclamos.")
+    parser.add_argument("--cola", default=str(DEFAULT_QUEUE_PATH), help="Ruta del JSON con la cola detectada.")
+    parser.add_argument("--checkpoint", default=str(DEFAULT_CHECKPOINT_PATH), help="Ruta del checkpoint de videos ya procesados.")
+    parser.add_argument("--solo-detectar", action="store_true", help="Solo detectar reclamos y guardar la cola sin enviar formularios.")
+    parser.add_argument("--max-scan", type=int, default=0, help="Cantidad maxima de videos a detectar en el escaneo automatico (0 = sin limite).")
+    parser.add_argument("--reintentos-modal", type=int, default=3, help="Reintentos para abrir el modal de derechos de autor por video.")
     parser.add_argument("--max", type=int, default=0, help="Cantidad de apelaciones a procesar (0 = infinito).")
     parser.add_argument("--delay", type=float, default=1.0, help="Segundos de espera corta entre pasos.")
     parser.add_argument("--espera-envio", type=float, default=6.0, help="Segundos de espera despues de enviar.")
@@ -886,7 +1047,8 @@ def parse_args():
 
 def main():
     args = parse_args()
-    user_data_dir, allow_create = resolve_user_data_dir(args)
+    profile_name = profile_name_from_args(args)
+    user_data_dir, allow_create, profile_source = resolve_user_data_dir(args)
     if user_data_dir is None:
         print("No se encontro un perfil local de Chrome. Usa --user-data-dir para indicar la ruta.")
         return
@@ -897,8 +1059,14 @@ def main():
             print(f"No existe la ruta del perfil: {user_data_dir}")
             return
 
-    channel, executable_path = resolve_launch_config(args)
-    profile_name = (args.profile or "").strip()
+    channel, executable_path = resolve_launch_config(args, profile_source=profile_source)
+    if profile_source and profile_source.get("detected"):
+        print(
+            f"Perfil detectado automaticamente: {profile_source['name']} "
+            f"({profile_source.get('cookie_count', 0)} cookies Google/YouTube)."
+        )
+    if profile_source and profile_source.get("cloned_from"):
+        print(f"Usando copia temporal del perfil: {profile_source['cloned_from']}")
     if args.usar_perfil_chrome:
         print(f"Usando perfil de Chrome: {user_data_dir}")
         print("Cierra Chrome antes de continuar para evitar bloqueo del perfil.")
@@ -907,16 +1075,26 @@ def main():
 
     selectors_path = Path(args.selectores) if args.selectores else SELECTORS_PATH
     actions_path = Path(args.acciones) if args.acciones else ACTIONS_PATH
+    queue_path = Path(args.cola) if args.cola else DEFAULT_QUEUE_PATH
+    checkpoint_path = Path(args.checkpoint) if args.checkpoint else DEFAULT_CHECKPOINT_PATH
 
     with sync_playwright() as p:
         context = launch_context(p, user_data_dir, args.headless, channel, profile_name, executable_path)
         try:
+            cookies = load_google_cookies_for_playwright(profile_source, profile_name=profile_name)
+            if cookies:
+                context.add_cookies(cookies)
+                print(f"Cookies de sesion cargadas: {len(cookies)}")
+
             page = context.new_page()
             page.set_default_timeout(15000)
             page.goto(args.url, wait_until="domcontentloaded")
 
             if not args.no_esperar:
-                input("Inicia sesion y entra a la pantalla de reclamaciones. Presiona Enter para continuar...")
+                if args.auto_detect:
+                    input("Inicia sesion en YouTube Studio. El script abrira Contenido y detectara reclamos automaticamente. Presiona Enter para continuar...")
+                else:
+                    input("Inicia sesion y entra a la pantalla de reclamaciones. Presiona Enter para continuar...")
 
             if args.grabar:
                 record_actions(page, actions_path)
@@ -927,6 +1105,11 @@ def main():
                 return
 
             selectors = load_selectors(selectors_path)
+
+            if args.auto_detect:
+                procesar_cola_automatica(page, args, selectors, queue_path, checkpoint_path)
+                return
+
             total = 0
             while True:
                 if args.max and total >= args.max:

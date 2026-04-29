@@ -87,6 +87,59 @@ P_REASON = re.compile(r"(reason|motivo|raz[oó]n)", re.IGNORECASE)
 P_DETAILS = re.compile(r"(details|detalles)", re.IGNORECASE)
 P_TOMAR_MEDIDAS = re.compile(r"(tomar medidas|take action)", re.IGNORECASE)
 P_PROGRAMADO = re.compile(r"\b(programado|scheduled)\b", re.IGNORECASE)
+
+_MESES_ES = [
+    "ene(?:ro)?", "feb(?:rero)?", "mar(?:zo)?", "abr(?:il)?",
+    "may(?:o)?", "jun(?:io)?", "jul(?:io)?", "ago(?:sto)?",
+    "sep(?:t(?:iembre)?)?|set(?:iembre)?", "oct(?:ubre)?",
+    "nov(?:iembre)?", "dic(?:iembre)?",
+]
+_MESES_EN = [
+    "jan(?:uary)?", "feb(?:ruary)?", "mar(?:ch)?", "apr(?:il)?",
+    "may", "jun(?:e)?", "jul(?:y)?", "aug(?:ust)?",
+    "sep(?:t(?:ember)?)?", "oct(?:ober)?",
+    "nov(?:ember)?", "dec(?:ember)?",
+]
+
+
+def build_omitir_fecha_pattern(fecha_iso):
+    """Construye un regex que matchea variantes de una fecha ISO (YYYY-MM-DD).
+
+    Cubre formatos en es / en / numeric que YouTube Studio puede mostrar.
+    Devuelve None si la fecha es vacia o invalida.
+    """
+    if not fecha_iso:
+        return None
+    fecha_iso = fecha_iso.strip()
+    if not fecha_iso:
+        return None
+    try:
+        from datetime import datetime
+        dt = datetime.strptime(fecha_iso, "%Y-%m-%d")
+    except ValueError:
+        print(f"AVISO: --omitir-fecha invalida ({fecha_iso!r}), se ignora. Usa formato YYYY-MM-DD.")
+        return None
+    d, m, y = dt.day, dt.month, dt.year
+    mes_es = _MESES_ES[m - 1]
+    mes_en = _MESES_EN[m - 1]
+    variants = [
+        rf"\b{d}\s+(?:{mes_es})\.?\s+{y}\b",
+        rf"\b(?:{mes_en})\.?\s+{d},?\s+{y}\b",
+        rf"\b{d:02d}/{m:02d}/{y}\b",
+        rf"\b{d}/{m}/{y}\b",
+        rf"\b{y}-{m:02d}-{d:02d}\b",
+    ]
+    return re.compile("|".join(variants), re.IGNORECASE)
+
+
+def is_video_marcado_omitir(item, fecha_pat):
+    if fecha_pat is None or not isinstance(item, dict):
+        return False
+    blob = " ".join(
+        str(item.get(k, "") or "")
+        for k in ("date_text", "row_text", "title")
+    )
+    return bool(fecha_pat.search(blob))
 P_VERIFY_IDENTITY = re.compile(
     r"(verifica que eres t[uú]|verify (it'?s|that) you|confirm.*identity|"
     r"necesitamos confirmar que eres t[uú]|extra security|nivel extra de seguridad)",
@@ -3326,6 +3379,50 @@ def _wait_if_paused():
     print(">>> Pausa terminada. Continuando. <<<")
 
 
+_MEM_PAUSA_MB = 0.0
+_MEM_REANUDAR_MB = 0.0
+
+
+def set_memoria_thresholds(min_mb, recover_mb):
+    global _MEM_PAUSA_MB, _MEM_REANUDAR_MB
+    _MEM_PAUSA_MB = float(min_mb or 0.0)
+    rec = float(recover_mb or 0.0)
+    if rec <= _MEM_PAUSA_MB:
+        rec = _MEM_PAUSA_MB * 1.5
+    _MEM_REANUDAR_MB = rec
+
+
+def _wait_if_low_memory():
+    if _MEM_PAUSA_MB <= 0:
+        return
+    try:
+        import psutil
+    except ImportError:
+        return
+    avail_mb = psutil.virtual_memory().available / (1024 * 1024)
+    if avail_mb >= _MEM_PAUSA_MB:
+        return
+    print("\n" + "!" * 70)
+    print(f"!!! MEMORIA BAJA: {avail_mb:.0f} MB libres (umbral pausa: {_MEM_PAUSA_MB:.0f} MB).")
+    print(f"!!! PAUSA AUTOMATICA. Reanudacion al recuperar {_MEM_REANUDAR_MB:.0f} MB libres.")
+    print("!!! Andá enviando tabs (cerralas con Ctrl+W) para liberar RAM.")
+    print("!" * 70)
+    last_log = 0.0
+    while True:
+        time.sleep(5.0)
+        try:
+            avail_mb = psutil.virtual_memory().available / (1024 * 1024)
+        except Exception:
+            return
+        now = time.time()
+        if avail_mb >= _MEM_REANUDAR_MB:
+            print(f">>> MEMORIA OK: {avail_mb:.0f} MB libres. Reanudando. <<<")
+            return
+        if now - last_log > 30:
+            print(f"  ...esperando memoria (actual: {avail_mb:.0f} MB / objetivo: {_MEM_REANUDAR_MB:.0f} MB)")
+            last_log = now
+
+
 def _click_nth_take_action_in_page(page, claim_index):
     """Devuelve {'ok': bool, 'total': int}. Click el i-th boton 'Tomar medidas' visible Y HABILITADO."""
     return page.evaluate(
@@ -3553,11 +3650,13 @@ def _procesar_lote_pestanas(context, page0, args, selectors):
 
     items = scan_claim_rows(page0, delay_s=max(0.8, min(args.delay, 1.5)), max_items=args.max_scan or args.max)
     if not items:
-        return {"items": 0, "listas": [], "fallos": []}
+        return {"items": 0, "listas": [], "fallos": [], "omitidos": 0}
 
+    fecha_pat = getattr(args, "_omitir_fecha_pat", None)
     print(f"\nVideos detectados: {len(items)}")
     pestanas_listas = []
     fallos = []
+    omitidos = 0
 
     for vidx, item in enumerate(items, start=1):
         if args.max and vidx > args.max:
@@ -3568,9 +3667,15 @@ def _procesar_lote_pestanas(context, page0, args, selectors):
             continue
         print(f"\n[Video {vidx}/{len(items)}] {title}")
 
+        if is_video_marcado_omitir(item, fecha_pat):
+            print(f"     [OMITIDO] fecha marcador detectada ({item.get('date_text') or 'sin fecha visible'}). Skip.")
+            omitidos += 1
+            continue
+
         max_reclamos_video = 30
         for ci in range(max_reclamos_video):
             _wait_if_paused()
+            _wait_if_low_memory()
             res = preparar_pestana_para_reclamo(context, video_id, ci, args, selectors)
             status = res.get("status")
             tab = res.get("page")
@@ -3590,18 +3695,19 @@ def _procesar_lote_pestanas(context, page0, args, selectors):
                     try: tab.close()
                     except Exception: pass
 
-    return {"items": len(items), "listas": pestanas_listas, "fallos": fallos}
+    return {"items": len(items), "listas": pestanas_listas, "fallos": fallos, "omitidos": omitidos}
 
 
 def preparar_pestanas_modo(context, page0, args, selectors):
     """Modo principal: abre tabs en paralelo, una por reclamo. Loop infinito si --loop."""
+    global _PAUSE_REQUESTED
     _start_input_listener()
     loop_on = bool(getattr(args, "loop", False))
     max_loops = max(1, int(getattr(args, "max_loops", 50)))
-    pausa_s = float(getattr(args, "pausa_interactiva_s", 600.0))
 
     total_listas = 0
     total_fallos = 0
+    total_omitidos = 0
 
     for vuelta in range(1, max_loops + 1):
         print("\n" + "=" * 70)
@@ -3614,15 +3720,18 @@ def preparar_pestanas_modo(context, page0, args, selectors):
         listas = resultado["listas"]
         fallos = resultado["fallos"]
         items_count = resultado["items"]
+        omitidos = resultado.get("omitidos", 0)
         total_listas += len(listas)
         total_fallos += len(fallos)
+        total_omitidos += omitidos
 
         print("\n" + "-" * 70)
         print(f"Vuelta {vuelta} terminada")
         print(f"  Videos detectados: {items_count}")
         print(f"  Pestañas listas: {len(listas)}")
+        print(f"  Omitidos por fecha marcador: {omitidos}")
         print(f"  Fallos: {len(fallos)}")
-        print(f"  Acumulado total: {total_listas} listas | {total_fallos} fallos")
+        print(f"  Acumulado total: {total_listas} listas | {total_omitidos} omitidos | {total_fallos} fallos")
 
         if items_count == 0:
             print("\nNo quedan videos con reclamos. Terminando loop.")
@@ -3642,14 +3751,19 @@ def preparar_pestanas_modo(context, page0, args, selectors):
             print(f"\nLimite de loops alcanzado ({max_loops}).")
             break
 
-        print(f"\n>>> Tenés {pausa_s:.0f}s para enviar las tabs (clicks + Enviar). <<<")
-        print(f">>> En {pausa_s:.0f}s el script re-escanea para procesar pendientes. <<<")
-        print(">>> Ctrl-C para cortar el loop. <<<")
+        print("\n" + ">" * 70)
+        print(">>> Andá enviando las tabs ya armadas (3 checks + Enviar en cada una).")
+        print(">>> Cuando termines, apretá ENTER para arrancar la SIGUIENTE pasada.")
+        print(">>> Ctrl-C para cortar el loop.")
+        print(">" * 70)
+        _PAUSE_REQUESTED = True
         try:
-            time.sleep(pausa_s)
+            while _PAUSE_REQUESTED:
+                time.sleep(0.5)
         except KeyboardInterrupt:
             print("\nLoop cortado por usuario.")
             return True
+        print(">>> Reanudando: arrancando re-escaneo. <<<")
 
     print("\n" + "=" * 70)
     print("LOOP FINALIZADO")
@@ -3705,6 +3819,17 @@ def procesar_cola_automatica(page, args, selectors, queue_path, checkpoint_path)
             update_checkpoint(checkpoint_path, processed, key, "programado_no_publicado")
             time.sleep(min(args.espera_entre, 1.0))
             continue
+
+        fecha_pat = getattr(args, "_omitir_fecha_pat", None)
+        if is_video_marcado_omitir(item, fecha_pat):
+            print(f"Saltando video con fecha marcador ({item.get('date_text') or 'fecha en row_text'}).")
+            item["status"] = "omitido_fecha_marcador"
+            save_queue(queue_path, items)
+            update_checkpoint(checkpoint_path, processed, key, "omitido_fecha_marcador")
+            time.sleep(min(args.espera_entre, 1.0))
+            continue
+
+        _wait_if_low_memory()
 
         page.goto(args.url, wait_until="domcontentloaded")
         clear_ui_blockers(page, delay_s=min(0.25, args.delay), rounds=3)
@@ -4328,13 +4453,43 @@ def parse_args():
         "--pausa-interactiva-s",
         type=float,
         default=600.0,
-        help="Tope de espera (segundos) en cada pausa interactiva. Default 10 min.",
+        help="Tope de espera (segundos) para pausas interactivas (2FA, modo --interactivo-impugnar). NO se usa entre vueltas: el loop espera ENTER.",
+    )
+    parser.add_argument(
+        "--omitir-fecha",
+        type=str,
+        default="",
+        help="Fecha marcador en formato YYYY-MM-DD. Videos cuya celda de fecha matchee se SALTAN sin abrir modal. Ej: 2028-04-30.",
+    )
+    parser.add_argument(
+        "--mem-pausa-mb",
+        type=float,
+        default=2000.0,
+        help="Si la RAM disponible cae debajo de este umbral (MB), el script PAUSA automaticamente. 0 = desactivado.",
+    )
+    parser.add_argument(
+        "--mem-reanudar-mb",
+        type=float,
+        default=3500.0,
+        help="Umbral de reanudacion (MB) cuando la pausa por memoria baja esta activa. Debe ser > --mem-pausa-mb.",
     )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    args._omitir_fecha_pat = build_omitir_fecha_pattern(getattr(args, "omitir_fecha", ""))
+    if args._omitir_fecha_pat is not None:
+        print(f"Filtro activo: se OMITEN videos con fecha {args.omitir_fecha} (variantes es/en/numericas).")
+    set_memoria_thresholds(
+        getattr(args, "mem_pausa_mb", 0.0),
+        getattr(args, "mem_reanudar_mb", 0.0),
+    )
+    if _MEM_PAUSA_MB > 0:
+        print(
+            f"Monitor de memoria: pausa < {_MEM_PAUSA_MB:.0f} MB libres, "
+            f"reanuda >= {_MEM_REANUDAR_MB:.0f} MB libres."
+        )
     profile_name = profile_name_from_args(args)
     user_data_dir, allow_create, profile_source = resolve_user_data_dir(args)
     if user_data_dir is None:
@@ -4467,7 +4622,7 @@ def main():
                         items = data.get("items", []) if isinstance(data, dict) else []
                         pendientes = [
                             it for it in items
-                            if it.get("status") not in ("ok", "programado_no_publicado")
+                            if it.get("status") not in ("ok", "programado_no_publicado", "omitido_fecha_marcador")
                         ]
                         verify_blocked = sum(
                             1 for it in items if it.get("status") == "requiere_verificacion_2fa"
