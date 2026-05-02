@@ -3648,11 +3648,19 @@ def _procesar_lote_pestanas(context, page0, args, selectors):
         print("No se pudo abrir la tabla de Contenido.")
         return None
 
-    items = scan_claim_rows(page0, delay_s=max(0.8, min(args.delay, 1.5)), max_items=args.max_scan or args.max)
+    fecha_pat = getattr(args, "_omitir_fecha_pat", None)
+    is_valid = (lambda it: not is_video_marcado_omitir(it, fecha_pat)) if fecha_pat else None
+    target_valid = args.max if args.max else 30
+
+    items = scan_claim_rows(
+        page0,
+        delay_s=max(0.8, min(args.delay, 1.5)),
+        max_items=args.max_scan or args.max,
+        is_valid=is_valid,
+        target_valid=target_valid,
+    )
     if not items:
         return {"items": 0, "listas": [], "fallos": [], "omitidos": 0}
-
-    fecha_pat = getattr(args, "_omitir_fecha_pat", None)
     print(f"\nVideos detectados: {len(items)}")
     pestanas_listas = []
     fallos = []
