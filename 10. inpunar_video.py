@@ -2509,6 +2509,98 @@ def advance_to_reason_step(page, selectors, delay_s):
     return wait_for_license_step(get_active_root(page), timeout_ms=1500)
 
 
+def handle_options_step(page, selectors, delay_s):
+    """Step 'Opciones' (Impugnar vs Apelar sin impugnar) que YouTube inserta
+    entre 'Motivo' y 'Detalles' cuando hay flujo extendido. Confirma 'Impugnar'
+    y avanza con Continuar. Devuelve True si actuó, False si no era ese step."""
+    appeal_visible = False
+    try:
+        appeal_locator = page.get_by_text(re.compile(r"apelar sin impugnar|appeal without disputing", re.IGNORECASE))
+        ct = appeal_locator.count()
+        for i in range(min(ct, 8)):
+            try:
+                if appeal_locator.nth(i).is_visible():
+                    appeal_visible = True
+                    break
+            except Exception:
+                continue
+    except Exception:
+        appeal_visible = False
+
+    if not appeal_visible:
+        text_root = ""
+        try:
+            root_dbg = get_active_root(page)
+            text_root = (root_dbg.inner_text() or "").strip().lower()
+        except Exception:
+            text_root = ""
+        preview = text_root[:140].replace("\n", " | ")
+        print(f"   [check Opciones] no es ese step (no encuentro 'Apelar sin impugnar'). root: {preview!r}")
+        return False
+
+    try:
+        root = get_active_root(page)
+    except Exception:
+        root = page
+
+    print("Paso 3.5/7: detectado step 'Opciones' (Impugnar vs Apelar). Confirmando 'Impugnar'.")
+
+    selected_dispute = False
+    for scope in (root, page):
+        if selected_dispute:
+            break
+        try:
+            radios = scope.locator("tp-yt-paper-radio-button, ytcp-radio-button, [role='radio']")
+            n = radios.count()
+        except Exception:
+            continue
+        for i in range(n):
+            r = radios.nth(i)
+            try:
+                if not r.is_visible():
+                    continue
+                label = (r.inner_text() or "").lower().strip()
+                aria = (r.get_attribute("aria-label") or "").lower()
+                hint = f"{label} {aria}"
+                if "apelar sin impugnar" in hint or "appeal without disputing" in hint:
+                    continue
+                if not (re.search(r"\bimpugnar\b", hint) or re.search(r"\bdispute\b", hint)):
+                    continue
+                already = (r.get_attribute("aria-checked") or "").lower() == "true"
+                if not already:
+                    try:
+                        r.scroll_into_view_if_needed()
+                        time.sleep(0.1)
+                        bbox = r.bounding_box()
+                        if bbox and bbox.get("width", 0) > 4 and bbox.get("height", 0) > 4:
+                            cx = bbox["x"] + bbox["width"] / 2
+                            cy = bbox["y"] + bbox["height"] / 2
+                            page.mouse.move(cx, cy)
+                            time.sleep(0.05)
+                            page.mouse.click(cx, cy, delay=60)
+                        else:
+                            r.click()
+                    except Exception:
+                        try:
+                            r.click(force=True)
+                        except Exception:
+                            pass
+                selected_dispute = True
+                break
+            except Exception:
+                continue
+
+    if not selected_dispute:
+        print("   [Opciones] no encontre radio 'Impugnar' — confiando en el default e intentando Continuar.")
+
+    time.sleep(delay_s)
+    if not (press_continue_step(page) or click_continue_step(page, selectors, delay_s)):
+        print("Advertencia: no se pudo avanzar desde el step 'Opciones'.")
+        return False
+    time.sleep(delay_s)
+    return True
+
+
 def check_all_visible_checkboxes(root, page=None):
     checked = 0
     seen = set()
@@ -3211,6 +3303,8 @@ def impugnar_una_reclamacion(page, delay_s, espera_envio_s, selectors, modo_moda
     print("Paso 3/7: avanzar a las opciones de Reason/Details.")
     if not skip_dispute_step:
         clear_ui_blockers(page, delay_s=min(0.25, delay_s), rounds=1)
+    if handle_options_step(page, selectors, delay_s):
+        root = get_active_root(page)
     if not advance_to_reason_step(page, selectors, delay_s):
         try:
             snippet = get_active_root(page).inner_text().strip().replace("\n", " ")
@@ -3222,12 +3316,24 @@ def impugnar_una_reclamacion(page, delay_s, espera_envio_s, selectors, modo_moda
     time.sleep(delay_s)
     root = get_active_root(page)
 
+    if handle_options_step(page, selectors, delay_s):
+        root = get_active_root(page)
+
     print("Paso 4/7: marcar 'I have permission / license'.")
     if not select_license_option(page, selectors, delay_s):
         print("No se encontro el elemento: Licencia")
         return False
     time.sleep(delay_s)
     root = get_active_root(page)
+
+    if handle_options_step(page, selectors, delay_s):
+        root = get_active_root(page)
+        print("Paso 4/7 (retry post-Opciones): marcar 'I have permission / license'.")
+        if not select_license_option(page, selectors, delay_s):
+            print("No se encontro el elemento: Licencia tras Opciones.")
+            return False
+        time.sleep(delay_s)
+        root = get_active_root(page)
 
     print("Paso 5/7: continuar al aviso de lectura.")
     if not skip_dispute_step:
@@ -3237,6 +3343,15 @@ def impugnar_una_reclamacion(page, delay_s, espera_envio_s, selectors, modo_moda
         return False
     time.sleep(delay_s)
     root = get_active_root(page)
+
+    if handle_options_step(page, selectors, delay_s):
+        root = get_active_root(page)
+        print("Paso 5/7 (retry post-Opciones): continuar al aviso de lectura.")
+        if not (press_continue_step(page) or click_continue_step(page, selectors, delay_s)):
+            print("No se pudo avanzar al aviso de lectura tras Opciones.")
+            return False
+        time.sleep(delay_s)
+        root = get_active_root(page)
 
     print("Paso 6/7: marcar la casilla de confirmacion y continuar.")
     if not skip_dispute_step:
@@ -3335,6 +3450,9 @@ _PAUSE_REQUESTED = False
 _INPUT_LISTENER_STARTED = False
 
 
+_AUTO_ENVIAR_ACTIVO = False
+
+
 def _input_listener_loop():
     global _PAUSE_REQUESTED
     while True:
@@ -3348,7 +3466,10 @@ def _input_listener_loop():
         if _PAUSE_REQUESTED:
             print("\n" + "*" * 70)
             print("*** PAUSA SOLICITADA: el script se detendra antes del proximo reclamo. ***")
-            print("*** Andá enviando las tabs ya armadas. ENTER cuando quieras reanudar.  ***")
+            if _AUTO_ENVIAR_ACTIVO:
+                print("*** Auto-envio activo: el batch actual se enviara solo. ENTER reanuda. ***")
+            else:
+                print("*** Andá enviando las tabs ya armadas. ENTER cuando quieras reanudar.  ***")
             print("*" * 70)
         else:
             print("\n" + "*" * 70)
@@ -3472,55 +3593,212 @@ def _click_nth_take_action_in_page(page, claim_index):
 
 
 def _click_impugnar_in_modal(page):
-    return page.evaluate(
-        """
-        () => {
-          const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
-          let target = null;
-          for (const d of dialogs) {
-            const t = (d.innerText || '').toLowerCase();
-            if (/seleccionar acci|select action/.test(t)) { target = d; break; }
-          }
-          const scope = target || document;
-          const candidates = Array.from(scope.querySelectorAll(
-            'button, [role="button"], ytcp-button-shape, tp-yt-paper-button'
-          ));
-          for (const el of candidates) {
-            const t = (el.innerText || el.textContent || '').trim().toLowerCase();
-            if (!/^impugnar(\\b|\\s)|^dispute(\\b|\\s)/.test(t)) continue;
-            const r = el.getBoundingClientRect();
-            if (r.width <= 0) continue;
-            el.scrollIntoView({block: 'center'});
-            el.click();
-            return true;
-          }
-          return false;
-        }
-        """
-    )
+    """Intenta marcar 'Impugnar' en el modal de Seleccionar Acción.
+    Primero ubica el elemento con JS, devuelve sus coords, y hace click via
+    page.mouse.click(x,y) trusted. Si no encuentra coords, cae al click JS.
+    Importante: el modal de Content ID tiene cards con descripción + link
+    'Más información' interno. Si el click cae sobre ese link, NO selecciona
+    la card. Por eso clickeamos cerca del HEADER (top) de la card."""
+    info = None
+    try:
+        info = page.evaluate(
+            """
+            () => {
+              const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+              let target = null;
+              for (const d of dialogs) {
+                const t = (d.innerText || '').toLowerCase();
+                if (/seleccionar acci|select action|elige una acci|choose an action/.test(t)) {
+                  target = d; break;
+                }
+              }
+              const scope = target || document;
+              const candidates = Array.from(scope.querySelectorAll(
+                'button, [role="button"], ytcp-button-shape, tp-yt-paper-button, [role="radio"], [role="option"]'
+              ));
+              let best = null;
+              let bestScore = -1;
+              for (const el of candidates) {
+                const raw = (el.innerText || el.textContent || '').trim();
+                if (!raw) continue;
+                const firstLine = raw.split(/\\n|\\r/)[0].trim().toLowerCase();
+                if (!/^(impugnar|disputar|dispute)$/.test(firstLine)) continue;
+                if (/apelar|appeal/.test(firstLine)) continue;
+                const r = el.getBoundingClientRect();
+                if (r.width <= 4 || r.height <= 4) continue;
+                let score = 100;
+                if ((el.tagName || '').toLowerCase() === 'button') score += 10;
+                if (r.height > 60) score += 20;
+                if (score > bestScore) {
+                  bestScore = score;
+                  const xCenter = r.x + r.width / 2;
+                  const yHeader = r.y + Math.min(30, Math.max(18, r.height * 0.18));
+                  best = { x: xCenter, y: yHeader, text: firstLine, tag: (el.tagName || '').toLowerCase(), h: r.height };
+                  try { el.scrollIntoView({block: 'center'}); } catch (e) {}
+                }
+              }
+              return best;
+            }
+            """
+        )
+    except Exception:
+        info = None
+
+    if not info:
+        return False
+
+    clicked_mouse = False
+    try:
+        cx = float(info.get("x", 0))
+        cy = float(info.get("y", 0))
+        if cx > 0 and cy > 0:
+            page.mouse.move(cx, cy)
+            time.sleep(0.08)
+            page.mouse.click(cx, cy, delay=70)
+            clicked_mouse = True
+    except Exception:
+        clicked_mouse = False
+
+    try:
+        focused_via_enter = page.evaluate(
+            """
+            () => {
+              const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+              let target = null;
+              for (const d of dialogs) {
+                const t = (d.innerText || '').toLowerCase();
+                if (/seleccionar acci|select action|elige una acci|choose an action/.test(t)) {
+                  target = d; break;
+                }
+              }
+              const scope = target || document;
+              const candidates = Array.from(scope.querySelectorAll('button'));
+              for (const el of candidates) {
+                const raw = (el.innerText || el.textContent || '').trim();
+                if (!raw) continue;
+                const firstLine = raw.split(/\\n|\\r/)[0].trim().toLowerCase();
+                if (!/^(impugnar|disputar|dispute)$/.test(firstLine)) continue;
+                if (/apelar|appeal/.test(firstLine)) continue;
+                try { el.focus(); } catch (e) {}
+                return true;
+              }
+              return false;
+            }
+            """
+        )
+        if focused_via_enter:
+            time.sleep(0.1)
+            page.keyboard.press("Enter")
+            return True
+    except Exception:
+        pass
+
+    if clicked_mouse:
+        return True
+
+    try:
+        return bool(
+            page.evaluate(
+                """
+                () => {
+                  const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+                  let target = null;
+                  for (const d of dialogs) {
+                    const t = (d.innerText || '').toLowerCase();
+                    if (/seleccionar acci|select action|elige una acci|choose an action/.test(t)) {
+                      target = d; break;
+                    }
+                  }
+                  const scope = target || document;
+                  const candidates = Array.from(scope.querySelectorAll(
+                    'button, [role="button"], ytcp-button-shape, tp-yt-paper-button, [role="radio"], [role="option"]'
+                  ));
+                  for (const el of candidates) {
+                    const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+                    if (!/(^|\\b)(impugnar|disputar|dispute)(\\b|\\s|$)/.test(t)) continue;
+                    if (/apelar|appeal/.test(t)) continue;
+                    const r = el.getBoundingClientRect();
+                    if (r.width <= 0) continue;
+                    el.click();
+                    return true;
+                  }
+                  return false;
+                }
+                """
+            )
+        )
+    except Exception:
+        return False
 
 
 def _click_continuar_in_modal(page):
-    return page.evaluate(
-        """
-        () => {
-          const all = Array.from(document.querySelectorAll(
-            'button, [role="button"], ytcp-button-shape'
-          ));
-          for (const el of all) {
-            const t = (el.innerText || '').trim().toLowerCase();
-            if (!/^continuar$|^continue$/.test(t)) continue;
-            const r = el.getBoundingClientRect();
-            if (r.width <= 0) continue;
-            const dis = el.disabled || el.getAttribute('aria-disabled') === 'true';
-            if (dis) continue;
-            el.click();
-            return true;
-          }
-          return false;
-        }
-        """
-    )
+    info = None
+    try:
+        info = page.evaluate(
+            """
+            () => {
+              const buttons = Array.from(document.querySelectorAll('button'));
+              let best = null;
+              let bestScore = -1;
+              for (const el of buttons) {
+                const t = (el.innerText || '').trim().toLowerCase();
+                if (!/^continuar$|^continue$/.test(t)) continue;
+                if ((el.tagName || '').toLowerCase() !== 'button') continue;
+                const r = el.getBoundingClientRect();
+                if (r.width <= 4 || r.height <= 4) continue;
+                const dis = el.disabled === true || el.getAttribute('aria-disabled') === 'true';
+                if (dis) continue;
+                let score = 100;
+                if (score > bestScore) {
+                  bestScore = score;
+                  best = { x: r.x + r.width / 2, y: r.y + r.height / 2, tag: 'button' };
+                  try { el.scrollIntoView({block: 'center'}); } catch (e) {}
+                }
+              }
+              return best;
+            }
+            """
+        )
+    except Exception:
+        info = None
+
+    if info:
+        try:
+            cx = float(info.get("x", 0))
+            cy = float(info.get("y", 0))
+            if cx > 0 and cy > 0:
+                page.mouse.move(cx, cy)
+                time.sleep(0.08)
+                page.mouse.click(cx, cy, delay=70)
+                return True
+        except Exception:
+            pass
+
+    try:
+        return bool(
+            page.evaluate(
+                """
+                () => {
+                  const all = Array.from(document.querySelectorAll(
+                    'button, [role="button"], ytcp-button-shape'
+                  ));
+                  for (const el of all) {
+                    const t = (el.innerText || '').trim().toLowerCase();
+                    if (!/^continuar$|^continue$/.test(t)) continue;
+                    const r = el.getBoundingClientRect();
+                    if (r.width <= 0) continue;
+                    const dis = el.disabled || el.getAttribute('aria-disabled') === 'true';
+                    if (dis) continue;
+                    el.click();
+                    return true;
+                  }
+                  return false;
+                }
+                """
+            )
+        )
+    except Exception:
+        return False
 
 
 def _wait_for_form_or_2fa(page, max_s=300.0):
@@ -3548,6 +3826,351 @@ def _wait_for_form_or_2fa(page, max_s=300.0):
         if hits >= 1 and not in_selector:
             return "form"
     return "timeout"
+
+
+def _contar_checkboxes_via_locator(root_):
+    """Cuenta total y unchecked via Playwright locator (pierces shadow DOM, usa el dialog correcto)."""
+    tot = 0
+    unc = 0
+    try:
+        boxes = root_.locator("input[type='checkbox'], tp-yt-paper-checkbox, ytcp-checkbox, [role='checkbox']")
+        n = boxes.count()
+    except Exception:
+        return 0, 0
+    for i in range(n):
+        box = boxes.nth(i)
+        try:
+            if not box.is_visible():
+                continue
+        except Exception:
+            continue
+        tot += 1
+        is_chk = False
+        try:
+            is_chk = box.is_checked()
+        except Exception:
+            aria = (box.get_attribute("aria-checked") or "").lower()
+            is_chk = aria == "true" or (box.get_attribute("checked") is not None)
+        if not is_chk:
+            unc += 1
+    return tot, unc
+
+
+def _checkboxes_realmente_marcados(page):
+    """Devuelve True si YouTube YA NO muestra el aviso 'Marca todas las casillas anteriores...'.
+    Ese mensaje rojo aparece cuando los checkboxes no están marcados a ojos del server,
+    incluso si aria-checked dice True (porque dispatchEvent no cuenta como trusted click)."""
+    try:
+        root = get_active_root(page)
+        text = (root.inner_text() or "").strip().lower()
+    except Exception:
+        return False
+    avisos = (
+        "marca todas las casillas anteriores",
+        "marca las casillas anteriores",
+        "check all boxes above to submit",
+        "check the boxes above to submit",
+        "select all checkboxes above",
+    )
+    return not any(aviso in text for aviso in avisos)
+
+
+def _force_trusted_checkboxes(page, max_passes=3, ignore_aria=True):
+    """Marca checkboxes del dialog activo con page.mouse.click(x,y) en sus coordenadas
+    REALES — el método más confiable para custom elements Polymer porque emula mouse físico
+    via CDP. Si ignore_aria=True, NO confía en aria-checked (que puede ser mentira si
+    alguien lo seteó por dispatchEvent); en su lugar, sólo confía en input[type=checkbox]:checked
+    de un <input> interno o usa la primera pasada para clickear TODOS los checkboxes visibles
+    sin verificar state previo."""
+    clicks = 0
+    for pass_idx in range(max_passes):
+        try:
+            root = get_active_root(page)
+            boxes = root.locator("input[type='checkbox'], tp-yt-paper-checkbox, ytcp-checkbox, [role='checkbox']")
+            n = boxes.count()
+        except Exception:
+            return clicks
+        unchecked_in_pass = 0
+        for i in range(n):
+            try:
+                box = boxes.nth(i)
+                if not box.is_visible():
+                    continue
+                is_chk = False
+                if not (ignore_aria and pass_idx == 0):
+                    try:
+                        inner_input = box.locator("input[type='checkbox']").first
+                        if inner_input.count() > 0:
+                            is_chk = inner_input.is_checked()
+                        else:
+                            is_chk = box.is_checked()
+                    except Exception:
+                        try:
+                            is_chk = box.is_checked()
+                        except Exception:
+                            aria = (box.get_attribute("aria-checked") or "").lower()
+                            is_chk = aria == "true"
+                if is_chk:
+                    continue
+                unchecked_in_pass += 1
+                try:
+                    box.scroll_into_view_if_needed()
+                except Exception:
+                    pass
+                time.sleep(0.1)
+                clicked = False
+                try:
+                    bbox = box.bounding_box()
+                    if bbox and bbox.get("width", 0) > 4 and bbox.get("height", 0) > 4:
+                        cx = bbox["x"] + bbox["width"] / 2
+                        cy = bbox["y"] + bbox["height"] / 2
+                        page.mouse.move(cx, cy)
+                        time.sleep(0.05)
+                        page.mouse.click(cx, cy, delay=60)
+                        clicked = True
+                        clicks += 1
+                except Exception:
+                    pass
+                if not clicked:
+                    try:
+                        box.focus()
+                        time.sleep(0.05)
+                        page.keyboard.press("Space")
+                        clicked = True
+                        clicks += 1
+                    except Exception:
+                        pass
+                if not clicked:
+                    try:
+                        box.click(timeout=1500)
+                        clicks += 1
+                    except Exception:
+                        pass
+                time.sleep(0.2)
+            except Exception:
+                continue
+        if unchecked_in_pass == 0:
+            break
+        time.sleep(0.3)
+    return clicks
+
+
+def _enviar_una_tab(page, args, selectors, evid_dir, idx, total):
+    """Marca los 3 checks con Playwright trusted clicks y clickea 'Enviar' en UNA tab armada.
+
+    Devuelve dict: {'ok': bool, 'razon': str, 'titulo': str}.
+    Si OK, cierra la tab. Si falla, deja la tab abierta para revision manual.
+    """
+    delay_s = args.delay
+    espera_envio_s = args.espera_envio
+    titulo_actual = ""
+    try:
+        try:
+            page.bring_to_front()
+        except Exception:
+            pass
+        try:
+            titulo_actual = page.title() or ""
+        except Exception:
+            pass
+        print(f"\n  [auto-envio {idx}/{total}] {titulo_actual[:140]}")
+
+        time.sleep(min(delay_s, 0.6))
+        root = get_active_root(page)
+        if not is_dispute_form_active(page):
+            print("     [SKIP] form no activo.")
+            return {"ok": False, "razon": "form_no_activo", "titulo": titulo_actual}
+
+        clicks = _force_trusted_checkboxes(page, max_passes=2, ignore_aria=True)
+        time.sleep(0.5)
+        total_boxes, unchecked = _contar_checkboxes_via_locator(get_active_root(page))
+        server_ok = _checkboxes_realmente_marcados(page)
+        print(f"     [verif inicial] trusted_clicks={clicks} total={total_boxes} unchecked={unchecked} server_ok={server_ok}")
+        for retry in range(5):
+            if total_boxes > 0 and unchecked == 0 and server_ok:
+                break
+            clicks2 = _force_trusted_checkboxes(page, max_passes=2, ignore_aria=False)
+            time.sleep(0.5)
+            total_boxes, unchecked = _contar_checkboxes_via_locator(get_active_root(page))
+            server_ok = _checkboxes_realmente_marcados(page)
+            print(f"     [verif retry {retry+1}] trusted_clicks={clicks2} total={total_boxes} unchecked={unchecked} server_ok={server_ok}")
+            time.sleep(0.3)
+
+        if total_boxes <= 0:
+            print("     [FALLO] no detecte casillas en el dialogo.")
+            return {"ok": False, "razon": "sin_casillas", "titulo": titulo_actual}
+        if unchecked > 0 or not server_ok:
+            razon_detalle = f"unchecked_{unchecked}_de_{total_boxes}"
+            if unchecked == 0 and not server_ok:
+                razon_detalle = "server_no_registra_clicks"
+                print("     [FALLO] aria-checked dice OK pero YouTube muestra aviso 'Marca todas las casillas anteriores'.")
+            else:
+                print(f"     [FALLO] {unchecked}/{total_boxes} casillas SIN MARCAR tras retries trusted.")
+            if evid_dir is not None:
+                try:
+                    dump_dispute_evidence(page, {"video_id": titulo_actual[:80]}, "auto_envio_unchecked", str(evid_dir))
+                except Exception:
+                    pass
+            return {"ok": False, "razon": razon_detalle, "titulo": titulo_actual}
+        print(f"     {total_boxes}/{total_boxes} casillas marcadas (mouse coords) + server_ok confirmado.")
+
+        time.sleep(min(delay_s, 0.5))
+        root = get_active_root(page)
+        try:
+            botones = root.locator("button, [role='button'], tp-yt-paper-button, ytcp-button-shape")
+            n_btn = botones.count()
+        except Exception:
+            n_btn = 0
+        labels_visibles = []
+        enviar_button_native = None
+        enviar_wrapper = None
+        for i in range(n_btn):
+            b = botones.nth(i)
+            try:
+                if not b.is_visible():
+                    continue
+            except Exception:
+                continue
+            try:
+                enabled = b.is_enabled()
+            except Exception:
+                enabled = True
+            try:
+                label = (b.inner_text().strip()
+                         or (b.get_attribute("aria-label") or "").strip()
+                         or (b.get_attribute("title") or "").strip())
+            except Exception:
+                label = ""
+            if not label:
+                continue
+            try:
+                tag = (b.evaluate("el => (el.tagName || '').toLowerCase()") or "").strip()
+            except Exception:
+                tag = ""
+            labels_visibles.append(f"{'OK' if enabled else 'OFF'}:{tag}:{label[:40]}")
+            if enabled and P_PRIMARY_SEND.search(label):
+                if tag == "button" and enviar_button_native is None:
+                    enviar_button_native = b
+                elif enviar_wrapper is None:
+                    enviar_wrapper = b
+        print(f"     [debug] botones visibles: {labels_visibles[:12]}")
+
+        enviar_locator = enviar_button_native or enviar_wrapper
+        if enviar_locator is None:
+            print("     [FALLO] NO encontre boton 'Enviar' habilitado.")
+            if evid_dir is not None:
+                try:
+                    dump_dispute_evidence(page, {"video_id": titulo_actual[:80]}, "auto_envio_sin_boton_enviar", str(evid_dir))
+                except Exception:
+                    pass
+            return {"ok": False, "razon": "sin_boton_enviar", "titulo": titulo_actual}
+
+        cual = "button_nativo" if enviar_button_native is not None else "wrapper"
+        print(f"     -> Click 'Enviar' (trusted via mouse coords, {cual})...")
+        try:
+            enviar_locator.scroll_into_view_if_needed()
+            time.sleep(0.15)
+            clicked_via_mouse = False
+            try:
+                bbox = enviar_locator.bounding_box()
+                if bbox and bbox.get("width", 0) > 4 and bbox.get("height", 0) > 4:
+                    cx = bbox["x"] + bbox["width"] / 2
+                    cy = bbox["y"] + bbox["height"] / 2
+                    page.mouse.move(cx, cy)
+                    time.sleep(0.1)
+                    page.mouse.click(cx, cy, delay=80)
+                    clicked_via_mouse = True
+                    print("     -> click 'Enviar' OK (mouse coords).")
+            except Exception as exc:
+                print(f"     -> mouse coords fallo: {exc}")
+            if not clicked_via_mouse:
+                enviar_locator.click(timeout=3000)
+                print("     -> click 'Enviar' OK (locator fallback).")
+        except Exception as exc:
+            print(f"     -> click 'Enviar' fallo: {exc}")
+            if evid_dir is not None:
+                try:
+                    dump_dispute_evidence(page, {"video_id": titulo_actual[:80]}, "auto_envio_no_envio", str(evid_dir))
+                except Exception:
+                    pass
+            return {"ok": False, "razon": "no_envio", "titulo": titulo_actual}
+
+        print(f"     -> Esperando {espera_envio_s}s...")
+        time.sleep(espera_envio_s)
+        sigue_activo = is_dispute_form_active(page)
+        if sigue_activo:
+            print("     [FALLO] form sigue activo despues del Enviar (probable bot detection).")
+            if evid_dir is not None:
+                try:
+                    dump_dispute_evidence(page, {"video_id": titulo_actual[:80]}, "auto_envio_form_persistente", str(evid_dir))
+                except Exception:
+                    pass
+            return {"ok": False, "razon": "form_persistente", "titulo": titulo_actual}
+
+        try:
+            page.evaluate(
+                """() => { document.title = document.title.replace('[LISTA-ENVIAR] ', '[ENVIADA] '); }"""
+            )
+        except Exception:
+            pass
+        print("     [OK] impugnacion enviada. Cerrando tab.")
+        try:
+            page.close()
+        except Exception:
+            pass
+        return {"ok": True, "razon": "ok", "titulo": titulo_actual}
+    except Exception as exc:
+        print(f"     [EXC] {exc}")
+        return {"ok": False, "razon": f"exc:{exc}", "titulo": titulo_actual}
+
+
+def enviar_pestanas_listas(context, args, selectors, max_a_enviar=None):
+    """Recorre tabs con titulo '[LISTA-ENVIAR]' y las envia (modo BATCH).
+
+    Devuelve dict: {'enviadas': N, 'fallos': [...], 'total_listas': N}.
+    Las tabs que fallan quedan abiertas; las exitosas se cierran.
+    """
+    candidatas = []
+    for page in context.pages:
+        try:
+            t = page.title() or ""
+        except Exception:
+            continue
+        if "[LISTA-ENVIAR]" in t:
+            candidatas.append(page)
+
+    if not candidatas:
+        return {"enviadas": 0, "fallos": [], "total_listas": 0}
+
+    if isinstance(max_a_enviar, int) and max_a_enviar > 0:
+        objetivo = candidatas[:max_a_enviar]
+    else:
+        objetivo = candidatas
+
+    print("\n" + "=" * 70)
+    print(f">>> AUTO-ENVIO BATCH: voy a enviar {len(objetivo)} tab(s) (de {len(candidatas)} listas).")
+    print("=" * 70)
+    enviadas = 0
+    fallos = []
+    evid_dir = Path(getattr(args, "evidencia_dir", "")) if getattr(args, "evidencia_dir", None) else None
+    espera_entre_s = max(0.5, min(getattr(args, "espera_entre", 1.0), 3.0))
+
+    for idx, page in enumerate(objetivo, start=1):
+        result = _enviar_una_tab(page, args, selectors, evid_dir, idx, len(objetivo))
+        if result.get("ok"):
+            enviadas += 1
+        else:
+            fallos.append({"titulo": result.get("titulo", ""), "razon": result.get("razon", "?")})
+        time.sleep(espera_entre_s)
+
+    print("\n" + "=" * 70)
+    print(f">>> AUTO-ENVIO TERMINADO. Enviadas: {enviadas}/{len(objetivo)} | Fallos: {len(fallos)}")
+    if fallos:
+        print(">>> Tabs con fallo (revisar y enviar a mano):")
+        for f in fallos:
+            print(f"   - [{f.get('razon')}] {f.get('titulo','')[:140]}")
+    print("=" * 70)
+    return {"enviadas": enviadas, "fallos": fallos, "total_listas": len(candidatas)}
 
 
 def preparar_pestana_para_reclamo(context, video_id, claim_index, args, selectors):
@@ -3580,12 +4203,12 @@ def preparar_pestana_para_reclamo(context, video_id, claim_index, args, selector
             return {"status": "no_more_claims", "total": result.get("total", 0), "page": page}
         print(f"     click Tomar medidas #{claim_index} OK (total CTAs visibles: {result.get('total')})")
 
-        deadline = time.time() + 8.0
+        deadline = time.time() + 12.0
         modal_open = False
         while time.time() < deadline:
             try:
                 txt = get_active_root(page).inner_text().lower()
-                if "seleccionar acci" in txt or "select action" in txt:
+                if "seleccionar acci" in txt or "select action" in txt or "elige una acci" in txt:
                     modal_open = True
                     break
             except Exception:
@@ -3599,10 +4222,72 @@ def preparar_pestana_para_reclamo(context, video_id, claim_index, args, selector
                 pass
             return {"status": "modal_seleccionar_no_abre", "page": page}
 
-        if not _click_impugnar_in_modal(page):
+        click_ok = False
+        for intento in range(3):
+            if _click_impugnar_in_modal(page):
+                click_ok = True
+                break
+            time.sleep(0.6)
+            try:
+                txt2 = get_active_root(page).inner_text().lower()
+                if "seleccionar acci" not in txt2 and "select action" not in txt2 and "elige una acci" not in txt2:
+                    print(f"     [Impugnar modal] modal de acciones cerrado en intento {intento+1}, abortando retries.")
+                    break
+            except Exception:
+                pass
+            print(f"     [Impugnar modal] retry {intento+1}/3 buscando boton 'Impugnar' en modal...")
+        if not click_ok:
+            try:
+                evid_dir = Path(__file__).resolve().parent / "data" / "impugnar_evidencia"
+                dump_dispute_evidence(page, {"video_id": f"{video_id}_claim{claim_index}"}, "no_pude_click_impugnar", str(evid_dir))
+            except Exception:
+                pass
             return {"status": "no_pude_click_impugnar", "page": page}
-        time.sleep(0.8)
-        _click_continuar_in_modal(page)
+
+        check_continuar_js = """
+            () => {
+              const all = Array.from(document.querySelectorAll('button'));
+              for (const el of all) {
+                const t = (el.innerText || '').trim().toLowerCase();
+                if (!/^continuar$|^continue$/.test(t)) continue;
+                if ((el.tagName || '').toLowerCase() !== 'button') continue;
+                const r = el.getBoundingClientRect();
+                if (r.width <= 0) continue;
+                const dis = el.disabled === true || el.getAttribute('aria-disabled') === 'true';
+                if (!dis) return true;
+              }
+              return false;
+            }
+            """
+        time.sleep(0.5)
+        continuar_enabled = False
+        deadline_cont = time.time() + 5.0
+        while time.time() < deadline_cont:
+            try:
+                continuar_enabled = bool(page.evaluate(check_continuar_js))
+            except Exception:
+                continuar_enabled = False
+            if continuar_enabled:
+                break
+            time.sleep(0.3)
+
+        if not continuar_enabled:
+            print("     [Impugnar modal] Continuar sigue DISABLED tras click. Re-intentando click en card Impugnar...")
+            for retry_card in range(3):
+                _click_impugnar_in_modal(page)
+                time.sleep(0.7)
+                try:
+                    continuar_enabled = bool(page.evaluate(check_continuar_js))
+                except Exception:
+                    continuar_enabled = False
+                if continuar_enabled:
+                    print(f"     [Impugnar modal] Continuar habilitado tras retry {retry_card+1}.")
+                    break
+            if not continuar_enabled:
+                print("     [Impugnar modal] Continuar SIGUE disabled tras retries. El click no esta seleccionando la card Impugnar.")
+
+        if not _click_continuar_in_modal(page):
+            print("     [Impugnar modal] no se pudo clickear Continuar.")
         time.sleep(1.5)
 
         estado = _wait_for_form_or_2fa(page, max_s=20.0)
@@ -3612,8 +4297,33 @@ def preparar_pestana_para_reclamo(context, video_id, claim_index, args, selector
             tope = float(getattr(args, "pausa_interactiva_s", 600.0))
             estado = _wait_for_form_or_2fa(page, max_s=tope)
             if estado != "form":
+                try:
+                    snippet = get_active_root(page).inner_text().strip().replace("\n", " | ")
+                    print(f"     [no_se_detecto_form post-2fa] estado={estado}. preview: {snippet[:300]!r}")
+                except Exception:
+                    pass
+                try:
+                    evid_dir = Path(__file__).resolve().parent / "data" / "impugnar_evidencia"
+                    dump_dispute_evidence(page, {"video_id": f"{video_id}_claim{claim_index}"}, f"no_se_detecto_form_post2fa_{estado}", str(evid_dir))
+                except Exception:
+                    pass
                 return {"status": f"2fa_no_completado ({estado})", "page": page}
         if estado != "form":
+            try:
+                snippet = get_active_root(page).inner_text().strip().replace("\n", " | ")
+                print(f"     [no_se_detecto_form] estado={estado}. preview: {snippet[:300]!r}")
+            except Exception:
+                snippet = ""
+            try:
+                page_url = page.url
+                print(f"     [no_se_detecto_form] URL actual: {page_url[:200]}")
+            except Exception:
+                pass
+            try:
+                evid_dir = Path(__file__).resolve().parent / "data" / "impugnar_evidencia"
+                dump_dispute_evidence(page, {"video_id": f"{video_id}_claim{claim_index}"}, f"no_se_detecto_form_{estado}", str(evid_dir))
+            except Exception:
+                pass
             return {"status": f"no_se_detecto_form ({estado})", "page": page}
 
         set_suppress_ui_blockers(True)
@@ -3666,8 +4376,13 @@ def _procesar_lote_pestanas(context, page0, args, selectors):
     fallos = []
     omitidos = 0
 
+    max_tabs = int(getattr(args, "max_tabs", 0) or 0)
+    cortar_por_tabs = False
+
     for vidx, item in enumerate(items, start=1):
         if args.max and vidx > args.max:
+            break
+        if cortar_por_tabs:
             break
         video_id = (item.get("video_id") or "").strip()
         title = item.get("title") or video_id
@@ -3696,6 +4411,13 @@ def _procesar_lote_pestanas(context, page0, args, selectors):
             if status == "ready_to_send":
                 pestanas_listas.append({"video_id": video_id, "claim": ci, "title": title})
                 print(f"     [LISTA] tab #{len(pestanas_listas)} preparada (video {video_id}, reclamo {ci}).")
+                if getattr(args, "auto_enviar_listas", False) and tab is not None:
+                    evid_dir_inm = Path(getattr(args, "evidencia_dir", "")) if getattr(args, "evidencia_dir", None) else None
+                    _enviar_una_tab(tab, args, selectors, evid_dir_inm, len(pestanas_listas), max_tabs if max_tabs > 0 else len(pestanas_listas))
+                if max_tabs > 0 and len(pestanas_listas) >= max_tabs:
+                    print(f"     >>> Corte por --max-tabs {max_tabs}: ya tengo {len(pestanas_listas)} tab(s) listas. Paro de armar.")
+                    cortar_por_tabs = True
+                    break
             else:
                 fallos.append({"video_id": video_id, "claim": ci, "razon": status})
                 print(f"     [FALLO] reclamo {ci}: {status}")
@@ -3708,7 +4430,8 @@ def _procesar_lote_pestanas(context, page0, args, selectors):
 
 def preparar_pestanas_modo(context, page0, args, selectors):
     """Modo principal: abre tabs en paralelo, una por reclamo. Loop infinito si --loop."""
-    global _PAUSE_REQUESTED
+    global _PAUSE_REQUESTED, _AUTO_ENVIAR_ACTIVO
+    _AUTO_ENVIAR_ACTIVO = bool(getattr(args, "auto_enviar_listas", False))
     _start_input_listener()
     loop_on = bool(getattr(args, "loop", False))
     max_loops = max(1, int(getattr(args, "max_loops", 50)))
@@ -3745,6 +4468,13 @@ def preparar_pestanas_modo(context, page0, args, selectors):
             print("\nNo quedan videos con reclamos. Terminando loop.")
             break
 
+        if getattr(args, "auto_enviar_listas", False) and len(listas) > 0:
+            max_envio = int(getattr(args, "probar_envio", 0) or 0)
+            enviar_pestanas_listas(
+                context, args, selectors,
+                max_a_enviar=(max_envio if max_envio > 0 else None),
+            )
+
         if not loop_on:
             print("\n>>> Andá pestaña por pestaña haciendo click los 3 checks + 'Enviar'. <<<")
             print(">>> Cuando termines, cerrá esta terminal con Ctrl-C. <<<")
@@ -3758,6 +4488,11 @@ def preparar_pestanas_modo(context, page0, args, selectors):
         if vuelta >= max_loops:
             print(f"\nLimite de loops alcanzado ({max_loops}).")
             break
+
+        if getattr(args, "auto_enviar_listas", False):
+            print(f"\n>>> Vuelta {vuelta} terminada (auto-envio activo). Re-escaneando para vuelta {vuelta+1}...")
+            time.sleep(1.0)
+            continue
 
         print("\n" + ">" * 70)
         print(">>> Andá enviando las tabs ya armadas (3 checks + Enviar en cada una).")
@@ -3777,6 +4512,9 @@ def preparar_pestanas_modo(context, page0, args, selectors):
     print("LOOP FINALIZADO")
     print(f"  Total acumulado: {total_listas} pestañas listas | {total_fallos} fallos")
     print("=" * 70)
+    if getattr(args, "auto_enviar_listas", False):
+        print(">>> Auto-envio terminado. Saliendo.")
+        return True
     print(">>> Cerrá esta terminal con Ctrl-C cuando hayas enviado todo. <<<")
     try:
         while True:
@@ -4456,6 +5194,23 @@ def parse_args():
         "--preparar-pestanas",
         action="store_true",
         help="Modo PESTAÑAS: abre una pestaña por reclamo, completa el formulario, deja el boton 'Enviar' SIN clickear. Vos vas tab por tab dandole Send.",
+    )
+    parser.add_argument(
+        "--auto-enviar-listas",
+        action="store_true",
+        help="Despues de armar las tabs en modo --preparar-pestanas, recorre las que tienen [LISTA-ENVIAR] y dispara los 3 checks + Enviar via Playwright (trusted clicks).",
+    )
+    parser.add_argument(
+        "--probar-envio",
+        type=int,
+        default=0,
+        help="Si --auto-enviar-listas esta activo, envia solo las primeras N tabs (para probar antes de soltar el resto). 0 = todas.",
+    )
+    parser.add_argument(
+        "--max-tabs",
+        type=int,
+        default=0,
+        help="Corte total por cantidad de tabs [LISTA-ENVIAR] armadas (cuenta reclamos, NO videos). Util para probar: --max-tabs 1 arma 1 tab y para. 0 = sin limite.",
     )
     parser.add_argument(
         "--pausa-interactiva-s",
