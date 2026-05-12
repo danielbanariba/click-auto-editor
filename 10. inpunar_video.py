@@ -103,33 +103,41 @@ _MESES_EN = [
 
 
 def build_omitir_fecha_pattern(fecha_iso):
-    """Construye un regex que matchea variantes de una fecha ISO (YYYY-MM-DD).
+    """Construye un regex que matchea variantes de una o varias fechas ISO (YYYY-MM-DD).
 
+    Acepta una sola fecha o lista CSV: 'YYYY-MM-DD' o 'YYYY-MM-DD,YYYY-MM-DD,...'.
     Cubre formatos en es / en / numeric que YouTube Studio puede mostrar.
-    Devuelve None si la fecha es vacia o invalida.
+    Devuelve None si todas las fechas son vacias o invalidas.
     """
     if not fecha_iso:
         return None
     fecha_iso = fecha_iso.strip()
     if not fecha_iso:
         return None
-    try:
-        from datetime import datetime
-        dt = datetime.strptime(fecha_iso, "%Y-%m-%d")
-    except ValueError:
-        print(f"AVISO: --omitir-fecha invalida ({fecha_iso!r}), se ignora. Usa formato YYYY-MM-DD.")
+    fechas = [f.strip() for f in fecha_iso.split(",") if f.strip()]
+    if not fechas:
         return None
-    d, m, y = dt.day, dt.month, dt.year
-    mes_es = _MESES_ES[m - 1]
-    mes_en = _MESES_EN[m - 1]
-    variants = [
-        rf"\b{d}\s+(?:{mes_es})\.?\s+{y}\b",
-        rf"\b(?:{mes_en})\.?\s+{d},?\s+{y}\b",
-        rf"\b{d:02d}/{m:02d}/{y}\b",
-        rf"\b{d}/{m}/{y}\b",
-        rf"\b{y}-{m:02d}-{d:02d}\b",
-    ]
-    return re.compile("|".join(variants), re.IGNORECASE)
+    from datetime import datetime
+    all_variants = []
+    for fecha in fechas:
+        try:
+            dt = datetime.strptime(fecha, "%Y-%m-%d")
+        except ValueError:
+            print(f"AVISO: --omitir-fecha invalida ({fecha!r}), se ignora. Usa formato YYYY-MM-DD.")
+            continue
+        d, m, y = dt.day, dt.month, dt.year
+        mes_es = _MESES_ES[m - 1]
+        mes_en = _MESES_EN[m - 1]
+        all_variants.extend([
+            rf"\b{d}\s+(?:{mes_es})\.?\s+{y}\b",
+            rf"\b(?:{mes_en})\.?\s+{d},?\s+{y}\b",
+            rf"\b{d:02d}/{m:02d}/{y}\b",
+            rf"\b{d}/{m}/{y}\b",
+            rf"\b{y}-{m:02d}-{d:02d}\b",
+        ])
+    if not all_variants:
+        return None
+    return re.compile("|".join(all_variants), re.IGNORECASE)
 
 
 def is_video_marcado_omitir(item, fecha_pat):
@@ -5222,7 +5230,8 @@ def parse_args():
         "--omitir-fecha",
         type=str,
         default="",
-        help="Fecha marcador en formato YYYY-MM-DD. Videos cuya celda de fecha matchee se SALTAN sin abrir modal. Ej: 2028-04-30.",
+        help="Fechas marcador en formato YYYY-MM-DD (CSV soportado). Videos cuya celda de fecha matchee CUALQUIERA "
+             "de las fechas se SALTAN sin abrir modal. Ej: 2028-04-30 o 2028-04-30,2028-05-01.",
     )
     parser.add_argument(
         "--mem-pausa-mb",

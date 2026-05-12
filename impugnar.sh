@@ -7,7 +7,8 @@
 #   - Después de armar el batch, AUTO-ENVÍA cada tab via Playwright trusted clicks
 #     (marca los 3 checks + clickea "Enviar"). El usuario NO toca nada.
 #   - Si una tab falla, queda abierta para envío manual; las exitosas se cierran.
-#   - OMITE videos con fecha marcador 2028-04-30. Cambiala con --omitir-fecha YYYY-MM-DD.
+#   - OMITE videos con fechas marcador 2028-04-30 y 2028-05-01 (CSV soportado).
+#     Cambialas con --omitir-fecha "YYYY-MM-DD,YYYY-MM-DD".
 #   - Loop hasta 1000 vueltas (efectivamente infinito hasta que no queden reclamos).
 #   - Monitor de memoria: pausa automáticamente si la RAM libre baja de 2GB.
 #
@@ -46,7 +47,7 @@ exec "$PYTHON" -u "$SCRIPT" \
     --max-tabs 10 \
     --loop \
     --max-loops 1000 \
-    --omitir-fecha 2028-04-30 \
+    --omitir-fecha "2028-04-30,2028-05-01" \
     --mem-pausa-mb 2000 \
     --mem-reanudar-mb 3500 \
     --delay 1.2 \
