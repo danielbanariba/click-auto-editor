@@ -1622,6 +1622,40 @@ def parse_filtros_reclamante(raw):
     return [s.strip().lower() for s in raw.split(",") if s.strip()]
 
 
+def parse_filtros_reclamante_archivo(path):
+    """Carga filtros desde un archivo TXT (una entrada por linea).
+    Ignora lineas vacias y comentarios (#). Devuelve lista normalizada lowercase."""
+    if not path:
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lineas = f.readlines()
+    except Exception as exc:
+        print(f"[WARN] no se pudo leer --filtrar-reclamante-archivo {path}: {exc}")
+        return []
+    salida = []
+    for raw in lineas:
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            continue
+        salida.append(s.lower())
+    return salida
+
+
+def combinar_filtros(*listas):
+    """Combina varias listas de filtros deduplicando case-insensitive."""
+    vistos = set()
+    out = []
+    for lista in listas:
+        for f in lista or []:
+            k = f.strip().lower()
+            if not k or k in vistos:
+                continue
+            vistos.add(k)
+            out.append(k)
+    return out
+
+
 def _locator_finds_filtros_visible(page_or_root, filtros, max_checks=8):
     """Usa Playwright get_by_text con regex que atraviesa shadow DOM.
     Devuelve True si encuentra al menos un elemento visible con alguno de los filtros."""
@@ -1662,6 +1696,132 @@ def claimant_matches_filter(page, filtros):
         except Exception:
             return False
     return any(f in text for f in filtros)
+
+
+P_RECLAMANTES_HEADER = re.compile(r"(reclamantes|claimants)", re.IGNORECASE)
+P_NEXT_SECTION = re.compile(
+    r"^(impacto|qu[eé] puedes|monetizaci[oó]n|tipo de contenido|contenido encontrado|impact|what you can)",
+    re.IGNORECASE,
+)
+P_VER_DETALLES_BTN = re.compile(r"^(ver detalles|see details)$", re.IGNORECASE)
+P_CERRAR_BTN = re.compile(r"(cerrar|close|descartar|dismiss)", re.IGNORECASE)
+
+
+def _parse_reclamantes_block(dialog_text):
+    """Dado el inner_text del modal 'Detalles del contenido', extrae las lineas
+    de la seccion 'Reclamantes' (incluye 'en nombre de X').
+    Devuelve lista de strings limpios."""
+    if not dialog_text:
+        return []
+    lines = [ln.strip() for ln in dialog_text.splitlines()]
+    out = []
+    capturing = False
+    for line in lines:
+        if not line:
+            if capturing and out:
+                break
+            continue
+        if not capturing:
+            if P_RECLAMANTES_HEADER.fullmatch(line) or P_RECLAMANTES_HEADER.match(line) and len(line) < 30:
+                capturing = True
+            continue
+        if P_NEXT_SECTION.match(line):
+            break
+        out.append(line)
+        if len(out) >= 8:
+            break
+    return out
+
+
+def extract_claimants_from_video(page, video_id, delay_s=1.0, max_claims_per_video=6):
+    """Abre /video/{id}/copyright, clickea cada 'Ver detalles', lee el bloque
+    'Reclamantes' del modal y devuelve la lista completa de reclamantes
+    encontrados (todos los claims del video, deduplicados).
+
+    NO clickea 'Tomar medidas' ni envia nada. Solo abre y cierra modales informativos."""
+    url = f"https://studio.youtube.com/video/{video_id}/copyright"
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=25000)
+    except Exception as exc:
+        print(f"     [WARN] no se pudo cargar /copyright: {exc}")
+        return []
+    try:
+        page.wait_for_load_state("networkidle", timeout=12000)
+    except Exception:
+        pass
+    time.sleep(max(1.5, min(delay_s * 1.5, 3.5)))
+
+    try:
+        botones = page.get_by_role("button", name=P_VER_DETALLES_BTN)
+        total = botones.count()
+    except Exception:
+        return []
+
+    if total == 0:
+        return []
+
+    total = min(total, max_claims_per_video)
+    reclamantes = []
+    vistos = set()
+
+    for i in range(total):
+        try:
+            btn = botones.nth(i)
+            if not btn.is_visible():
+                continue
+            try:
+                btn.scroll_into_view_if_needed(timeout=3000)
+            except Exception:
+                pass
+            try:
+                btn.click(timeout=5000)
+            except Exception as exc:
+                print(f"     [WARN] no se pudo clickear 'Ver detalles' #{i+1}: {exc}")
+                continue
+
+            time.sleep(max(1.0, min(delay_s, 2.0)))
+
+            text = ""
+            try:
+                dialog = page.get_by_role("dialog").last
+                if dialog and dialog.count() > 0 and dialog.is_visible():
+                    text = dialog.inner_text(timeout=3000) or ""
+            except Exception:
+                text = ""
+            if not text:
+                try:
+                    text = page.evaluate("() => (document.body && document.body.innerText) || ''") or ""
+                except Exception:
+                    text = ""
+
+            bloque = _parse_reclamantes_block(text)
+            for nombre in bloque:
+                key = nombre.lower()
+                if key in vistos:
+                    continue
+                vistos.add(key)
+                reclamantes.append(nombre)
+
+            try:
+                page.keyboard.press("Escape")
+            except Exception:
+                pass
+            time.sleep(max(0.5, min(delay_s * 0.6, 1.2)))
+
+            try:
+                if claim_dialog_is_open(page):
+                    dismiss_claim_dialog(page, delay_s=delay_s)
+            except Exception:
+                pass
+        except Exception as exc:
+            print(f"     [WARN] error procesando claim #{i+1}: {exc}")
+            try:
+                page.keyboard.press("Escape")
+            except Exception:
+                pass
+            continue
+
+    return reclamantes
 
 
 def page_has_claimant(page, video_id, filtros, delay_s=1.0):
@@ -1738,12 +1898,99 @@ def procesar_cola_automatica(page, args, selectors, queue_path, checkpoint_path)
     pendientes = [item for item in items if processed.get(claim_item_key(item)) != "ok"]
     print(f"Videos detectados (filtrados): {len(items)} | Pendientes: {len(pendientes)}")
 
-    filtros = parse_filtros_reclamante(getattr(args, "filtrar_reclamante", ""))
+    filtros_csv = parse_filtros_reclamante(getattr(args, "filtrar_reclamante", ""))
+    filtros_archivo = parse_filtros_reclamante_archivo(getattr(args, "filtrar_reclamante_archivo", "") or "")
+    filtros = combinar_filtros(filtros_csv, filtros_archivo)
     if filtros:
-        print(f"FILTRO ACTIVO: solo se apelaran reclamos que matcheen {filtros}")
+        if filtros_archivo and not filtros_csv:
+            print(f"FILTRO ACTIVO: {len(filtros)} reclamantes cargados desde archivo {args.filtrar_reclamante_archivo}")
+        elif filtros_csv and filtros_archivo:
+            print(f"FILTRO ACTIVO: {len(filtros)} reclamantes ({len(filtros_csv)} CLI + {len(filtros_archivo)} archivo)")
+        else:
+            print(f"FILTRO ACTIVO: solo se apelaran reclamos que matcheen {filtros}")
 
     if args.solo_detectar:
-        print(f"Cola guardada en: {queue_path}")
+        if filtros:
+            print(f"\nModo SOLO-DETECTAR + FILTRO: abriendo 'Ver detalles' de cada claim en {len(items)} videos")
+            print(f"para verificar reclamante {filtros}. NO se clickea 'Tomar medidas'.")
+            matches = []
+            matches_path = getattr(args, "matches_output", "") or ""
+            partial_writes = 0
+
+            def _flush_partial(items_so_far, matches_so_far):
+                if not matches_path:
+                    return
+                try:
+                    with open(matches_path, "w", encoding="utf-8") as f:
+                        f.write(f"# Videos con reclamante {filtros}\n")
+                        f.write(f"# Total matches: {len(matches_so_far)} | Procesados: {items_so_far}\n")
+                        f.write("# titulo\tvideo_id\treclamantes\turl\n")
+                        for m in matches_so_far:
+                            vid = (m.get("video_id") or "?").strip()
+                            ttl = (m.get("title") or "?").strip().replace("\t", " ")
+                            rec = " | ".join(m.get("reclamantes", []))
+                            url = f"https://studio.youtube.com/video/{vid}/copyright"
+                            f.write(f"{ttl}\t{vid}\t{rec}\t{url}\n")
+                except Exception as exc:
+                    print(f"[WARN] no se pudo escribir matches_output {matches_path}: {exc}")
+
+            for index, item in enumerate(items, start=1):
+                video_id = (item.get("video_id") or "").strip()
+                titulo = item.get("title") or video_id or "?"
+                if not video_id:
+                    item["status"] = "sin_video_id"
+                    save_queue(queue_path, items)
+                    continue
+                print(f"\n  [{index}/{len(items)}] {titulo[:90]}")
+                try:
+                    reclamantes = extract_claimants_from_video(page, video_id, delay_s=args.delay)
+                except Exception as exc:
+                    item["status"] = "error_escaneo"
+                    print(f"     [ERROR] {exc}")
+                    save_queue(queue_path, items)
+                    continue
+
+                if not reclamantes:
+                    item["status"] = "sin_reclamantes_detectados"
+                    item["reclamantes"] = []
+                    print(f"     [WARN] no se detectaron reclamantes (puede ser claim ya resuelto o UI distinta)")
+                else:
+                    item["reclamantes"] = reclamantes
+                    print(f"     Reclamantes: {' | '.join(reclamantes)}")
+                    texto_completo = " | ".join(reclamantes).lower()
+                    hit = any(f in texto_completo for f in filtros)
+                    if hit:
+                        item["status"] = "match_reclamante"
+                        matches.append(item)
+                        print(f"     [MATCH] {filtros} encontrado")
+                    else:
+                        item["status"] = "skip_filtro_reclamante"
+
+                save_queue(queue_path, items)
+                partial_writes += 1
+                if partial_writes % 5 == 0:
+                    _flush_partial(index, matches)
+
+            print(f"\n=== RESUMEN ESCANEO ===")
+            print(f"Total videos con claim escaneados: {len(items)}")
+            print(f"Matches con reclamante {filtros}: {len(matches)}")
+            print(f"Cola completa: {queue_path}")
+
+            if matches:
+                print(f"\nVideos cuyo reclamante incluye {filtros}:")
+                for m in matches:
+                    vid = (m.get("video_id") or "?").strip()
+                    ttl = (m.get("title") or "?").strip()
+                    rec = " | ".join(m.get("reclamantes", []))
+                    print(f"  - {ttl}")
+                    print(f"    reclamantes: {rec}")
+                    print(f"    https://studio.youtube.com/video/{vid}/copyright")
+
+            _flush_partial(len(items), matches)
+            if matches_path:
+                print(f"\nArchivo matches: {matches_path}")
+        else:
+            print(f"Cola guardada en: {queue_path}")
         return True
 
     total = 0
@@ -2065,6 +2312,7 @@ def parse_args():
     parser.add_argument("--cola", default=str(DEFAULT_QUEUE_PATH), help="Ruta del JSON con la cola detectada.")
     parser.add_argument("--checkpoint", default=str(DEFAULT_CHECKPOINT_PATH), help="Ruta del checkpoint de videos ya procesados.")
     parser.add_argument("--solo-detectar", action="store_true", help="Solo detectar reclamos y guardar la cola sin enviar formularios.")
+    parser.add_argument("--matches-output", default="", help="Ruta de archivo TXT donde escribir los videos que matchean el filtro de reclamante (solo aplica con --solo-detectar + --filtrar-reclamante).")
     parser.add_argument("--max-scan", type=int, default=0, help="Cantidad maxima de videos a detectar en el escaneo automatico (0 = sin limite).")
     parser.add_argument("--reintentos-modal", type=int, default=3, help="Reintentos para abrir el modal de derechos de autor por video.")
     parser.add_argument("--max", type=int, default=0, help="Cantidad de apelaciones a procesar (0 = infinito).")
@@ -2078,6 +2326,12 @@ def parse_args():
         help="Lista CSV de nombres de reclamantes a apelar. Si se especifica, solo apela reclamos cuyo "
              "texto del modal contenga alguno de estos nombres (case-insensitive). "
              "Ejemplo: --filtrar-reclamante 'CD Baby,CD Baby CO'. Vacio = sin filtro.",
+    )
+    parser.add_argument(
+        "--filtrar-reclamante-archivo",
+        default="",
+        help="Ruta a archivo TXT con un nombre de reclamante por linea (lineas vacias y '#' ignoradas). "
+             "Se combina con --filtrar-reclamante (deduplicado case-insensitive).",
     )
     parser.add_argument(
         "--solo-fecha",

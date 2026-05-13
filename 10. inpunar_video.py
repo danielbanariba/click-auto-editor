@@ -4181,6 +4181,49 @@ def enviar_pestanas_listas(context, args, selectors, max_a_enviar=None):
     return {"enviadas": enviadas, "fallos": fallos, "total_listas": len(candidatas)}
 
 
+def _scroll_copyright_page_to_bottom(page, max_iters=12, pause=0.35):
+    """Scrollea la página /copyright hasta el fondo para forzar lazy render de todos los reclamos."""
+    last_count = -1
+    for _ in range(max_iters):
+        try:
+            page.evaluate(
+                """
+                () => {
+                  const scrollables = Array.from(document.querySelectorAll('*')).filter(el => {
+                    const s = window.getComputedStyle(el);
+                    return (s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 10;
+                  });
+                  for (const el of scrollables) { el.scrollTop = el.scrollHeight; }
+                  window.scrollTo(0, document.documentElement.scrollHeight);
+                }
+                """
+            )
+        except Exception:
+            pass
+        time.sleep(pause)
+        try:
+            count = int(page.evaluate(
+                """
+                () => {
+                  const all = Array.from(document.querySelectorAll('button, ytcp-button-shape, [role="button"], tp-yt-paper-button'));
+                  return all.filter(el => {
+                    const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+                    return t === 'tomar medidas' || t === 'take action';
+                  }).length;
+                }
+                """
+            ))
+        except Exception:
+            count = 0
+        if count == last_count and count > 0:
+            break
+        last_count = count
+    try:
+        page.evaluate("() => window.scrollTo(0, 0)")
+    except Exception:
+        pass
+
+
 def preparar_pestana_para_reclamo(context, video_id, claim_index, args, selectors):
     """Abre nueva tab. Hace todo el flujo hasta dejar la pestaña en el botón Enviar (sin clickearlo)."""
     global _2FA_PASSED_THIS_SESSION
@@ -4193,6 +4236,7 @@ def preparar_pestana_para_reclamo(context, video_id, claim_index, args, selector
             page.wait_for_load_state("networkidle", timeout=12000)
         except Exception:
             pass
+        _scroll_copyright_page_to_bottom(page)
 
         deadline = time.time() + 20.0
         result = {"ok": False, "total": 0}
@@ -4404,10 +4448,12 @@ def _procesar_lote_pestanas(context, page0, args, selectors):
             continue
 
         max_reclamos_video = 30
-        for ci in range(max_reclamos_video):
+        intentos_sin_progreso = 0
+        ci = 0
+        while ci < max_reclamos_video:
             _wait_if_paused()
             _wait_if_low_memory()
-            res = preparar_pestana_para_reclamo(context, video_id, ci, args, selectors)
+            res = preparar_pestana_para_reclamo(context, video_id, 0, args, selectors)
             status = res.get("status")
             tab = res.get("page")
             if status == "no_more_claims":
@@ -4419,6 +4465,7 @@ def _procesar_lote_pestanas(context, page0, args, selectors):
             if status == "ready_to_send":
                 pestanas_listas.append({"video_id": video_id, "claim": ci, "title": title})
                 print(f"     [LISTA] tab #{len(pestanas_listas)} preparada (video {video_id}, reclamo {ci}).")
+                intentos_sin_progreso = 0
                 if getattr(args, "auto_enviar_listas", False) and tab is not None:
                     evid_dir_inm = Path(getattr(args, "evidencia_dir", "")) if getattr(args, "evidencia_dir", None) else None
                     _enviar_una_tab(tab, args, selectors, evid_dir_inm, len(pestanas_listas), max_tabs if max_tabs > 0 else len(pestanas_listas))
@@ -4432,6 +4479,11 @@ def _procesar_lote_pestanas(context, page0, args, selectors):
                 if tab is not None:
                     try: tab.close()
                     except Exception: pass
+                intentos_sin_progreso += 1
+                if intentos_sin_progreso >= 4:
+                    print(f"     [STOP] {intentos_sin_progreso} fallos consecutivos en este video. Saltando al siguiente.")
+                    break
+            ci += 1
 
     return {"items": len(items), "listas": pestanas_listas, "fallos": fallos, "omitidos": omitidos}
 
