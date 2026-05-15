@@ -24,6 +24,8 @@ DIR_AUDIO_SCRIPTS = (
     BASE_DIR / "01_limpieza_de_impurezas"
 )  # Carpeta fuente para renderizado
 DIR_UPLOAD = BASE_DIR / "upload_video"
+#DIR_UPLOAD = Path("/mnt/DiscoLocal")
+DIR_RENDERIZANDO = BASE_DIR / "Renderizando"
 DIR_VERIFICACION = BASE_DIR / "verificacion"
 
 # Directorio temporal para renderizado rápido
@@ -89,7 +91,7 @@ MAX_FOLDERS_TO_PROCESS = 9999  # Sin límite fijo, se detiene por espacio en dis
 # Selección de carpetas/videos en scripts 1, 2 y 3
 # True  = orden aleatorio
 # False = orden descendente por año (más reciente primero)
-RANDOMIZE_VIDEO_SELECTION = False
+RANDOMIZE_VIDEO_SELECTION = True
 
 # Control inteligente de espacio en disco
 # El renderizado se detiene cuando queda menos de este espacio libre en DIR_UPLOAD
@@ -185,6 +187,7 @@ def create_directories():
         DIR_JUNTAR_AUDIOS,
         DIR_AUDIO_SCRIPTS,
         DIR_UPLOAD,
+        DIR_RENDERIZANDO,
         DIR_VERIFICACION,
         DIR_VOLVER_A_BUSCAR,
         DIR_REGRESAR_AUDIO,

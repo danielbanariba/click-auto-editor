@@ -26,7 +26,7 @@ from limpieza.censura import censor_profanity
 sys.path.append(str(Path(__file__).parent))
 from config import (
     DIR_AUDIO_SCRIPTS,
-    DIR_UPLOAD,
+    DIR_RENDERIZANDO,
     INTRO_VIDEO,
     MAX_PARALLEL_RENDERS,
     MAX_FOLDERS_TO_PROCESS,
@@ -304,12 +304,12 @@ def get_free_space_gb(path: Path) -> float:
 
 def has_enough_disk_space(min_gb: float = None) -> bool:
     """
-    Verifica si hay suficiente espacio libre en DIR_UPLOAD.
+    Verifica si hay suficiente espacio libre en DIR_RENDERIZANDO.
     Retorna True si hay >= min_gb libres, False si hay menos.
     """
     if min_gb is None:
         min_gb = MIN_FREE_SPACE_GB
-    free_gb = get_free_space_gb(DIR_UPLOAD)
+    free_gb = get_free_space_gb(DIR_RENDERIZANDO)
     return free_gb >= min_gb
 
 
@@ -696,7 +696,7 @@ def prepare_staging_batch():
         return None, None
 
     audio_rel = resolve_rel_path(DIR_AUDIO_SCRIPTS, DEFAULT_BASE_DIR)
-    upload_rel = resolve_rel_path(DIR_UPLOAD, DEFAULT_BASE_DIR)
+    upload_rel = resolve_rel_path(DIR_RENDERIZANDO, DEFAULT_BASE_DIR)
 
     slow_audio = DEFAULT_BASE_DIR / audio_rel
     fast_audio = fast_base / audio_rel
@@ -828,14 +828,14 @@ def move_folder_to_upload(
     """
     Mueve la carpeta renderizada a la carpeta de subida.
     """
-    DIR_UPLOAD.mkdir(parents=True, exist_ok=True)
+    DIR_RENDERIZANDO.mkdir(parents=True, exist_ok=True)
     overlays_dir = source_folder / "_track_overlays"
     if overlays_dir.exists():
         try:
             shutil.rmtree(overlays_dir)
         except Exception:
             pass
-    destination = get_unique_destination(DIR_UPLOAD, folder_name)
+    destination = get_unique_destination(DIR_RENDERIZANDO, folder_name)
 
     if show_progress:
         log_verbose(f"[UPLOAD] Moviendo carpeta a {destination}...")
@@ -3245,7 +3245,7 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
     folders = folders[:MAX_FOLDERS_TO_PROCESS]
 
     # Verificar espacio inicial
-    free_gb = get_free_space_gb(DIR_UPLOAD)
+    free_gb = get_free_space_gb(DIR_RENDERIZANDO)
     log_verbose(f"\n{'=' * 60}")
     log_verbose("INICIANDO RENDERIZADO PARALELO")
     log_verbose(f"Carpetas disponibles: {len(folders)}")
@@ -3345,7 +3345,7 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
 
             # Verificar espacio antes de lanzar más trabajos
             if not has_enough_disk_space():
-                free_gb = get_free_space_gb(DIR_UPLOAD)
+                free_gb = get_free_space_gb(DIR_RENDERIZANDO)
                 print(
                     f"\n[ESPACIO] Disco casi lleno ({format_size_gb(free_gb)} libres)"
                 )
@@ -3398,7 +3398,7 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
     if cancelled:
         return
 
-    free_gb = get_free_space_gb(DIR_UPLOAD)
+    free_gb = get_free_space_gb(DIR_RENDERIZANDO)
     log_verbose(f"\n{'=' * 60}")
     if stopped_by_space:
         log_verbose("RENDERIZADO DETENIDO POR ESPACIO EN DISCO")
@@ -3439,7 +3439,7 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
         return
 
     # Verificar espacio inicial
-    free_gb = get_free_space_gb(DIR_UPLOAD)
+    free_gb = get_free_space_gb(DIR_RENDERIZANDO)
     print(f"\n{'=' * 60}")
     print(f"INICIANDO RENDERIZADO SECUENCIAL")
     print(f"Carpetas disponibles: {total}")
@@ -3464,7 +3464,7 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
         for i, (folder_path, folder_name) in enumerate(folders, 1):
             # Verificar espacio antes de cada render
             if not has_enough_disk_space():
-                free_gb = get_free_space_gb(DIR_UPLOAD)
+                free_gb = get_free_space_gb(DIR_RENDERIZANDO)
                 print(
                     f"\n[ESPACIO] Disco casi lleno ({format_size_gb(free_gb)} libres)"
                 )
@@ -3503,7 +3503,7 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
                     break
 
             # Mostrar estadísticas parciales con espacio libre
-            free_gb = get_free_space_gb(DIR_UPLOAD)
+            free_gb = get_free_space_gb(DIR_RENDERIZANDO)
             remaining = total - i
 
             print(
@@ -3522,7 +3522,7 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
                 )
         return
 
-    free_gb = get_free_space_gb(DIR_UPLOAD)
+    free_gb = get_free_space_gb(DIR_RENDERIZANDO)
     print(f"\n{'=' * 60}")
     if stopped_by_space:
         print("RENDERIZADO DETENIDO POR ESPACIO EN DISCO")
@@ -3575,7 +3575,7 @@ def render_single_video(specific_folder=None):
     if result.success:
         print(f"PRUEBA COMPLETADA EXITOSAMENTE")
         log_verbose(
-            f"Carpeta final: {DIR_UPLOAD} (revisa [UPLOAD] para el nombre final)"
+            f"Carpeta final: {DIR_RENDERIZANDO} (revisa [UPLOAD] para el nombre final)"
         )
     else:
         print(f"PRUEBA FALLIDA")
