@@ -2115,10 +2115,8 @@ def prompt_confirm_schedule_date(
     )
     if ocupados:
         print("\nDias con videos ya programados (PROHIBIDOS):")
-        for fecha, cantidad in ocupados[:20]:
+        for fecha, cantidad in ocupados:
             print(f"  {fecha.isoformat()}: {cantidad} videos")
-        if len(ocupados) > 20:
-            print(f"  ... y {len(ocupados) - 20} dias mas")
     else:
         print("\nNo hay dias ocupados en el rango escaneado.")
 
