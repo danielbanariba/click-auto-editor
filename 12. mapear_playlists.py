@@ -654,17 +654,17 @@ def iter_public_videos(
                 video_id = resource.get("videoId")
                 if not video_id:
                     continue
-                if state["first_video_id"] is None:
-                    state["first_video_id"] = video_id
-                if stop_at_video_id and video_id == stop_at_video_id:
-                    state["stopped_at"] = True
-                    return
                 status = item.get("status", {})
                 privacy = status.get("privacyStatus") or "public"
                 if privacy != "public" and not (
                     include_unlisted and privacy == "unlisted"
                 ):
                     continue
+                if state["first_video_id"] is None:
+                    state["first_video_id"] = video_id
+                if stop_at_video_id and video_id == stop_at_video_id:
+                    state["stopped_at"] = True
+                    return
                 yield {
                     "id": video_id,
                     "snippet": {

@@ -1088,6 +1088,99 @@ def parse_band_album_from_folder(folder_name: str):
     return name.strip(), None
 
 
+# .cue sheets usan formato CDDA: MM:SS:FF, donde FF son frames (75 por segundo).
+CUE_FRAMES_PER_SECOND = 75
+CUE_TRACK_RE = re.compile(r"^TRACK\s+(\d+)\s+AUDIO\s*$", re.IGNORECASE)
+CUE_TITLE_RE = re.compile(r'^TITLE\s+"(.+)"\s*$', re.IGNORECASE)
+CUE_INDEX_RE = re.compile(r"^INDEX\s+01\s+(\d+:\d+:\d+)\s*$", re.IGNORECASE)
+
+
+def _parse_cue_time(value: str):
+    parts = value.strip().split(":")
+    if len(parts) != 3:
+        return None
+    try:
+        minutes, seconds, frames = (int(p) for p in parts)
+    except ValueError:
+        return None
+    return minutes * 60 + seconds + frames / CUE_FRAMES_PER_SECOND
+
+
+def parse_cue_file(cue_path: Path):
+    try:
+        text = cue_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return None
+
+    tracks = []
+    current = None
+
+    def flush():
+        if current and current.get("title") and current.get("start") is not None:
+            tracks.append(current)
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        match = CUE_TRACK_RE.match(line)
+        if match:
+            flush()
+            current = {"index": int(match.group(1))}
+            continue
+
+        if current is None:
+            continue
+
+        match = CUE_TITLE_RE.match(line)
+        if match:
+            current["title"] = match.group(1).strip()
+            continue
+
+        match = CUE_INDEX_RE.match(line)
+        if match and current.get("start") is None:
+            seconds = _parse_cue_time(match.group(1))
+            if seconds is not None:
+                current["start"] = seconds
+
+    flush()
+    return tracks or None
+
+
+def detect_cue_tracks(folder_path: Path, audio_files, audio_duration: float):
+    if len(audio_files) != 1 or audio_duration <= 0:
+        return None
+
+    cue_files = sorted(folder_path.glob("*.cue"))
+    if not cue_files:
+        return None
+
+    raw_tracks = parse_cue_file(cue_files[0])
+    if not raw_tracks:
+        return None
+
+    valid = [t for t in raw_tracks if t["start"] < audio_duration]
+    if not valid:
+        return None
+
+    enriched = []
+    for i, track in enumerate(valid):
+        start = track["start"]
+        end = valid[i + 1]["start"] if i + 1 < len(valid) else audio_duration
+        if end <= start:
+            continue
+        enriched.append(
+            {
+                "index": track["index"],
+                "title": track["title"],
+                "start": start,
+                "end": end,
+            }
+        )
+    return enriched or None
+
+
 def clean_track_title(title: str, band_name, album_name, fallback_title: str) -> str:
     cleaned = normalize_track_title(title)
     if not cleaned:
@@ -1481,14 +1574,40 @@ def obtener_tracklist_deathgrind(folder_name, audio_count):
     return []
 
 
-def build_tracklist(audio_files, folder_name=None, api_titles=None):
+def build_tracklist(audio_files, folder_name=None, api_titles=None, cue_tracks=None):
     """
     Construye una lista de pistas con tiempos de inicio/fin.
+    Si cue_tracks viene, usa esos timestamps (caso album con .cue).
     """
     band_name = None
     album_name = None
     if folder_name:
         band_name, album_name = parse_band_album_from_folder(folder_name)
+
+    if cue_tracks:
+        use_api = bool(api_titles) and len(api_titles) == len(cue_tracks)
+        clean_api_titles = (
+            [normalize_track_title(title) for title in api_titles] if use_api else []
+        )
+        if use_api and not all(clean_api_titles):
+            use_api = False
+
+        result = []
+        for idx, entry in enumerate(cue_tracks, start=1):
+            raw_title = clean_api_titles[idx - 1] if use_api else entry["title"]
+            fallback = entry["title"]
+            title = normalize_track_title(raw_title) or fallback
+            title = censor_profanity(title)
+            title = re.sub(rf"^0*{idx}(?:\s*[-._)\]]\s*|\s+)", "", title).strip() or title
+            result.append(
+                {
+                    "index": idx,
+                    "title": title,
+                    "start": entry["start"],
+                    "end": entry["end"],
+                }
+            )
+        return result
 
     use_api = False
     clean_api_titles = []
@@ -2770,15 +2889,24 @@ def render_video(folder_path, folder_name, show_progress=False):
         tracklist_path = None
         track_overlays_path = None
         if USE_CPP_VHS:
-            api_titles = obtener_tracklist_deathgrind(folder_name, len(audio_files))
+            cue_tracks = detect_cue_tracks(folder_path, audio_files, audio_duration)
+            if cue_tracks:
+                log_verbose(
+                    f"[TRACKLIST] {folder_name} usando .cue ({len(cue_tracks)} tracks)."
+                )
+            expected_track_count = len(cue_tracks) if cue_tracks else len(audio_files)
+            api_titles = obtener_tracklist_deathgrind(folder_name, expected_track_count)
             if api_titles:
                 log_verbose(
                     f"[TRACKLIST] {folder_name} titulos obtenidos desde DeathGrind."
                 )
-            else:
+            elif not cue_tracks:
                 log_verbose(f"[TRACKLIST] {folder_name} usando titulos de audio local.")
             tracks = build_tracklist(
-                audio_files, folder_name=folder_name, api_titles=api_titles
+                audio_files,
+                folder_name=folder_name,
+                api_titles=api_titles,
+                cue_tracks=cue_tracks,
             )
             if tracks and cover_overlay:
                 overlays_dir = folder_path / "_track_overlays"

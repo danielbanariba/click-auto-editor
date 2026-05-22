@@ -10,6 +10,7 @@ import re
 import shutil
 import socket
 import ssl
+import subprocess
 import sys
 import time
 import unicodedata
@@ -1703,11 +1704,151 @@ def extraer_audio_metadata(audio_path):
     return meta
 
 
+# .cue sheets usan formato CDDA: MM:SS:FF, donde FF son frames (75 por segundo).
+CUE_FRAMES_PER_SECOND = 75
+CUE_TRACK_RE = re.compile(r"^TRACK\s+(\d+)\s+AUDIO\s*$", re.IGNORECASE)
+CUE_TITLE_RE = re.compile(r'^TITLE\s+"(.+)"\s*$', re.IGNORECASE)
+CUE_INDEX_RE = re.compile(r"^INDEX\s+01\s+(\d+:\d+:\d+)\s*$", re.IGNORECASE)
+
+
+def _parse_cue_time(value):
+    parts = value.strip().split(":")
+    if len(parts) != 3:
+        return None
+    try:
+        minutes, seconds, frames = (int(p) for p in parts)
+    except ValueError:
+        return None
+    return minutes * 60 + seconds + frames / CUE_FRAMES_PER_SECOND
+
+
+def parse_cue_file(cue_path):
+    try:
+        text = Path(cue_path).read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return None
+
+    tracks = []
+    current = None
+
+    def flush():
+        if current and current.get("title") and current.get("start") is not None:
+            tracks.append(current)
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        match = CUE_TRACK_RE.match(line)
+        if match:
+            flush()
+            current = {"index": int(match.group(1))}
+            continue
+
+        if current is None:
+            continue
+
+        match = CUE_TITLE_RE.match(line)
+        if match:
+            current["title"] = match.group(1).strip()
+            continue
+
+        match = CUE_INDEX_RE.match(line)
+        if match and current.get("start") is None:
+            seconds = _parse_cue_time(match.group(1))
+            if seconds is not None:
+                current["start"] = seconds
+
+    flush()
+    return tracks or None
+
+
+def _audio_length_seconds(audio_path):
+    """
+    Devuelve la duracion del audio en segundos sin caer en la trampa de
+    MutagenFile.__bool__ (que evalua False cuando el archivo no tiene tags).
+    """
+    try:
+        audio = MutagenFile(str(audio_path))
+    except Exception:
+        audio = None
+    if audio is not None:
+        length = getattr(getattr(audio, "info", None), "length", None)
+        if length and length > 0:
+            return float(length)
+
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(audio_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            value = result.stdout.strip()
+            if value:
+                return float(value)
+    except Exception:
+        pass
+    return 0.0
+
+
+def expand_tracks_from_cue(folder_path, audio_track, audio_duration):
+    """
+    Si hay un .cue valido para un audio unico, devuelve N tracks derivados.
+    audio_track es el dict ya producido por collect_audio_tracks para el unico audio.
+    """
+    cue_files = sorted(folder_path.glob("*.cue"))
+    if not cue_files:
+        return None
+
+    raw_tracks = parse_cue_file(cue_files[0])
+    if not raw_tracks:
+        return None
+
+    if not audio_duration or audio_duration <= 0:
+        audio_duration = _audio_length_seconds(folder_path / audio_track["filename"])
+    if not audio_duration or audio_duration <= 0:
+        return None
+
+    valid = [t for t in raw_tracks if t["start"] < audio_duration]
+    if not valid:
+        return None
+
+    expanded = []
+    filename = audio_track["filename"]
+    for i, track in enumerate(valid):
+        start = track["start"]
+        end = valid[i + 1]["start"] if i + 1 < len(valid) else audio_duration
+        if end <= start:
+            continue
+        expanded.append(
+            {
+                "title": limpiar_titulo(track["title"]),
+                "track_number": track["index"],
+                "duration": int(round(end - start)),
+                "filename": filename,
+            }
+        )
+    return expanded or None
+
+
 def collect_audio_tracks(folder_path):
     audio_exts = {ext.lower() for ext in AUDIO_FORMATS}
     tracks = []
     context = {"band": None, "album": None, "genre": None, "year": None}
     folder_name = folder_path.name.lower()
+    audio_durations = {}
 
     for audio_path in folder_path.iterdir():
         if not audio_path.is_file():
@@ -1720,6 +1861,7 @@ def collect_audio_tracks(folder_path):
         title = meta["title"] or limpiar_titulo(audio_path.stem)
         track_number = meta["track_number"]
         duration = int(meta["duration"] or 0)
+        audio_durations[audio_path.name] = meta["duration"] or 0
         tracks.append(
             {
                 "title": title,
@@ -1736,6 +1878,14 @@ def collect_audio_tracks(folder_path):
             context["genre"] = meta["genre"]
         if not context["year"] and meta["year"]:
             context["year"] = meta["year"]
+
+    if len(tracks) == 1:
+        only_track = tracks[0]
+        audio_duration = audio_durations.get(only_track["filename"], 0)
+        expanded = expand_tracks_from_cue(folder_path, only_track, audio_duration)
+        if expanded:
+            print(f"Detectado .cue: expandiendo a {len(expanded)} tracks.")
+            tracks = expanded
 
     if tracks and all(track["track_number"] is not None for track in tracks):
         tracks.sort(key=lambda item: item["track_number"])
