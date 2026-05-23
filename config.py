@@ -60,6 +60,7 @@ DIR_NEED_CENSURED = BASE_DIR / "need_censured"
 DIR_CORREGIR_EDICION = BASE_DIR / "corregir_edicion"
 DIR_BANDAS_SUBIDAS = BASE_DIR / "bandas_que_supuestamente_ya_se_subieron"
 DIR_ERROR404 = BASE_DIR / "Error404"
+DIR_METAL_TRACKER = BASE_DIR / "metal-tracker"
 
 # ============================================================================
 # ARCHIVOS DEL PROYECTO
@@ -91,7 +92,7 @@ MAX_FOLDERS_TO_PROCESS = 9999  # Sin límite fijo, se detiene por espacio en dis
 # Selección de carpetas/videos en scripts 1, 2 y 3
 # True  = orden aleatorio
 # False = orden descendente por año (más reciente primero)
-RANDOMIZE_VIDEO_SELECTION = True
+RANDOMIZE_VIDEO_SELECTION = False
 
 # Control inteligente de espacio en disco
 # El renderizado se detiene cuando queda menos de este espacio libre en DIR_UPLOAD

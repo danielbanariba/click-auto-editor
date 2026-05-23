@@ -6,7 +6,23 @@ from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 
-from config import DIR_LIMPIEZA, DIR_UPLOAD, RANDOMIZE_VIDEO_SELECTION
+from config import (
+    DIR_ERROR404,
+    DIR_LIMPIEZA,
+    DIR_METAL_TRACKER,
+    DIR_UPLOAD,
+    RANDOMIZE_VIDEO_SELECTION,
+)
+
+ORIGENES = {
+    "limpieza": DIR_LIMPIEZA,
+    "upload": DIR_UPLOAD,
+    "error404": DIR_ERROR404,
+    "metal-tracker": DIR_METAL_TRACKER,
+}
+
+# Carpetas de triage/revision donde las subcarpetas no tienen .mp4 todavia.
+ORIGENES_SIN_VIDEO = {DIR_LIMPIEZA, DIR_ERROR404, DIR_METAL_TRACKER}
 
 
 def cargar_modulo_subir_api():
@@ -108,11 +124,17 @@ def elegir_origen_interactivo():
         print("Elige carpeta base para verificar:")
         print("  1) 01_limpieza_de_impurezas")
         print("  2) upload_video")
-        respuesta = input("Opcion (1/2): ").strip().lower()
+        print("  3) Error404")
+        print("  4) metal-tracker")
+        respuesta = input("Opcion (1/2/3/4): ").strip().lower()
         if respuesta in {"1", "limpieza", "l"}:
             return "limpieza"
         if respuesta in {"2", "upload", "u"}:
             return "upload"
+        if respuesta in {"3", "error404", "404"}:
+            return "error404"
+        if respuesta in {"4", "metal-tracker", "metal", "tracker"}:
+            return "metal-tracker"
         print("Opcion no valida, intenta de nuevo.")
 
 
@@ -122,9 +144,12 @@ def main():
     )
     parser.add_argument(
         "--origen",
-        choices=["upload", "limpieza"],
+        choices=["upload", "limpieza", "error404", "metal-tracker"],
         default=None,
-        help="Carpeta base a verificar (upload_video o 01_limpieza_de_impurezas).",
+        help=(
+            "Carpeta base a verificar (upload_video, 01_limpieza_de_impurezas, "
+            "Error404 o metal-tracker)."
+        ),
     )
     parser.add_argument(
         "--ruta", help="Ruta absoluta a verificar (sobrescribe --origen)."
@@ -159,7 +184,7 @@ def main():
         base_dir = Path(args.ruta)
     else:
         origen = args.origen or elegir_origen_interactivo()
-        base_dir = DIR_LIMPIEZA if origen == "limpieza" else DIR_UPLOAD
+        base_dir = ORIGENES.get(origen, DIR_UPLOAD)
 
     if args.carpeta:
         upload_dir = Path(args.carpeta)
@@ -197,7 +222,7 @@ def main():
         max_items = max(0, args.limite)
     revisados = 0
     ya_subidos = 0
-    allow_no_video = args.permitir_sin_video or base_dir == DIR_LIMPIEZA
+    allow_no_video = args.permitir_sin_video or base_dir in ORIGENES_SIN_VIDEO
 
     for folder_path in folders:
         if max_items is not None and revisados >= max_items:
