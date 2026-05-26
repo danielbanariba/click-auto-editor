@@ -30,6 +30,7 @@ from mutagen import File as MutagenFile
 
 from config import AUDIO_FORMATS, DIR_UPLOAD, DIR_YA_SUBIDOS, RANDOMIZE_VIDEO_SELECTION
 from subir_video.authenticate import authenticate, authenticate_next
+from subir_video.quota_errors import is_quota_error, is_upload_limit_error
 from limpieza.censura import censor_profanity, contains_profanity_fragment
 
 
@@ -43,41 +44,6 @@ class UploadLimitExceededError(RuntimeError):
     """Error lanzado cuando el canal de YouTube alcanza su limite de subidas diarias."""
 
     pass
-
-
-def _get_error_reasons(exc: HttpError) -> list[str]:
-    """Extrae las razones de error de un HttpError."""
-    try:
-        content = (
-            exc.content.decode("utf-8")
-            if isinstance(exc.content, bytes)
-            else exc.content
-        )
-        data = json.loads(content)
-        errors = data.get("error", {}).get("errors", [])
-        return [e.get("reason", "") for e in errors]
-    except (json.JSONDecodeError, AttributeError):
-        return []
-
-
-def is_quota_error(exc: HttpError) -> bool:
-    """Detecta si un HttpError es por cuota agotada de la API."""
-    if exc.resp is None:
-        return False
-    if exc.resp.status not in (403, 429):
-        return False
-    reasons = _get_error_reasons(exc)
-    return any(r in {"quotaExceeded", "dailyLimitExceeded"} for r in reasons)
-
-
-def is_upload_limit_error(exc: HttpError) -> bool:
-    """Detecta si un HttpError es por limite de subidas del canal."""
-    if exc.resp is None:
-        return False
-    if exc.resp.status != 400:
-        return False
-    reasons = _get_error_reasons(exc)
-    return "uploadLimitExceeded" in reasons
 
 
 BASE_URL = "https://deathgrind.club"

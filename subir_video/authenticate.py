@@ -90,7 +90,7 @@ def authenticate_with_credentials(secrets_path, token_path):
                 credentials = None
         if not credentials or not credentials.valid:
             flow = InstalledAppFlow.from_client_secrets_file(str(secrets_file), SCOPES)
-            credentials = flow.run_local_server(port=0)
+            credentials = flow.run_local_server(host="127.0.0.1", port=0)
         token_file.parent.mkdir(parents=True, exist_ok=True)
         token_file.write_text(credentials.to_json(), encoding="utf-8")
 
@@ -136,11 +136,13 @@ def mark_credential_exhausted(secrets_path):
     print(f"Credencial agotada: {Path(secrets_path).name}")
 
 
-def get_current_credential_path():
+def get_current_credential_path(prefix=None):
     """
     Retorna la ruta del client_secrets actualmente en uso.
+    Respeta el prefijo para no confundir credenciales de distintos pools
+    (ej: 'upload' vs 'playlists'), que viven en proyectos GCP separados.
     """
-    pairs = get_credential_sets()
+    pairs = get_credential_sets(prefix)
     available = [(s, t) for s, t in pairs if str(s) not in _exhausted_credentials]
     if available:
         return available[0][0]
@@ -157,31 +159,27 @@ def reset_exhausted_credentials():
 def authenticate_next(prefix=None):
     """
     Marca la credencial actual como agotada y autentica con la siguiente disponible.
-    Re-escanea la carpeta para detectar nuevas credenciales agregadas.
-    Si no hay mas con el prefijo, prueba con TODAS las credenciales disponibles.
-    Retorna None si no hay mas credenciales disponibles.
+    Re-escanea la carpeta para detectar nuevas credenciales agregadas con el mismo
+    prefijo. Aislamiento de pools: NO rota a credenciales de otro prefijo
+    (upload no toca playlists ni viceversa, son proyectos GCP separados).
+    Retorna None si no hay mas credenciales del prefijo disponibles.
     """
-    current = get_current_credential_path()
+    current = get_current_credential_path(prefix)
     if current:
         mark_credential_exhausted(current)
 
-    # Re-escanear carpeta para detectar nuevas credenciales con el prefijo
+    # Re-escanear carpeta (get_credential_sets globea) para detectar nuevas
+    # credenciales agregadas con el MISMO prefijo. Sin derrame a otros pools.
     pairs = get_credential_sets(prefix)
     available = [(s, t) for s, t in pairs if str(s) not in _exhausted_credentials]
 
-    # Si no hay con el prefijo, probar con TODAS las credenciales
-    if not available and prefix and CREDENTIALS_DIR.exists():
-        all_pairs = []
-        for secrets_file in sorted(CREDENTIALS_DIR.glob("client_secrets_*.json")):
-            name = secrets_file.stem.replace("client_secrets_", "token_")
-            token_file = CREDENTIALS_DIR / f"{name}.json"
-            all_pairs.append((secrets_file, token_file))
-        available = [(s, t) for s, t in all_pairs if str(s) not in _exhausted_credentials]
-        if available:
-            print(f"Credenciales '{prefix}' agotadas. Probando credenciales alternativas.")
-
     if not available:
-        print("Todas las credenciales agotadas. Agrega mas en credentials/")
+        pool = prefix or "disponibles"
+        print(
+            f"Credenciales del pool '{pool}' agotadas. "
+            f"No se rota a otros pools (aislamiento). "
+            f"Agrega mas client_secrets_{prefix or '*'}_*.json en credentials/"
+        )
         return None
 
     secrets_path, token_path = available[0]
