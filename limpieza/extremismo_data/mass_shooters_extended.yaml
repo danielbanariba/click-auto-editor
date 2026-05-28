@@ -1,0 +1,887 @@
+# ============================================================================
+# Tiradores masivos y atacantes notorios — EXTENSIÓN
+# ============================================================================
+# Adiciones a mass_shooters.yaml: school shootings, mass shootings y atentados
+# terroristas mediáticos con sus perpetradores, además de serial killers
+# habitualmente referenciados por bandas de death/doom/grindcore.
+#
+# Filtro aplicado: solo casos con suficiente notoriedad mediática como para
+# que aparezcan en letras o títulos de metal extremo. Casos demasiado
+# oscuros se omiten para no inflar el matcher.
+# ============================================================================
+
+categories:
+
+  # ----------------------------------------------------------------
+  # School shootings adicionales
+  # ----------------------------------------------------------------
+  school_shootings_extended:
+    severity: explicit
+    description: Tiradores escolares mediáticos adicionales
+    entries:
+      - canonical: "Charles Whitman"
+        aliases:
+          - "Texas Tower sniper"
+          - "UT tower shooter"
+          - "University of Texas tower shooting"
+
+      - canonical: "Brenda Spencer"
+        aliases:
+          - "I Don't Like Mondays shooter"
+          - "Cleveland Elementary shooter"
+
+      - canonical: "Patrick Purdy"
+        aliases:
+          - "Stockton schoolyard shooter"
+          - "Stockton massacre"
+
+      - canonical: "Andrew Golden"
+        aliases:
+          - "Jonesboro shooter"
+          - "Westside Middle School shooter"
+
+      - canonical: "Mitchell Johnson"
+        aliases:
+          - "Jonesboro shooter"
+
+      - canonical: "Robert Steinhäuser"
+        aliases:
+          - "Robert Steinhauser"
+          - "Erfurt shooter"
+          - "Gutenberg Gymnasium shooter"
+
+      - canonical: "Beslan school siege"
+        aliases:
+          - "Beslan massacre"
+          - "Beslan school attack"
+          - "School Number One siege"
+
+      - canonical: "Jeff Weise"
+        aliases:
+          - "Red Lake shooter"
+          - "Red Lake High School shooter"
+
+      - canonical: "Kimveer Gill"
+        aliases:
+          - "Dawson College shooter"
+
+      - canonical: "Steven Kazmierczak"
+        aliases:
+          - "NIU shooter"
+          - "Northern Illinois University shooter"
+
+      - canonical: "Tim Kretschmer"
+        aliases:
+          - "Winnenden shooter"
+          - "Albertville-Realschule shooter"
+
+      - canonical: "Pekka-Eric Auvinen"
+        aliases:
+          - "Jokela shooter"
+          - "Sturmgeist89"
+          - "Jokela High School shooter"
+
+      - canonical: "Matti Saari"
+        aliases:
+          - "Kauhajoki shooter"
+
+      - canonical: "Wellington Oliveira"
+        aliases:
+          - "Realengo shooter"
+          - "Wellington Menezes de Oliveira"
+
+      - canonical: "T.J. Lane"
+        aliases:
+          - "Chardon shooter"
+
+      - canonical: "Chris Harper-Mercer"
+        aliases:
+          - "Umpqua shooter"
+          - "Roseburg shooter"
+          - "UCC shooter"
+
+      - canonical: "Dimitrios Pagourtzis"
+        aliases:
+          - "Santa Fe shooter"
+          - "Santa Fe High shooter"
+
+      - canonical: "Vladislav Roslyakov"
+        aliases:
+          - "Kerch shooter"
+          - "Kerch college shooter"
+          - "Crimea school shooter"
+
+      - canonical: "Ilnaz Galyaviev"
+        aliases:
+          - "Kazan shooter"
+
+      - canonical: "Timur Bekmansurov"
+        aliases:
+          - "Perm shooter"
+          - "Perm University shooter"
+
+      - canonical: "Ethan Crumbley"
+        aliases:
+          - "Oxford shooter"
+          - "Oxford High shooter"
+
+      - canonical: "Audrey Hale"
+        aliases:
+          - "Nashville Covenant shooter"
+          - "Covenant shooter"
+          - "Nashville school shooter"
+
+  # ----------------------------------------------------------------
+  # Mass shootings no escolares adicionales
+  # ----------------------------------------------------------------
+  mass_shootings_extended:
+    severity: explicit
+    description: Tiroteos masivos no escolares mediáticos adicionales
+    entries:
+      - canonical: "Howard Unruh"
+        aliases:
+          - "Camden shooter"
+          - "Walk of Death"
+
+      - canonical: "James Huberty"
+        aliases:
+          - "San Ysidro shooter"
+          - "McDonald's massacre shooter"
+
+      - canonical: "Patrick Sherrill"
+        aliases:
+          - "Edmond shooter"
+          - "Crazy Pat"
+
+      - canonical: "George Hennard"
+        aliases:
+          - "Luby's shooter"
+          - "Killeen shooter"
+
+      - canonical: "Martin Bryant"
+        aliases:
+          - "Port Arthur shooter"
+          - "Tasmania shooter"
+
+      - canonical: "Thomas Hamilton"
+        aliases:
+          - "Dunblane shooter"
+
+      - canonical: "Michael Ryan"
+        aliases:
+          - "Hungerford shooter"
+
+      - canonical: "Derrick Bird"
+        aliases:
+          - "Cumbria shooter"
+          - "Whitehaven shooter"
+
+      - canonical: "Jared Loughner"
+        aliases:
+          - "Tucson shooter"
+
+      - canonical: "James Holmes"
+        aliases:
+          - "Aurora shooter"
+          - "Century 16 shooter"
+          - "Dark Knight shooter"
+
+      - canonical: "Wade Michael Page"
+        aliases:
+          - "Oak Creek shooter"
+          - "Sikh temple shooter Wisconsin"
+
+      - canonical: "Christopher Dorner"
+        aliases: []
+
+      - canonical: "Aaron Alexis"
+        aliases:
+          - "Navy Yard shooter"
+          - "Washington Navy Yard shooter"
+
+      - canonical: "Elliot Rodger"
+        aliases:
+          - "Isla Vista killer"
+          - "Santa Barbara shooter"
+
+      - canonical: "Syed Rizwan Farook"
+        aliases:
+          - "San Bernardino shooter"
+
+      - canonical: "Tashfeen Malik"
+        aliases:
+          - "San Bernardino shooter"
+
+      - canonical: "Vester Lee Flanagan"
+        aliases:
+          - "Bryce Williams"
+          - "WDBJ shooter"
+          - "Virginia on-air shooter"
+
+      - canonical: "Micah Xavier Johnson"
+        aliases:
+          - "Dallas police shooter"
+
+      - canonical: "Gavin Long"
+        aliases:
+          - "Baton Rouge shooter"
+
+      - canonical: "Esteban Santiago"
+        aliases:
+          - "Fort Lauderdale shooter"
+
+      - canonical: "Devin Patrick Kelley"
+        aliases:
+          - "Sutherland Springs shooter"
+
+      - canonical: "Ian David Long"
+        aliases:
+          - "Borderline shooter"
+          - "Thousand Oaks shooter"
+
+      - canonical: "Jarrod Ramos"
+        aliases:
+          - "Capital Gazette shooter"
+          - "Annapolis newsroom shooter"
+
+      - canonical: "Connor Betts"
+        aliases:
+          - "Dayton shooter"
+          - "Oregon District shooter"
+
+      - canonical: "Seth Ator"
+        aliases:
+          - "Odessa shooter"
+          - "Midland Odessa shooter"
+
+      - canonical: "Robert Aaron Long"
+        aliases:
+          - "Atlanta spa shooter"
+          - "Atlanta massage parlor shooter"
+
+      - canonical: "Robert E Crimo III"
+        aliases:
+          - "Highland Park shooter"
+          - "July 4 parade shooter"
+
+      - canonical: "Anderson Lee Aldrich"
+        aliases:
+          - "Club Q shooter"
+          - "Colorado Springs nightclub shooter"
+
+      - canonical: "Robert Card"
+        aliases:
+          - "Lewiston shooter"
+          - "Maine bowling alley shooter"
+
+      - canonical: "Andrew Cunanan"
+        aliases:
+          - "Versace killer"
+
+      - canonical: "John Earnest"
+        aliases:
+          - "Poway shooter"
+
+      - canonical: "Scott Beierle"
+        aliases:
+          - "Tallahassee hot yoga shooter"
+
+      - canonical: "Nidal Hasan"
+        aliases:
+          - "Fort Hood shooter"
+
+      - canonical: "Cesar Sayoc"
+        aliases:
+          - "MAGA bomber"
+
+  # ----------------------------------------------------------------
+  # Atentados terroristas mediáticos (eventos)
+  # ----------------------------------------------------------------
+  terror_events:
+    severity: explicit
+    description: Eventos terroristas mediáticos referenciados por su nombre propio
+    entries:
+      - canonical: "September 11 attacks"
+        aliases:
+          - "9/11"
+          - "September 11"
+          - "Sept 11 attacks"
+          - "11-S"
+          - "11 de septiembre"
+          - "WTC attack"
+          - "Twin Towers attack"
+
+      - canonical: "7/7 London bombings"
+        aliases:
+          - "July 7 bombings"
+          - "London bombings 2005"
+          - "7 de julio Londres"
+
+      - canonical: "Madrid train bombings"
+        aliases:
+          - "11-M"
+          - "11 de marzo"
+          - "Atocha bombings"
+          - "Atentados de Atocha"
+
+      - canonical: "Bali bombings"
+        aliases:
+          - "Bali bombing"
+          - "Kuta bombing"
+          - "Sari Club bombing"
+          - "Paddy's Pub bombing"
+
+      - canonical: "Boston Marathon bombing"
+        aliases:
+          - "Boston bombing"
+          - "Boston Marathon attack"
+          - "Boylston Street bombing"
+
+      - canonical: "Nice truck attack"
+        aliases:
+          - "Promenade des Anglais attack"
+          - "Bastille Day attack"
+
+      - canonical: "Berlin Christmas market attack"
+        aliases:
+          - "Breitscheidplatz attack"
+          - "Berlin truck attack"
+
+      - canonical: "Manchester Arena bombing"
+        aliases:
+          - "Manchester bombing"
+          - "Ariana Grande concert bombing"
+
+      - canonical: "London Bridge attack"
+        aliases:
+          - "Borough Market attack"
+          - "Fishmongers Hall attack"
+
+      - canonical: "Bataclan attack"
+        aliases:
+          - "Bataclan"
+          - "Bataclan massacre"
+          - "Paris attacks 2015"
+          - "13-N"
+          - "November 13 attacks"
+
+      - canonical: "Charlie Hebdo attack"
+        aliases:
+          - "Atentado Charlie Hebdo"
+          - "Je suis Charlie attack"
+
+      - canonical: "Westgate mall attack"
+        aliases:
+          - "Nairobi mall attack"
+
+      - canonical: "Mumbai attacks"
+        aliases:
+          - "26/11"
+          - "Mumbai 26/11"
+          - "Bombay attacks"
+          - "Taj Hotel attack"
+
+      - canonical: "Moscow theater hostage crisis"
+        aliases:
+          - "Nord-Ost siege"
+          - "Dubrovka siege"
+          - "Moscow theater attack"
+
+      - canonical: "Beirut barracks bombing"
+        aliases:
+          - "Marine barracks bombing"
+          - "Beirut bombing 1983"
+
+      - canonical: "Lockerbie bombing"
+        aliases:
+          - "Pan Am 103"
+          - "Pan Am Flight 103"
+          - "Pan Am Lockerbie"
+
+      - canonical: "Bath School disaster"
+        aliases:
+          - "Bath School bombing"
+          - "Bath Consolidated School disaster"
+
+      - canonical: "Munich Olympics massacre"
+        aliases:
+          - "Munich massacre"
+          - "Munich Olympia massacre"
+          - "Black September Munich"
+
+      - canonical: "Tokyo subway sarin attack"
+        aliases:
+          - "Aum Shinrikyo attack"
+          - "Tokyo subway sarin"
+
+      - canonical: "Amerithrax"
+        aliases:
+          - "anthrax letters 2001"
+          - "anthrax attacks"
+
+      - canonical: "Toronto van attack"
+        aliases:
+          - "Yonge Street van attack"
+          - "incel van attack"
+
+      - canonical: "Quebec City mosque attack"
+        aliases:
+          - "Quebec mosque shooting"
+          - "Quebec City mosque shooting"
+
+      - canonical: "Westminster Bridge attack"
+        aliases:
+          - "Westminster attack"
+
+      - canonical: "Pulse nightclub shooting"
+        aliases:
+          - "Pulse shooting"
+          - "Orlando nightclub shooting"
+
+  # ----------------------------------------------------------------
+  # Atacantes individuales internacionales adicionales
+  # ----------------------------------------------------------------
+  attackers_intl_extended:
+    severity: explicit
+    description: Atacantes individuales internacionales adicionales
+    entries:
+      - canonical: "Tamerlan Tsarnaev"
+        aliases:
+          - "Boston Marathon bomber"
+
+      - canonical: "Dzhokhar Tsarnaev"
+        aliases:
+          - "Jahar Tsarnaev"
+          - "Boston Marathon bomber"
+
+      - canonical: "Mohamed Lahouaiej-Bouhlel"
+        aliases:
+          - "Nice attacker"
+          - "Nice truck driver"
+
+      - canonical: "Anis Amri"
+        aliases:
+          - "Berlin Christmas market attacker"
+          - "Breitscheidplatz attacker"
+
+      - canonical: "Salman Abedi"
+        aliases:
+          - "Manchester Arena bomber"
+          - "Manchester bomber"
+
+      - canonical: "Khuram Butt"
+        aliases:
+          - "London Bridge attacker"
+
+      - canonical: "Abdelhamid Abaaoud"
+        aliases:
+          - "Paris attacks ringleader"
+
+      - canonical: "Salah Abdeslam"
+        aliases: []
+
+      - canonical: "Said Kouachi"
+        aliases:
+          - "Kouachi brother"
+
+      - canonical: "Cherif Kouachi"
+        aliases:
+          - "Chérif Kouachi"
+
+      - canonical: "Amedy Coulibaly"
+        aliases:
+          - "Hypercacher attacker"
+
+      - canonical: "Ajmal Kasab"
+        aliases:
+          - "Mumbai attacker"
+
+      - canonical: "Abdelbaset al-Megrahi"
+        aliases:
+          - "Al-Megrahi"
+          - "Lockerbie bomber"
+
+      - canonical: "Andrew Kehoe"
+        aliases:
+          - "Bath School bomber"
+
+      - canonical: "David Sonboly"
+        aliases:
+          - "Munich OEZ shooter"
+          - "Ali Sonboly"
+
+      - canonical: "Alek Minassian"
+        aliases:
+          - "Toronto van attacker"
+
+      - canonical: "Alexandre Bissonnette"
+        aliases:
+          - "Quebec mosque shooter"
+
+      - canonical: "Mohammed Bouyeri"
+        aliases:
+          - "Theo van Gogh killer"
+
+      - canonical: "Richard Reid"
+        aliases:
+          - "shoe bomber"
+
+      - canonical: "Umar Farouk Abdulmutallab"
+        aliases:
+          - "underwear bomber"
+          - "Christmas Day bomber"
+
+      - canonical: "Faisal Shahzad"
+        aliases:
+          - "Times Square bomber"
+
+      - canonical: "Khalid Masood"
+        aliases:
+          - "Westminster attacker"
+
+      - canonical: "Usman Khan"
+        aliases:
+          - "Fishmongers Hall attacker"
+
+      - canonical: "Yigal Amir"
+        aliases:
+          - "Rabin assassin"
+
+  # ----------------------------------------------------------------
+  # Serial killers famosos adicionales
+  # ----------------------------------------------------------------
+  serial_killers_extended:
+    severity: explicit
+    description: Asesinos seriales famosos referenciados habitualmente en metal extremo
+    entries:
+      - canonical: "John Wayne Gacy"
+        aliases:
+          - "Killer Clown"
+          - "Pogo the Clown"
+
+      - canonical: "Ed Gein"
+        aliases:
+          - "Plainfield Ghoul"
+          - "Butcher of Plainfield"
+          - "Mad Butcher"
+
+      - canonical: "Henry Lee Lucas"
+        aliases:
+          - "Confession Killer"
+
+      - canonical: "Ottis Toole"
+        aliases:
+          - "Ottis Elwood Toole"
+          - "Jacksonville Cannibal"
+
+      - canonical: "Richard Ramirez"
+        aliases:
+          - "Night Stalker"
+          - "Walk-In Killer"
+          - "Valley Intruder"
+
+      - canonical: "Aileen Wuornos"
+        aliases:
+          - "Damsel of Death"
+
+      - canonical: "Albert Fish"
+        aliases:
+          - "Gray Man"
+          - "Werewolf of Wysteria"
+          - "Brooklyn Vampire"
+          - "Boogey Man"
+          - "Moon Maniac"
+
+      - canonical: "H.H. Holmes"
+        aliases:
+          - "Henry Howard Holmes"
+          - "Herman Webster Mudgett"
+          - "Murder Castle killer"
+
+      - canonical: "Andrei Chikatilo"
+        aliases:
+          - "Rostov Ripper"
+          - "Butcher of Rostov"
+          - "Red Ripper"
+
+      - canonical: "Pedro Lopez"
+        aliases:
+          - "Monster of the Andes"
+          - "Monstruo de los Andes"
+          - "Pedro Alonso Lopez"
+
+      - canonical: "Luis Garavito"
+        aliases:
+          - "La Bestia"
+          - "Tribilin"
+
+      - canonical: "Jack the Ripper"
+        aliases:
+          - "Whitechapel murderer"
+          - "Leather Apron"
+
+      - canonical: "Dennis Nilsen"
+        aliases:
+          - "Muswell Hill Murderer"
+          - "Kindly Killer"
+          - "British Jeffrey Dahmer"
+
+      - canonical: "Fred West"
+        aliases:
+          - "Frederick West"
+          - "Cromwell Street killer"
+
+      - canonical: "Rose West"
+        aliases:
+          - "Rosemary West"
+
+      - canonical: "Harold Shipman"
+        aliases:
+          - "Doctor Death"
+          - "Dr Death"
+
+      - canonical: "Peter Sutcliffe"
+        aliases:
+          - "Yorkshire Ripper"
+          - "Bradford Ripper"
+
+      - canonical: "Gary Ridgway"
+        aliases:
+          - "Green River Killer"
+
+      - canonical: "Ed Kemper"
+        aliases:
+          - "Co-ed Killer"
+          - "Co-ed Butcher"
+          - "Edmund Kemper"
+
+      - canonical: "Albert DeSalvo"
+        aliases:
+          - "Boston Strangler"
+          - "Measuring Man"
+          - "Green Man"
+
+      - canonical: "David Berkowitz"
+        aliases:
+          - "Son of Sam"
+          - ".44 Caliber Killer"
+
+      - canonical: "Joel Rifkin"
+        aliases:
+          - "Joel the Ripper"
+
+      - canonical: "Robert Pickton"
+        aliases:
+          - "Pig Farmer Killer"
+          - "Willie Pickton"
+
+      - canonical: "Alexander Pichushkin"
+        aliases:
+          - "Chessboard Killer"
+          - "Chessboard Maniac"
+          - "Bitsa Park Maniac"
+          - "Bittsevsky Maniac"
+
+      - canonical: "Anatoly Onoprienko"
+        aliases:
+          - "Beast of Ukraine"
+          - "Citizen O"
+
+      - canonical: "Dean Corll"
+        aliases:
+          - "Candy Man Killer"
+
+      - canonical: "Marc Lépine"
+        aliases:
+          - "Marc Lepine"
+          - "Polytechnique shooter"
+          - "Montreal massacre"
+          - "École Polytechnique massacre"
+          - "Ecole Polytechnique massacre"
+          - "Gamil Gharbi"
+
+      - canonical: "Carl Panzram"
+        aliases: []
+
+      - canonical: "Samuel Little"
+        aliases:
+          - "Samuel McDowell"
+
+      - canonical: "Rodney Alcala"
+        aliases:
+          - "Dating Game Killer"
+
+      - canonical: "Wayne Williams"
+        aliases:
+          - "Atlanta Child Murderer"
+
+      - canonical: "Gary Heidnik"
+        aliases:
+          - "House of Horrors killer"
+
+      - canonical: "Charles Sobhraj"
+        aliases:
+          - "Bikini Killer"
+          - "Serpent killer"
+
+      - canonical: "Karla Homolka"
+        aliases:
+          - "Ken and Barbie Killer"
+
+      - canonical: "Paul Bernardo"
+        aliases:
+          - "Scarborough Rapist"
+          - "Schoolgirl Killer"
+
+      - canonical: "Peter Kurten"
+        aliases:
+          - "Vampire of Dusseldorf"
+          - "Vampire of Düsseldorf"
+          - "Düsseldorf Ripper"
+
+      - canonical: "Fritz Haarmann"
+        aliases:
+          - "Butcher of Hanover"
+          - "Vampire of Hanover"
+          - "Wolf Man Haarmann"
+
+      - canonical: "Karl Denke"
+        aliases:
+          - "Munsterberg Cannibal"
+          - "Cannibal of Ziebice"
+
+      - canonical: "Joachim Kroll"
+        aliases:
+          - "Ruhr Cannibal"
+          - "Ruhr Hunter"
+          - "Duisburg Man-Eater"
+
+      - canonical: "Armin Meiwes"
+        aliases:
+          - "Rotenburg Cannibal"
+          - "Cannibal of Rotenburg"
+          - "Der Metzgermeister"
+
+      - canonical: "Issei Sagawa"
+        aliases:
+          - "Kobe Cannibal"
+
+      - canonical: "Tsutomu Miyazaki"
+        aliases:
+          - "Otaku Murderer"
+          - "Little Girl Murderer"
+
+      - canonical: "Henri Landru"
+        aliases:
+          - "Bluebeard of Gambais"
+
+      - canonical: "Gilles de Rais"
+        aliases:
+          - "Baron de Rais"
+
+      - canonical: "Elizabeth Báthory"
+        aliases:
+          - "Elizabeth Bathory"
+          - "Blood Countess"
+          - "Countess Dracula"
+          - "Erzsebet Bathory"
+
+      - canonical: "Vlad the Impaler"
+        aliases:
+          - "Vlad Dracula"
+          - "Vlad Țepeș"
+          - "Vlad Tepes"
+          - "Vlad III"
+          - "Vlad Drakul"
+
+      - canonical: "Marcel Petiot"
+        aliases:
+          - "Doctor Satan"
+          - "Docteur Satan"
+
+      - canonical: "Belle Gunness"
+        aliases:
+          - "Belle of Indiana"
+          - "Lady Bluebeard"
+          - "Hell's Belle"
+
+      - canonical: "Amelia Dyer"
+        aliases:
+          - "Ogress of Reading"
+
+      - canonical: "Dorothea Puente"
+        aliases:
+          - "Death House Landlady"
+
+      - canonical: "Donald Henry Gaskins"
+        aliases:
+          - "Pee Wee Gaskins"
+          - "Meanest Man in America"
+
+      - canonical: "Pedro Rodrigues Filho"
+        aliases:
+          - "Pedrinho Matador"
+          - "Killer Petey"
+
+      - canonical: "Charles Cullen"
+        aliases: []
+
+      - canonical: "Niels Högel"
+        aliases:
+          - "Niels Hogel"
+
+      - canonical: "Beverley Allitt"
+        aliases: []
+
+      - canonical: "Yoo Young-chul"
+        aliases:
+          - "Raincoat Killer"
+
+      - canonical: "Mikhail Popkov"
+        aliases:
+          - "Angarsk Maniac"
+
+      - canonical: "Anthony Sowell"
+        aliases:
+          - "Cleveland Strangler"
+
+      - canonical: "Lonnie Franklin"
+        aliases:
+          - "Grim Sleeper"
+
+      - canonical: "Arthur Shawcross"
+        aliases:
+          - "Genesee River Killer"
+          - "Rochester Strangler"
+          - "Monster of the Rivers"
+
+      - canonical: "Bobby Joe Long"
+        aliases:
+          - "Classified Ad Rapist"
+
+      - canonical: "Danny Rolling"
+        aliases:
+          - "Gainesville Ripper"
+
+      - canonical: "Robert Berdella"
+        aliases:
+          - "Kansas City Butcher"
+
+      - canonical: "Andras Pandy"
+        aliases:
+          - "András Pándy"
+
+      - canonical: "Israel Keyes"
+        aliases: []
+
+      - canonical: "Coral Eugene Watts"
+        aliases:
+          - "Sunday Morning Slasher"
+
+      - canonical: "Wayne Williams Atlanta"
+        aliases:
+          - "Atlanta child murderer"
+
+      - canonical: "Yang Xinhai"
+        aliases:
+          - "Monster Killer China"

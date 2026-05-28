@@ -1,0 +1,76 @@
+# ============================================================================
+# Bandas NSBM (National Socialist Black Metal) y artistas designados
+# ============================================================================
+# Bandas con ideología neonazi explícita, miembros condenados por crímenes
+# vinculados a ideología, o presencia recurrente en escenas designadas.
+# El usuario podría inadvertidamente subir alguna de estas bandas en su
+# canal y recibir strike automático.
+#
+# IMPORTANTE — selección conservadora:
+# - Solo bandas con asociación NSBM ampliamente documentada
+# - Para nombres con palabras comunes ("Absurd", "The Base"), se incluye
+#   un calificador para reducir falsos positivos
+# - Si una banda no está en blacklist no significa endorsement — el
+#   usuario debe usar su criterio para escenas grises
+# ============================================================================
+
+categories:
+
+  nsbm_bands_designated:
+    severity: explicit
+    description: Bandas NSBM y artistas con miembros condenados o ideología explícita
+    entries:
+      - canonical: "Varg Vikernes"
+        aliases:
+          - "Kristian Vikernes"
+          - "Louis Cachet"
+          - "Count Grishnackh"
+          - "Greifi Grishnackh"
+
+      - canonical: "Burzum"
+        aliases:
+          - "Burzum band"
+
+      - canonical: "Hendrik Möbus"
+        aliases:
+          - "Hendrik Mobus"
+
+      - canonical: "Graveland"
+        aliases:
+          - "Rob Darken Graveland"
+
+      - canonical: "Der Stürmer band"
+        aliases:
+          - "Der Sturmer band"
+
+      - canonical: "Skrewdriver"
+        aliases:
+          - "Ian Stuart Donaldson"
+
+      - canonical: "Landser"
+        aliases:
+          - "Landser band"
+
+      - canonical: "Nokturnal Mortum"
+        aliases: []
+
+      - canonical: "Branikald"
+        aliases: []
+
+      - canonical: "Temnozor"
+        aliases: []
+
+      - canonical: "Goatmoon"
+        aliases: []
+
+      - canonical: "M8L8TH"
+        aliases:
+          - "Molot M8L8TH"
+
+      - canonical: "Peste Noire"
+        aliases:
+          - "La Sale Famine Peste Noire"
+
+      - canonical: "Absurd NSBM"
+        aliases:
+          - "Absurd band"

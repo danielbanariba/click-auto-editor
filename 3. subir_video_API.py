@@ -29,9 +29,14 @@ from googleapiclient.http import MediaFileUpload
 from mutagen import File as MutagenFile
 
 from config import AUDIO_FORMATS, DIR_UPLOAD, DIR_YA_SUBIDOS, RANDOMIZE_VIDEO_SELECTION
-from subir_video.authenticate import authenticate, authenticate_next
+from subir_video.authenticate import (
+    authenticate,
+    authenticate_next,
+    probar_credenciales_disponibles,
+)
 from subir_video.quota_errors import is_quota_error, is_upload_limit_error
 from limpieza.censura import censor_profanity, contains_profanity_fragment
+from limpieza.extremismo import redact_extremism
 
 
 class QuotaExceededError(RuntimeError):
@@ -1991,6 +1996,7 @@ def build_tracklist(tracks, api_titles=None):
         title = track["title"]
         if api_titles and index - 1 < len(api_titles):
             title = api_titles[index - 1]
+        title = redact_extremism(title)
         title = censor_profanity(title)
         lines.append(f"{index} - {title} ({format_time(total_duration)})")
         total_duration += track["duration"]
@@ -2379,6 +2385,7 @@ def censor_text_preserving_urls(text):
         return placeholder
 
     masked = URL_PATTERN.sub(replace_url, str(text))
+    masked = redact_extremism(masked)
     masked = censor_profanity(masked)
 
     for placeholder, url in placeholders.items():
@@ -3166,7 +3173,7 @@ def procesar_carpeta(
             )
 
     tracklist = build_tracklist(tracks, track_titles if track_titles else None)
-    safe_tracklist = [censor_profanity(line) for line in tracklist]
+    safe_tracklist = [censor_profanity(redact_extremism(line)) for line in tracklist]
     playlist_cache = load_playlist_links_cache()
     description = construir_descripcion(
         video_title=title,
@@ -3181,6 +3188,7 @@ def procesar_carpeta(
         playlist_cache=playlist_cache,
     )
     description = ensure_description_limit(description)
+    title = redact_extremism(title)
     title = censor_profanity(title)
     title = truncar_titulo(title)
     description = truncar_descripcion(description)
@@ -3253,24 +3261,33 @@ def main():
     )
     args = parser.parse_args()
 
+    global DEATHGRIND_DISABLED
+
     cargar_env()
-    session = None
-    if not args.sin_deathgrind:
-        try:
-            session = crear_sesion_autenticada()
-        except Exception as exc:
-            print(f"Error al iniciar sesion DeathGrind: {exc}")
+
+    print("Verificando cuota de credenciales upload...")
+    youtube, sanas, agotadas = probar_credenciales_disponibles(prefix="upload")
+    if agotadas:
+        print(f"Credenciales agotadas ({len(agotadas)}):")
+        for s in agotadas:
+            print(f"  - {s.name}")
+    if not youtube:
+        print(
+            "❌ No hay credenciales upload con cuota disponible. "
+            "Esperá ~24h o agregá nuevas client_secrets_upload_*.json en credentials/."
+        )
+        return
+    print(f"Credenciales upload con cuota disponible: {len(sanas)}")
+    for s in sanas:
+        print(f"  + {s.name}")
 
     generos, generos_lookup = cargar_generos()
     repertorio = cargar_repertorio()
 
-    youtube = authenticate(prefix="upload")
-    if session and not args.sin_deathgrind:
-        ok = deathgrind_smoke_test(session, generos)
-        if not ok:
-            global DEATHGRIND_DISABLED
-            DEATHGRIND_DISABLED = True
-            print("DeathGrind desactivado para esta ejecucion por fallas en la prueba.")
+    # La sesion DeathGrind y el smoke test se crean recien cuando se va a
+    # buscar metadata (despues de elegir fecha), para no gastar API antes
+    # de confirmar que el lote se va a programar.
+    session = None
 
     upload_dir = DIR_UPLOAD
     if args.carpeta:
@@ -3388,7 +3405,58 @@ def main():
                     time.sleep(scan_interval)
                     continue
 
-            # Fase 2: Busqueda de metadata (diferida, despues de seleccionar todo el lote)
+            # Calculo y prompt de fecha (ANTES de buscar metadata).
+            # Usamos len(pending_items) como estimacion del batch size para
+            # validar capacidad diaria; el tamano real puede ser menor si
+            # algunas carpetas no obtienen metadata.
+            estimated_batch_size = len(pending_items)
+            tz_local = datetime.now().astimezone().tzinfo
+            tomorrow = (datetime.now(tz_local) + timedelta(days=1)).date()
+            fecha_minima_env = parse_fecha_minima_env()
+            fecha_minima = (
+                max(tomorrow, fecha_minima_env) if fecha_minima_env else tomorrow
+            )
+            max_per_day = max_videos_por_dia(gap_hours)
+            max_days = int(os.environ.get("YOUTUBE_BATCH_MAX_DAYS", "365"))
+            if max_days <= 0:
+                max_days = 365
+            scan_limit = resolve_schedule_scan_limit(max_per_day, max_days)
+            taken_slots, counts_by_date = fetch_scheduled_publish_times_safe(
+                youtube,
+                max_items=scan_limit,
+            )
+            if estimated_batch_size > max_per_day:
+                print(
+                    f"No se puede programar {estimated_batch_size} videos con separacion de {gap_hours}h "
+                    f"en un solo dia (max {max_per_day})."
+                )
+                break
+
+            sugerida = buscar_primer_dia_libre(fecha_minima, counts_by_date, max_days)
+            latest_slot = max(taken_slots) if taken_slots else None
+            schedule_date = prompt_confirm_schedule_date(
+                sugerida, counts_by_date, fecha_minima, latest_slot
+            )
+            if schedule_date is None:
+                print("Programacion cancelada. No se subio ningun video.")
+                break
+
+            # Recien ahora abrimos sesion con DeathGrind para buscar metadata
+            if not args.sin_deathgrind and session is None:
+                try:
+                    session = crear_sesion_autenticada()
+                except Exception as exc:
+                    print(f"Error al iniciar sesion DeathGrind: {exc}")
+                if session is not None:
+                    ok = deathgrind_smoke_test(session, generos)
+                    if not ok:
+                        DEATHGRIND_DISABLED = True
+                        print(
+                            "DeathGrind desactivado para esta ejecucion por fallas en la prueba."
+                        )
+
+            # Fase 2: Busqueda de metadata (diferida, despues de seleccionar
+            # todo el lote y de confirmar la fecha)
             print(
                 f"\nIniciando busqueda de metadata para {len(pending_items)} videos..."
             )
@@ -3420,38 +3488,14 @@ def main():
                 print("No hay videos con metadata valida para programar.")
                 break
 
-            # Usar el tamano real del lote (puede ser menor si algunos fallaron)
+            # Tamano real del lote (puede ser menor que el estimado).
             actual_batch_size = len(pending_items)
 
-            tz_local = datetime.now().astimezone().tzinfo
-            tomorrow = (datetime.now(tz_local) + timedelta(days=1)).date()
-            fecha_minima_env = parse_fecha_minima_env()
-            fecha_minima = (
-                max(tomorrow, fecha_minima_env) if fecha_minima_env else tomorrow
-            )
-            max_per_day = max_videos_por_dia(gap_hours)
-            max_days = int(os.environ.get("YOUTUBE_BATCH_MAX_DAYS", "365"))
-            if max_days <= 0:
-                max_days = 365
-            scan_limit = resolve_schedule_scan_limit(max_per_day, max_days)
-            taken_slots, counts_by_date = fetch_scheduled_publish_times_safe(
-                youtube,
-                max_items=scan_limit,
-            )
             if actual_batch_size > max_per_day:
                 print(
                     f"No se puede programar {actual_batch_size} videos con separacion de {gap_hours}h "
                     f"en un solo dia (max {max_per_day})."
                 )
-                break
-
-            sugerida = buscar_primer_dia_libre(fecha_minima, counts_by_date, max_days)
-            latest_slot = max(taken_slots) if taken_slots else None
-            schedule_date = prompt_confirm_schedule_date(
-                sugerida, counts_by_date, fecha_minima, latest_slot
-            )
-            if schedule_date is None:
-                print("Programacion cancelada. No se subio ningun video.")
                 break
 
             slots = build_schedule_for_exact_date(
@@ -3588,6 +3632,21 @@ def main():
             if not args.sin_verificacion:
                 if verificacion_manual(folder_path, repertorio):
                     continue
+            # Lazy init de DeathGrind (modo inmediato): recien acá hace falta
+            # para buscar metadata. Asi evitamos pegarle a la API si el lote
+            # esta vacio o si el usuario cancela en la verificacion manual.
+            if not args.sin_deathgrind and session is None:
+                try:
+                    session = crear_sesion_autenticada()
+                except Exception as exc:
+                    print(f"Error al iniciar sesion DeathGrind: {exc}")
+                if session is not None:
+                    ok = deathgrind_smoke_test(session, generos)
+                    if not ok:
+                        DEATHGRIND_DISABLED = True
+                        print(
+                            "DeathGrind desactivado para esta ejecucion por fallas en la prueba."
+                        )
             print(f"Procesando {folder_path.name}...")
             metadata = procesar_carpeta(
                 folder_path,

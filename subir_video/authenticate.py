@@ -156,6 +156,61 @@ def reset_exhausted_credentials():
     _exhausted_credentials.clear()
 
 
+def probar_credenciales_disponibles(prefix="upload"):
+    """Prueba cada credencial del pool con una llamada barata (1 unit) y
+    devuelve las que NO estan agotadas.
+
+    Para cada par (secrets, token) intenta autenticar y ejecutar
+    channels().list(part='id', mine=True). Si la API responde con
+    quotaExceeded o dailyLimitExceeded, marca esa credencial como agotada
+    en la sesion. Si responde OK, la considera sana.
+
+    Retorna una tupla (youtube_sano, sanas, agotadas) donde:
+      - youtube_sano: cliente youtube ya autenticado contra la primera
+        credencial sana, o None si no hay ninguna.
+      - sanas: lista de Path de client_secrets sanos.
+      - agotadas: lista de Path de client_secrets agotados.
+
+    Side effect: las credenciales agotadas quedan registradas en
+    _exhausted_credentials, asi que llamadas posteriores a authenticate()
+    las saltean.
+    """
+    from googleapiclient.errors import HttpError
+
+    pairs = get_credential_sets(prefix)
+    if not pairs:
+        return None, [], []
+
+    sanas = []
+    agotadas = []
+    youtube_sano = None
+
+    for secrets_path, token_path in pairs:
+        if str(secrets_path) in _exhausted_credentials:
+            agotadas.append(secrets_path)
+            continue
+        try:
+            yt = authenticate_with_credentials(secrets_path, token_path)
+            yt.channels().list(part="id", mine=True).execute()
+        except HttpError as exc:
+            from subir_video.quota_errors import is_quota_error
+
+            if is_quota_error(exc):
+                mark_credential_exhausted(secrets_path)
+                agotadas.append(secrets_path)
+                continue
+            print(f"Error verificando {secrets_path.name}: {exc}")
+            continue
+        except Exception as exc:
+            print(f"Error verificando {secrets_path.name}: {exc}")
+            continue
+        sanas.append(secrets_path)
+        if youtube_sano is None:
+            youtube_sano = yt
+
+    return youtube_sano, sanas, agotadas
+
+
 def authenticate_next(prefix=None):
     """
     Marca la credencial actual como agotada y autentica con la siguiente disponible.

@@ -1,0 +1,914 @@
+# ============================================================================
+# Atrocidades históricas, dictadores y figuras del totalitarismo
+# ============================================================================
+# Contenido referenciado habitualmente por bandas de death/doom/grindcore en
+# letras y nombres de tracks. Mucho de esto cae en contextos educativos o
+# artísticos legítimos, pero YouTube puede flagear cualquier referencia que
+# interprete como apología.
+#
+# FILTRO APLICADO (críticamente importante):
+# - NO se incluyen términos peligrosamente ambiguos como apellidos sueltos
+#   ("Mao", "Stalin" solo, "Reich" solo, "Wolf", "Heil", "Goth", etc.).
+#   Solo frases multi-palabra o nombres completos.
+# - "Wehrmacht" y "Luftwaffe" se omiten — fuerzas armadas alemanas
+#   generales, no necesariamente criminales. Aparece en metal benigno.
+# - "Hiroshima", "Nagasaki", "Dresden" solos: omitidos. Aparecen en
+#   contextos antibélicos legítimos del crust/grindcore.
+# - "88", "14" como números aislados: omitidos. Riesgo masivo de falsos
+#   positivos en años, deportes, ranking, etc.
+# - Nombres como "Manson", "Kim", "Franco", "Barbie" solos: omitidos.
+# ============================================================================
+
+categories:
+
+  # ----------------------------------------------------------------
+  # Dictadores históricos asociados con crímenes masivos
+  # ----------------------------------------------------------------
+  dictators_historical:
+    severity: explicit
+    description: Dictadores asociados con crímenes contra la humanidad
+    entries:
+      - canonical: "Adolf Hitler"
+        aliases:
+          - "Hitler"
+          - "Der Führer"
+          - "Adolf Schicklgruber"
+
+      - canonical: "Joseph Stalin"
+        aliases:
+          - "Josef Stalin"
+          - "Iosif Stalin"
+          - "Iósif Stalin"
+          - "Iosif Vissarionovich Stalin"
+          - "Ioseb Jughashvili"
+          - "Iosif Dzhugashvili"
+
+      - canonical: "Mao Zedong"
+        aliases:
+          - "Mao Tse-tung"
+          - "Mao Tse Tung"
+          - "Chairman Mao"
+          - "Great Helmsman"
+
+      - canonical: "Pol Pot"
+        aliases:
+          - "Saloth Sar"
+          - "Brother Number One"
+
+      - canonical: "Idi Amin"
+        aliases:
+          - "Idi Amin Dada"
+          - "Butcher of Uganda"
+
+      - canonical: "Jean-Bédel Bokassa"
+        aliases:
+          - "Jean-Bedel Bokassa"
+          - "Emperor Bokassa"
+          - "Bokassa I"
+
+      - canonical: "Saddam Hussein"
+        aliases:
+          - "Sadam Husein"
+          - "Saddam Hussein al-Tikriti"
+          - "Butcher of Baghdad"
+
+      - canonical: "Muammar Gaddafi"
+        aliases:
+          - "Muammar al-Gaddafi"
+          - "Moammar Qaddafi"
+          - "Muammar Qaddafi"
+          - "Muammar al-Qadhafi"
+          - "Colonel Gaddafi"
+
+      - canonical: "Bashar al-Assad"
+        aliases:
+          - "Bashar Assad"
+          - "Bashar al-Asad"
+
+      - canonical: "Hafez al-Assad"
+        aliases:
+          - "Hafez Assad"
+          - "Hafez al-Asad"
+
+      - canonical: "Kim Il-sung"
+        aliases:
+          - "Kim Il Sung"
+          - "Eternal President"
+
+      - canonical: "Kim Jong-il"
+        aliases:
+          - "Kim Jong Il"
+          - "Dear Leader"
+
+      - canonical: "Kim Jong-un"
+        aliases:
+          - "Kim Jong Un"
+
+      - canonical: "Slobodan Milošević"
+        aliases:
+          - "Slobodan Milosevic"
+          - "Butcher of the Balkans"
+
+      - canonical: "Ratko Mladić"
+        aliases:
+          - "Ratko Mladic"
+          - "Butcher of Bosnia"
+          - "Butcher of Srebrenica"
+
+      - canonical: "Radovan Karadžić"
+        aliases:
+          - "Radovan Karadzic"
+
+      - canonical: "Augusto Pinochet"
+        aliases:
+          - "Pinochet"
+          - "Pinochet Ugarte"
+          - "General Pinochet"
+
+      - canonical: "Jorge Rafael Videla"
+        aliases:
+          - "Jorge Videla"
+          - "Rafael Videla"
+
+      - canonical: "Francisco Franco"
+        aliases:
+          - "Generalísimo Franco"
+          - "Generalisimo Franco"
+          - "El Caudillo"
+
+      - canonical: "Benito Mussolini"
+        aliases:
+          - "Il Duce"
+          - "Benito Amilcare Andrea Mussolini"
+
+      - canonical: "Hideki Tojo"
+        aliases:
+          - "Hideki Tōjō"
+          - "General Tojo"
+
+      - canonical: "António de Oliveira Salazar"
+        aliases:
+          - "Antonio Salazar"
+          - "Salazar Portugal"
+          - "Oliveira Salazar"
+
+      - canonical: "Nicolae Ceaușescu"
+        aliases:
+          - "Nicolae Ceausescu"
+          - "Conducător Ceausescu"
+
+      - canonical: "Enver Hoxha"
+        aliases:
+          - "Enver Hoxa"
+
+      - canonical: "Mengistu Haile Mariam"
+        aliases:
+          - "Haile Mariam Mengistu"
+          - "Red Terror Mengistu"
+
+      - canonical: "François Duvalier"
+        aliases:
+          - "Francois Duvalier"
+          - "Papa Doc"
+          - "Papa Doc Duvalier"
+
+      - canonical: "Jean-Claude Duvalier"
+        aliases:
+          - "Baby Doc"
+          - "Baby Doc Duvalier"
+
+      - canonical: "Anastasio Somoza"
+        aliases:
+          - "Somoza Debayle"
+          - "Somoza García"
+
+      - canonical: "Rafael Trujillo"
+        aliases:
+          - "Rafael Leónidas Trujillo"
+          - "Trujillo Molina"
+
+      - canonical: "Hissène Habré"
+        aliases:
+          - "Hissene Habre"
+
+      - canonical: "Robert Mugabe"
+        aliases:
+          - "Robert Gabriel Mugabe"
+
+      - canonical: "Omar al-Bashir"
+        aliases:
+          - "Omar Bashir Sudan"
+
+      - canonical: "Manuel Noriega"
+        aliases:
+          - "Manuel Antonio Noriega"
+
+      - canonical: "Alfredo Stroessner"
+        aliases:
+          - "Stroessner Matiauda"
+
+      - canonical: "Lavrentiy Beria"
+        aliases:
+          - "Lavrenti Beria"
+
+      - canonical: "Nikolai Yezhov"
+        aliases:
+          - "Yezhovshchina"
+
+  # ----------------------------------------------------------------
+  # Figuras nazis específicas (alto riesgo en NSBM)
+  # ----------------------------------------------------------------
+  nazi_figures:
+    severity: explicit
+    description: Figuras nazis individualmente referenciables
+    entries:
+      - canonical: "Heinrich Himmler"
+        aliases:
+          - "Reichsführer Himmler"
+          - "Reichsfuhrer-SS Himmler"
+
+      - canonical: "Joseph Goebbels"
+        aliases:
+          - "Paul Joseph Goebbels"
+          - "Josef Goebbels"
+
+      - canonical: "Hermann Göring"
+        aliases:
+          - "Hermann Goring"
+          - "Hermann Goering"
+          - "Reichsmarschall Goring"
+
+      - canonical: "Reinhard Heydrich"
+        aliases:
+          - "Hangman of Prague"
+          - "Butcher of Prague"
+          - "Blond Beast Heydrich"
+
+      - canonical: "Adolf Eichmann"
+        aliases:
+          - "Otto Adolf Eichmann"
+          - "Architect of the Holocaust"
+
+      - canonical: "Josef Mengele"
+        aliases:
+          - "Mengele"
+          - "Joseph Mengele"
+          - "Angel of Death Mengele"
+          - "Angel of Auschwitz"
+          - "Todesengel Mengele"
+
+      - canonical: "Klaus Barbie"
+        aliases:
+          - "Butcher of Lyon"
+
+      - canonical: "Rudolf Hess"
+        aliases:
+          - "Rudolf Heß"
+          - "Deputy Führer Hess"
+
+      - canonical: "Martin Bormann"
+        aliases:
+          - "Reichsleiter Bormann"
+
+      - canonical: "Ernst Röhm"
+        aliases:
+          - "Ernst Rohm"
+          - "Ernst Roehm"
+
+      - canonical: "Albert Speer"
+        aliases:
+          - "Architect of the Nazis"
+
+      - canonical: "Léon Degrelle"
+        aliases:
+          - "Leon Degrelle"
+          - "Rexist Degrelle"
+
+      - canonical: "Vidkun Quisling"
+        aliases:
+          - "Nasjonal Samling Quisling"
+
+      - canonical: "Rudolf Höss"
+        aliases:
+          - "Rudolf Hoss"
+          - "Rudolf Hoess"
+          - "Kommandant of Auschwitz"
+
+      - canonical: "Amon Göth"
+        aliases:
+          - "Amon Goth"
+          - "Płaszów commandant"
+          - "Plaszow commandant"
+
+      - canonical: "Oskar Dirlewanger"
+        aliases:
+          - "Sturmbrigade Dirlewanger"
+          - "SS-Dirlewanger"
+
+      - canonical: "Otto Skorzeny"
+        aliases: []
+
+      - canonical: "Ilse Koch"
+        aliases:
+          - "Witch of Buchenwald"
+          - "Bitch of Buchenwald"
+          - "Hexe von Buchenwald"
+
+      - canonical: "Irma Grese"
+        aliases:
+          - "Hyena of Auschwitz"
+          - "Blonde Angel of Auschwitz"
+          - "Beautiful Beast"
+
+      - canonical: "Maria Mandl"
+        aliases:
+          - "Maria Mandel"
+          - "Beast of Auschwitz"
+
+      - canonical: "Wilhelm Keitel"
+        aliases:
+          - "Feldmarschall Keitel"
+
+      - canonical: "Alfred Rosenberg"
+        aliases:
+          - "Reichsleiter Rosenberg"
+
+      - canonical: "Julius Streicher"
+        aliases:
+          - "Der Stürmer Streicher"
+
+      - canonical: "Ernst Kaltenbrunner"
+        aliases: []
+
+  # ----------------------------------------------------------------
+  # Genocidios, campos de exterminio y atrocidades
+  # ----------------------------------------------------------------
+  atrocities_events:
+    severity: explicit
+    description: Genocidios, campos de exterminio y masacres específicas
+    entries:
+      - canonical: "Holocaust"
+        aliases:
+          - "Shoah"
+          - "Sho'ah"
+          - "Final Solution"
+          - "Endlösung"
+          - "Endlosung"
+          - "Endloesung"
+          - "Endlösung der Judenfrage"
+          - "Final Solution to the Jewish Question"
+          - "Holocausto"
+
+      - canonical: "Auschwitz"
+        aliases:
+          - "Auschwitz-Birkenau"
+          - "Auschwitz Birkenau"
+          - "Auschwitz I"
+          - "Auschwitz II"
+          - "Auschwitz III"
+          - "Oświęcim camp"
+
+      - canonical: "Birkenau"
+        aliases: []
+
+      - canonical: "Treblinka"
+        aliases:
+          - "Treblinka II"
+
+      - canonical: "Sobibor"
+        aliases:
+          - "Sobibór"
+
+      - canonical: "Bełżec"
+        aliases:
+          - "Belzec"
+          - "Belzec extermination camp"
+
+      - canonical: "Chełmno"
+        aliases:
+          - "Chelmno"
+          - "Kulmhof"
+
+      - canonical: "Bergen-Belsen"
+        aliases:
+          - "Bergen Belsen"
+
+      - canonical: "Dachau"
+        aliases:
+          - "KZ Dachau"
+
+      - canonical: "Buchenwald"
+        aliases:
+          - "KZ Buchenwald"
+          - "Konzentrationslager Buchenwald"
+
+      - canonical: "Mauthausen"
+        aliases:
+          - "Mauthausen-Gusen"
+
+      - canonical: "Majdanek"
+        aliases:
+          - "Lublin-Majdanek"
+
+      - canonical: "Ravensbrück"
+        aliases:
+          - "Ravensbruck"
+
+      - canonical: "Sachsenhausen"
+        aliases:
+          - "KZ Sachsenhausen"
+
+      - canonical: "Wannsee Conference"
+        aliases:
+          - "Wannseekonferenz"
+          - "Wannsee Protocol"
+
+      - canonical: "Kristallnacht"
+        aliases:
+          - "Night of Broken Glass"
+          - "Reichspogromnacht"
+          - "November Pogrom"
+
+      - canonical: "Babi Yar"
+        aliases:
+          - "Babyn Yar"
+          - "Babij Jar"
+
+      - canonical: "Katyn massacre"
+        aliases:
+          - "Katyń massacre"
+          - "Katyn Forest massacre"
+
+      - canonical: "Holodomor"
+        aliases:
+          - "Terror-Famine"
+          - "Great Famine Ukraine"
+          - "Ukrainian Genocide"
+
+      - canonical: "Killing Fields"
+        aliases:
+          - "Cambodian Killing Fields"
+          - "Choeung Ek"
+
+      - canonical: "Tuol Sleng"
+        aliases:
+          - "S-21"
+          - "Security Prison 21"
+
+      - canonical: "Rwandan Genocide"
+        aliases:
+          - "Tutsi Genocide"
+          - "Rwanda 1994"
+          - "Genocide of Tutsis"
+          - "Interahamwe"
+          - "Impuzamugambi"
+
+      - canonical: "Srebrenica massacre"
+        aliases:
+          - "Srebrenica"
+          - "Srebrenica genocide"
+          - "Potočari massacre"
+
+      - canonical: "Bosnian Genocide"
+        aliases:
+          - "Bosnian War crimes"
+          - "Ethnic cleansing Bosnia"
+
+      - canonical: "Armenian Genocide"
+        aliases:
+          - "Medz Yeghern"
+          - "Armenian Holocaust"
+          - "Aghet"
+
+      - canonical: "Nanking Massacre"
+        aliases:
+          - "Nanjing Massacre"
+          - "Rape of Nanking"
+          - "Rape of Nanjing"
+
+      - canonical: "Unit 731"
+        aliases:
+          - "Detachment 731"
+          - "Manshu Detachment 731"
+          - "Ishii Unit"
+
+      - canonical: "My Lai massacre"
+        aliases:
+          - "Mỹ Lai massacre"
+          - "Sơn Mỹ massacre"
+          - "Son My massacre"
+          - "Pinkville massacre"
+
+      - canonical: "Wounded Knee Massacre"
+        aliases:
+          - "Wounded Knee 1890"
+
+      - canonical: "East Timor genocide"
+        aliases:
+          - "Timor-Leste occupation"
+          - "Indonesian occupation East Timor"
+
+      - canonical: "Darfur Genocide"
+        aliases:
+          - "Darfur conflict"
+          - "Janjaweed atrocities"
+
+      - canonical: "Rohingya Genocide"
+        aliases:
+          - "Rohingya persecution"
+
+      - canonical: "Yazidi Genocide"
+        aliases:
+          - "Sinjar massacre"
+          - "Yezidi Genocide"
+
+      - canonical: "Anfal campaign"
+        aliases:
+          - "al-Anfal"
+          - "Anfal Genocide"
+          - "Kurdish Genocide"
+          - "Halabja"
+          - "Halabja chemical attack"
+          - "Halabja massacre"
+
+      - canonical: "Operation Condor"
+        aliases:
+          - "Operación Cóndor"
+          - "Plan Cóndor"
+          - "Plan Condor"
+
+      - canonical: "Dirty War"
+        aliases:
+          - "Guerra Sucia"
+          - "Argentine Dirty War"
+          - "Los Desaparecidos"
+          - "Vuelos de la muerte"
+          - "Death flights"
+
+      - canonical: "Caravan of Death"
+        aliases:
+          - "Caravana de la Muerte"
+
+      - canonical: "Tlatelolco massacre"
+        aliases:
+          - "Masacre de Tlatelolco"
+          - "Matanza de Tlatelolco"
+          - "Plaza de las Tres Culturas massacre"
+
+      - canonical: "El Mozote massacre"
+        aliases:
+          - "Masacre de El Mozote"
+
+      - canonical: "Sabra and Shatila massacre"
+        aliases:
+          - "Sabra y Shatila"
+          - "Sabra-Shatila massacre"
+
+      - canonical: "Bangladesh Genocide"
+        aliases:
+          - "Operation Searchlight"
+          - "1971 Bangladesh atrocities"
+
+      - canonical: "Indonesian mass killings"
+        aliases:
+          - "Indonesian killings 1965"
+          - "Indonesian genocide 1965"
+          - "PKI massacre"
+
+      - canonical: "Acteal massacre"
+        aliases:
+          - "Masacre de Acteal"
+
+      - canonical: "Hama massacre"
+        aliases:
+          - "1982 Hama massacre"
+          - "Masacre de Hama"
+
+      - canonical: "Porajmos"
+        aliases:
+          - "Pharrajimos"
+          - "Roma genocide"
+          - "Romani Holocaust"
+          - "Samudaripen"
+
+      - canonical: "Aktion T4"
+        aliases:
+          - "Action T4"
+          - "T4 Program"
+          - "Nazi euthanasia"
+
+      - canonical: "Generalplan Ost"
+        aliases:
+          - "Master Plan East"
+
+      - canonical: "Operation Reinhard"
+        aliases:
+          - "Aktion Reinhard"
+          - "Einsatz Reinhardt"
+
+      - canonical: "Bataan Death March"
+        aliases:
+          - "Marcha de la Muerte de Bataán"
+
+      - canonical: "Comfort Women"
+        aliases:
+          - "Ianfu"
+          - "Wianbu"
+
+      - canonical: "Burma Railway"
+        aliases:
+          - "Death Railway"
+          - "Burma-Siam Railway"
+
+      - canonical: "Gulag"
+        aliases:
+          - "GULAG"
+          - "Glavnoye Upravleniye Lagerey"
+          - "Kolyma camps"
+          - "Vorkuta camps"
+          - "Solovki camps"
+
+      - canonical: "Great Purge"
+        aliases:
+          - "Great Terror"
+          - "Yezhovshchina"
+          - "Stalin's Purges"
+
+      - canonical: "Lidice massacre"
+        aliases: []
+
+      - canonical: "Oradour-sur-Glane massacre"
+        aliases:
+          - "Oradour massacre"
+
+      - canonical: "Marzabotto massacre"
+        aliases:
+          - "Monte Sole massacre"
+
+      - canonical: "Malmedy massacre"
+        aliases: []
+
+      - canonical: "Jedwabne pogrom"
+        aliases: []
+
+      - canonical: "Iași pogrom"
+        aliases:
+          - "Iasi pogrom"
+          - "Jassy pogrom"
+
+      - canonical: "Volhynia massacres"
+        aliases:
+          - "Wołyń massacres"
+          - "Wolyn massacres"
+          - "UPA massacres"
+
+      - canonical: "Lebensraum"
+        aliases:
+          - "Lebensraum policy"
+
+      - canonical: "Einsatzgruppen"
+        aliases:
+          - "Einsatzkommando"
+          - "Mobile Killing Units"
+
+  # ----------------------------------------------------------------
+  # Aparato totalitario / agencias represivas
+  # ----------------------------------------------------------------
+  totalitarian_apparatus:
+    severity: explicit
+    description: Organizaciones del aparato represor en regímenes totalitarios
+    entries:
+      - canonical: "Third Reich"
+        aliases:
+          - "Drittes Reich"
+          - "Tausendjähriges Reich"
+          - "Thousand-Year Reich"
+          - "Nazi Germany"
+
+      - canonical: "Waffen-SS"
+        aliases:
+          - "Waffen SS"
+          - "SS-Totenkopfverbände"
+          - "SS Totenkopfverbande"
+
+      - canonical: "Schutzstaffel"
+        aliases:
+          - "Allgemeine SS"
+
+      - canonical: "Gestapo"
+        aliases:
+          - "Geheime Staatspolizei"
+
+      - canonical: "Hitlerjugend"
+        aliases:
+          - "Hitler Youth"
+          - "Hitler-Jugend"
+          - "Bund Deutscher Mädel"
+
+      - canonical: "Sturmabteilung"
+        aliases:
+          - "Brownshirts"
+          - "Storm Detachment"
+
+      - canonical: "Khmer Rouge"
+        aliases:
+          - "Angkar"
+          - "Khmer Krahom"
+          - "Communist Party of Kampuchea"
+
+      - canonical: "Stasi"
+        aliases:
+          - "Ministerium für Staatssicherheit"
+          - "State Security Service GDR"
+
+      - canonical: "NKVD"
+        aliases:
+          - "Narodnyi Komissariat Vnutrennikh Del"
+          - "People's Commissariat for Internal Affairs"
+
+      - canonical: "Cheka"
+        aliases:
+          - "VChK"
+          - "Vserossiyskaya Chrezvychaynaya Komissiya"
+          - "Chekist"
+
+      - canonical: "Tonton Macoute"
+        aliases:
+          - "Tonton Macoutes"
+          - "Milice de Volontaires de la Sécurité Nationale"
+
+      - canonical: "Securitate"
+        aliases:
+          - "Departamentul Securității Statului"
+
+      - canonical: "Iron Guard"
+        aliases:
+          - "Garda de Fier"
+          - "Legion of the Archangel Michael"
+          - "Codreanu Legion"
+
+      - canonical: "Ustaše"
+        aliases:
+          - "Ustase"
+          - "Ustasha"
+          - "Croatian Revolutionary Movement"
+          - "Jasenovac camp"
+
+      - canonical: "Arrow Cross"
+        aliases:
+          - "Nyilaskeresztes Párt"
+          - "Hungarian Arrow Cross"
+
+      - canonical: "Falange Española"
+        aliases:
+          - "Spanish Falange"
+          - "FE de las JONS"
+
+      - canonical: "Golden Dawn party"
+        aliases:
+          - "Chrysi Avgi"
+          - "Greek Golden Dawn"
+
+      - canonical: "British National Party"
+        aliases: []
+
+      - canonical: "English Defence League"
+        aliases:
+          - "EDL"
+
+      - canonical: "Combat 18"
+        aliases:
+          - "C18"
+          - "Combat Eighteen"
+
+      - canonical: "Blood and Honour"
+        aliases:
+          - "Blut und Ehre"
+
+      - canonical: "American Nazi Party"
+        aliases:
+          - "Rockwell American Nazi Party"
+
+      - canonical: "Aryan Brotherhood"
+        aliases:
+          - "Aryan Brotherhood of Texas"
+
+      - canonical: "Black Hundreds"
+        aliases:
+          - "Chyornaya Sotnya"
+
+  # ----------------------------------------------------------------
+  # Frases/lemas ideológicos del extremismo (alto riesgo en NSBM/RAC)
+  # ----------------------------------------------------------------
+  coded_ideology_phrases:
+    severity: explicit
+    description: Frases, lemas y códigos asociados con supremacismo o terrorismo
+    entries:
+      - canonical: "Heil Hitler"
+        aliases:
+          - "Sieg Heil"
+          - "Hail Victory"
+
+      - canonical: "Blood and Soil"
+        aliases:
+          - "Blut und Boden"
+
+      - canonical: "Fourteen Words"
+        aliases:
+          - "14 Words"
+          - "14W"
+
+      - canonical: "1488"
+        aliases:
+          - "14/88"
+          - "14-88"
+
+      - canonical: "Untermensch"
+        aliases:
+          - "Untermenschen"
+
+      - canonical: "RAHOWA"
+        aliases:
+          - "Racial Holy War"
+
+      - canonical: "ZOG"
+        aliases:
+          - "Zionist Occupation Government"
+          - "Zionist Occupied Government"
+
+      - canonical: "Day of the Rope"
+        aliases:
+          - "Day of Rope"
+
+      - canonical: "Great Replacement"
+        aliases:
+          - "Grand Remplacement"
+          - "White Genocide"
+          - "Kalergi Plan"
+
+      - canonical: "Turner Diaries"
+        aliases:
+          - "The Turner Diaries"
+
+      - canonical: "Total Aryan Victory"
+        aliases: []
+
+      - canonical: "Camp of the Saints"
+        aliases:
+          - "Le Camp des Saints"
+
+      - canonical: "Siege Kulture"
+        aliases:
+          - "James Mason Siege"
+
+  # ----------------------------------------------------------------
+  # Líderes ideológicos del extremismo blanco
+  # ----------------------------------------------------------------
+  far_right_ideologues:
+    severity: explicit
+    description: Ideólogos del supremacismo blanco referenciados
+    entries:
+      - canonical: "George Lincoln Rockwell"
+        aliases:
+          - "ANP Rockwell"
+
+      - canonical: "William Luther Pierce"
+        aliases:
+          - "William Pierce"
+          - "Andrew Macdonald Pierce"
+
+      - canonical: "David Lane"
+        aliases:
+          - "David Eden Lane"
+          - "Lane 14 Words"
+
+      - canonical: "Robert Jay Mathews"
+        aliases:
+          - "Robert Mathews The Order"
+          - "Bruder Schweigen"
+          - "Brüder Schweigen"
+
+      - canonical: "Andrew Anglin"
+        aliases:
+          - "Daily Stormer Anglin"
+
+      - canonical: "James Mason"
+        aliases:
+          - "James Mason Siege"
+
+  # ----------------------------------------------------------------
+  # Cultos violentos famosos
+  # ----------------------------------------------------------------
+  violent_cults:
+    severity: explicit
+    description: Cultos asociados con violencia masiva
+    entries:
+      - canonical: "Jim Jones Peoples Temple"
+        aliases:
+          - "Jonestown"
+          - "Peoples Temple"
+
+      - canonical: "David Koresh"
+        aliases:
+          - "Branch Davidians"
+          - "Waco siege"

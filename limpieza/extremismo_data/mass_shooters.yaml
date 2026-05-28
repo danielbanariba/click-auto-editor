@@ -1,0 +1,147 @@
+# ============================================================================
+# Tiradores masivos y atacantes notorios — política específica de YouTube
+# ============================================================================
+# YouTube tiene política específica contra el elogio de tiradores escolares
+# y atacantes masivos (mencionado textualmente en la formación, pregunta 7/7).
+# Incluye también atacantes terroristas individuales famosos.
+#
+# CRÍTICO: incluso nombrarlos en contexto musical (death metal, etc.)
+# puede disparar strike si el algoritmo interpreta apología.
+# ============================================================================
+
+categories:
+
+  school_shootings:
+    severity: explicit
+    description: Tiroteos escolares mediáticos
+    entries:
+      - canonical: "Columbine"
+        aliases:
+          - "Columbine High School"
+          - "Columbine massacre"
+
+      - canonical: "Eric Harris"
+        aliases:
+          - "Reb"               # apodo en sus diarios
+
+      - canonical: "Dylan Klebold"
+        aliases:
+          - "VoDKa"             # apodo en sus diarios
+
+      - canonical: "Sandy Hook"
+        aliases:
+          - "Sandy Hook Elementary"
+          - "Newtown shooting"
+
+      - canonical: "Adam Lanza"
+        aliases: []
+
+      - canonical: "Virginia Tech"
+        aliases:
+          - "Virginia Tech shooting"
+          - "VT shooting"
+
+      - canonical: "Seung-Hui Cho"
+        aliases:
+          - "Seung Hui Cho"
+
+      - canonical: "Parkland shooting"
+        aliases:
+          - "Marjory Stoneman Douglas shooting"
+          - "MSD shooting"
+
+      - canonical: "Nikolas Cruz"
+        aliases: []
+
+      - canonical: "Uvalde shooting"
+        aliases:
+          - "Robb Elementary shooting"
+
+      - canonical: "Salvador Ramos"
+        aliases: []
+
+      - canonical: "Stoneman Douglas"
+        aliases: []
+
+  mass_shootings_other:
+    severity: explicit
+    description: Tiradores masivos no escolares
+    entries:
+      - canonical: "Stephen Paddock"
+        aliases:
+          - "Las Vegas shooter"
+          - "Route 91 shooter"
+
+      - canonical: "Omar Mateen"
+        aliases:
+          - "Pulse shooter"
+          - "Pulse nightclub shooter"
+
+      - canonical: "Robert Bowers"
+        aliases:
+          - "Pittsburgh synagogue shooter"
+          - "Tree of Life shooter"
+
+      - canonical: "Patrick Crusius"
+        aliases:
+          - "El Paso shooter"
+
+      - canonical: "Payton Gendron"
+        aliases:
+          - "Buffalo shooter"
+          - "Tops shooter"
+
+      - canonical: "Dylann Roof"
+        aliases:
+          - "Charleston shooter"
+          - "Emanuel AME shooter"
+
+  international_attackers:
+    severity: explicit
+    description: Atacantes individuales internacionales notorios
+    entries:
+      - canonical: "Anders Breivik"
+        aliases:
+          - "Anders Behring Breivik"
+          - "Breivik"
+          - "Utoya attacker"
+          - "Utøya attacker"
+          - "Andrew Berwick"            # seudónimo del manifiesto
+          - "2083"                       # título del manifiesto (CUIDADO: año común)
+
+      - canonical: "Brenton Tarrant"
+        aliases:
+          - "Christchurch shooter"
+          - "Christchurch attacker"
+          - "Great Replacement manifesto"
+
+      - canonical: "Stephan Balliet"
+        aliases:
+          - "Halle synagogue shooter"
+
+      - canonical: "Tobias Rathjen"
+        aliases:
+          - "Hanau shooter"
+
+  serial_killers_notorious:
+    severity: explicit
+    description: Asesinos seriales mediáticos que YouTube puede flagear por apología
+    entries:
+      - canonical: "Charles Manson"
+        aliases:
+          - "Manson Family"
+          - "Helter Skelter killings"
+
+      - canonical: "Ted Bundy"
+        aliases: []
+
+      - canonical: "Jeffrey Dahmer"
+        aliases:
+          - "Milwaukee Cannibal"
+
+      - canonical: "BTK Killer"
+        aliases:
+          - "Dennis Rader"
+
+      - canonical: "Zodiac Killer"
+        aliases: []

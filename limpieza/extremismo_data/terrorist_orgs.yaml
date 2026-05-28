@@ -1,0 +1,184 @@
+# ============================================================================
+# Organizaciones terroristas designadas — listas oficiales
+# ============================================================================
+# Fuentes:
+#   - US State Department Foreign Terrorist Organizations (FTO)
+#   - EU terrorist list
+#   - UN Security Council Consolidated Sanctions List
+#
+# Cada entrada tiene un nombre canónico y alias. Todos se matchean como
+# frase completa (multi-word) con boundaries de palabra en los extremos.
+# ============================================================================
+
+categories:
+
+  jihadist:
+    severity: explicit
+    description: Grupos yihadistas designados por múltiples gobiernos
+    entries:
+      - canonical: "Al-Qaeda"
+        aliases:
+          - "Al Qaeda"
+          - "Al-Qaida"
+          - "Al Qaida"
+          - "AQAP"               # Al-Qaeda in the Arabian Peninsula
+          - "AQIM"               # Al-Qaeda in the Islamic Maghreb
+          - "Al-Qaeda in Iraq"
+          - "Al-Nusra"
+          - "Jabhat al-Nusra"
+          - "Nusra Front"
+          - "Hayat Tahrir al-Sham"
+          - "HTS"
+
+      - canonical: "Islamic State"
+        aliases:
+          - "ISIS"
+          - "ISIL"
+          - "Daesh"
+          - "Da'esh"
+          - "Estado Islamico"
+          - "Estado Islámico"
+          - "IS Khorasan"
+          - "ISIS-K"
+          - "Islamic State of Iraq and Syria"
+          - "Islamic State of Iraq and the Levant"
+
+      - canonical: "Taliban"
+        aliases:
+          - "Talibán"
+          - "Tehrik-i-Taliban"
+          - "TTP"
+
+      - canonical: "Boko Haram"
+        aliases:
+          - "Jamaatu Ahli Sunnah"
+          - "Wilayat Gharb Afriqiya"
+          - "Islamic State West Africa Province"
+          - "ISWAP"
+
+      - canonical: "Al-Shabaab"
+        aliases:
+          - "Al Shabaab"
+          - "Harakat al-Shabaab"
+          - "Shabaab"
+
+      - canonical: "Hezbollah"
+        aliases:
+          - "Hizbollah"
+          - "Hizbullah"
+          - "Hizb Allah"
+          - "Party of God"
+
+      - canonical: "Hamas"
+        aliases:
+          - "Harakat al-Muqawama al-Islamiyya"
+          - "Izz ad-Din al-Qassam Brigades"
+          - "Qassam Brigades"
+
+      - canonical: "Palestinian Islamic Jihad"
+        aliases:
+          - "PIJ"
+          - "Yihad Islámica Palestina"
+
+      - canonical: "Lashkar-e-Taiba"
+        aliases:
+          - "LeT"
+          - "Lashkar e Taiba"
+          - "Jamaat-ud-Dawa"
+
+      - canonical: "Jemaah Islamiyah"
+        aliases:
+          - "Jemaah Islamiya"
+          - "JI"
+
+      - canonical: "Abu Sayyaf"
+        aliases:
+          - "Abu Sayyaf Group"
+          - "ASG"
+
+      - canonical: "Ansar al-Islam"
+        aliases:
+          - "Ansar al Islam"
+
+      - canonical: "Haqqani Network"
+        aliases: []
+
+  cult_terrorist:
+    severity: explicit
+    description: Cultos con historial terrorista designado
+    entries:
+      - canonical: "Aum Shinrikyo"
+        aliases:
+          - "Aum Shinri Kyo"
+          - "Aleph"
+          - "Aum Supreme Truth"
+
+  separatist_armed:
+    severity: explicit
+    description: Grupos separatistas con campaña armada designada
+    entries:
+      - canonical: "ETA"
+        aliases:
+          - "Euskadi Ta Askatasuna"
+          - "Basque Homeland and Liberty"
+
+      - canonical: "Provisional IRA"
+        aliases:
+          - "Real IRA"
+          - "Continuity IRA"
+          - "New IRA"
+          - "Provisional Irish Republican Army"
+
+      - canonical: "PKK"
+        aliases:
+          - "Kurdistan Workers Party"
+          - "Partiya Karkeren Kurdistan"
+          - "Kongra-Gel"
+
+      - canonical: "LTTE"
+        aliases:
+          - "Tamil Tigers"
+          - "Liberation Tigers of Tamil Eelam"
+
+      - canonical: "FARC"
+        aliases:
+          - "Fuerzas Armadas Revolucionarias de Colombia"
+          - "Revolutionary Armed Forces of Colombia"
+
+      - canonical: "ELN"
+        aliases:
+          - "National Liberation Army"
+          - "Ejército de Liberación Nacional"
+
+      - canonical: "Sendero Luminoso"
+        aliases:
+          - "Shining Path"
+          - "Communist Party of Peru"
+
+  far_right_designated:
+    severity: explicit
+    description: Grupos de extrema derecha designados como terroristas
+    entries:
+      - canonical: "Atomwaffen Division"
+        aliases:
+          - "Atomwaffen"
+          - "National Socialist Order"
+          - "NSO"
+
+      - canonical: "The Base"
+        aliases:
+          - "Base movement"
+
+      - canonical: "Russian Imperial Movement"
+        aliases:
+          - "RIM"
+          - "Russkoye Imperskoye Dvizheniye"
+
+      - canonical: "Nordic Resistance Movement"
+        aliases:
+          - "NMR"
+          - "Nordiska motståndsrörelsen"
+
+      - canonical: "Combat 18"
+        aliases:
+          - "C18"

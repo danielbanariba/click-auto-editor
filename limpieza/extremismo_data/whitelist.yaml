@@ -1,0 +1,88 @@
+# ============================================================================
+# Whitelist — frases que NUNCA se redactan aunque contengan substrings
+# ============================================================================
+# Bandas, álbumes y términos legítimos del mundo del metal/rock que pueden
+# colisionar con términos de la blacklist.
+#
+# El matching es por frase completa: si el texto contiene una frase de
+# esta lista, esa frase se preserva intacta (los términos de blacklist
+# que estén DENTRO de la frase whitelist se ignoran).
+# ============================================================================
+
+# --- Bandas legítimas con nombres que colisionan con la blacklist -----------
+bands:
+  # "Manson" colisiona con Charles Manson — pero Marilyn Manson es banda
+  - "Marilyn Manson"
+  - "Manson Family Picnic"     # cover band común
+
+  # "Death" / "Doom" — palabras temáticas de bandas, NO se censuran solas
+  # (igual no están en la blacklist de extremismo, solo aclaración).
+
+  # "Hamas" se solapa accidentalmente con la palabra árabe común — pero
+  # no hay banda metal con ese nombre. No agregamos whitelist.
+
+  # "Slayer" es banda — no relacionada con extremismo, no en blacklist.
+
+  # "Anthrax" es banda — el ántrax como arma sí es relevante pero no
+  # está en blacklist (sería over-match).
+
+# --- Apellidos comunes / personas no-extremistas que pueden colisionar -------
+personal_names_legitimate:
+  # "Reich" no está en blacklist solo, pero "Reich Music Publications"
+  # podría aparecer como editorial. "Steve Reich" / "Wilhelm Reich" son
+  # figuras culturales legítimas.
+  - "Steve Reich"
+  - "Wilhelm Reich"
+  - "Reich Music Publications"
+
+  # "Lane" - apellido común. "David Lane" sí es ideólogo neonazi pero
+  # nombre completo de otras personas no relacionadas se preserva si
+  # aparece como frase distintiva. No agregamos genéricos.
+
+  # "Mao" - apellido chino muy común. No está blacklisted solo.
+
+  # "Kim" - apellido coreano muy común. No está blacklisted solo.
+
+# --- Ubicaciones y eventos históricos no-extremistas -------------------------
+historical_locations:
+  # "Reichstag" es el edificio del parlamento alemán histórico
+  - "Reichstag"
+  - "Reichstag fire"
+  - "Reichstag building"
+
+# --- Términos histórico-académicos que pueden confundirse --------------------
+academic_context:
+  # "Industrial Society and Its Future" es el manifiesto del Unabomber
+  # pero también frase común en sociología. Si aparece en contexto musical
+  # casi seguro es referencia al manifiesto — NO whitelistear.
+
+  # "Freedom Club" sin contexto extra puede ser nombre legítimo de club.
+  # Tradeoff: preferimos falso positivo a strike de YouTube.
+
+  # "FC" sola no está en blacklist por riesgo de falsos positivos masivos
+  # (Football Club, etc.).
+
+# --- Géneros y temáticas metal legítimas -------------------------------------
+metal_themes:
+  # Géneros y subgéneros que mencionan violencia/muerte pero NO son extremismo
+  - "war metal"
+  - "death metal"
+  - "doom metal"
+  - "grindcore"
+  - "black metal"
+  - "thrash metal"
+  - "deathcore"
+  - "extreme metal"
+
+# --- Términos geográficos / históricos no-extremistas ------------------------
+geography:
+  # "Sinaloa" sin "cartel" puede ser referencia al estado mexicano
+  # (música, cultura, gastronomía). Whitelistar contextos legítimos.
+  - "Sinaloa style"
+  - "música sinaloense"
+  - "musica sinaloense"
+  - "Estado de Sinaloa"
+
+  # "Medellín" como ciudad es legítimo
+  - "ciudad de Medellín"
+  - "Medellín Colombia"

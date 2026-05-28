@@ -21,6 +21,7 @@ import unicodedata
 from mutagen import File as MutagenFile
 from effects.sombra import add_shadow
 from limpieza.censura import censor_profanity
+from limpieza.extremismo import redact_extremism
 
 # Importar configuración
 sys.path.append(str(Path(__file__).parent))
@@ -1597,6 +1598,7 @@ def build_tracklist(audio_files, folder_name=None, api_titles=None, cue_tracks=N
             raw_title = clean_api_titles[idx - 1] if use_api else entry["title"]
             fallback = entry["title"]
             title = normalize_track_title(raw_title) or fallback
+            title = redact_extremism(title)
             title = censor_profanity(title)
             title = re.sub(rf"^0*{idx}(?:\s*[-._)\]]\s*|\s+)", "", title).strip() or title
             result.append(
@@ -1629,6 +1631,7 @@ def build_tracklist(audio_files, folder_name=None, api_titles=None, cue_tracks=N
             title = clean_track_title(audio_file.stem, band_name, album_name, fallback)
         if not title:
             title = normalize_track_title(fallback) or fallback
+        title = redact_extremism(title)
         title = censor_profanity(title)
         # Eliminar prefijo numérico redundante que coincida con el índice del track
         # Ej: track 5 con título "05 3 Words..." → "3 Words..."

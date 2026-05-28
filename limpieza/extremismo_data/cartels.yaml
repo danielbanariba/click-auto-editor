@@ -1,0 +1,142 @@
+# ============================================================================
+# Cárteles de droga violentos — listados como organizaciones criminales
+# ============================================================================
+# YouTube flagea explícitamente contenido que promociona cárteles según
+# la política "Organizaciones criminales o extremistas violentas".
+# Caso textual de la pregunta 4/7 de la formación: "cártel de Sinaloa".
+# ============================================================================
+
+categories:
+
+  cartels_mexico:
+    severity: explicit
+    description: Cárteles mexicanos designados
+    entries:
+      - canonical: "Sinaloa Cartel"
+        aliases:
+          - "Cártel de Sinaloa"
+          - "Cartel de Sinaloa"
+          - "Cártel del Pacífico"
+          - "Pacific Cartel"
+          - "Federation Cartel"
+
+      - canonical: "Cártel de Jalisco Nueva Generación"
+        aliases:
+          - "CJNG"
+          - "Jalisco New Generation Cartel"
+          - "Jalisco Cartel"
+
+      - canonical: "Los Zetas"
+        aliases:
+          - "Zetas Cartel"
+          - "Cártel de los Zetas"
+
+      - canonical: "Gulf Cartel"
+        aliases:
+          - "Cártel del Golfo"
+          - "CDG"
+
+      - canonical: "La Familia Michoacana"
+        aliases:
+          - "Familia Michoacana"
+
+      - canonical: "Knights Templar Cartel"
+        aliases:
+          - "Caballeros Templarios"
+          - "Los Caballeros Templarios"
+
+      - canonical: "Beltrán-Leyva Organization"
+        aliases:
+          - "Cártel de los Beltrán Leyva"
+          - "BLO"
+          - "Beltran Leyva"
+
+      - canonical: "Juárez Cartel"
+        aliases:
+          - "Cártel de Juárez"
+          - "Cartel de Juarez"
+          - "La Línea"
+
+      - canonical: "Tijuana Cartel"
+        aliases:
+          - "Cártel de Tijuana"
+          - "Arellano Félix Organization"
+          - "AFO"
+
+      - canonical: "Cártel de Santa Rosa de Lima"
+        aliases:
+          - "CSRL"
+
+  cartels_colombia:
+    severity: explicit
+    description: Cárteles colombianos históricos
+    entries:
+      - canonical: "Medellín Cartel"
+        aliases:
+          - "Cártel de Medellín"
+          - "Cartel de Medellin"
+
+      - canonical: "Cali Cartel"
+        aliases:
+          - "Cártel de Cali"
+
+      - canonical: "Norte del Valle Cartel"
+        aliases:
+          - "Cártel del Norte del Valle"
+
+  cartel_leaders:
+    severity: explicit
+    description: Líderes mediáticos de cárteles (incluirlos puede ser apología)
+    entries:
+      - canonical: "Joaquín Guzmán"
+        aliases:
+          - "El Chapo"
+          - "Chapo Guzmán"
+          - "Chapo Guzman"
+          - "Joaquin Guzman"
+
+      - canonical: "Nemesio Oseguera Cervantes"
+        aliases:
+          - "El Mencho"
+
+      - canonical: "Pablo Escobar"
+        aliases:
+          - "Escobar Gaviria"
+
+      - canonical: "Amado Carrillo Fuentes"
+        aliases:
+          - "El Señor de los Cielos"
+          - "Lord of the Skies"
+
+      - canonical: "Miguel Ángel Félix Gallardo"
+        aliases:
+          - "El Padrino"
+
+  pandillas:
+    severity: explicit
+    description: Pandillas transnacionales clasificadas como organizaciones criminales
+    entries:
+      - canonical: "MS-13"
+        aliases:
+          - "Mara Salvatrucha"
+          - "MS 13"
+          - "MS Trece"
+
+      - canonical: "Barrio 18"
+        aliases:
+          - "18th Street Gang"
+          - "Mara 18"
+          - "Calle 18"
+
+      - canonical: "Primeiro Comando da Capital"
+        aliases:
+          - "PCC"
+          - "First Capital Command"
+
+      - canonical: "Comando Vermelho"
+        aliases:
+          - "Red Command"
+          - "CV"
+
+      - canonical: "Tren de Aragua"
+        aliases: []

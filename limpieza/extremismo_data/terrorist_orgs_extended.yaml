@@ -1,0 +1,648 @@
+# ============================================================================
+# Organizaciones terroristas designadas — EXTENSIÓN
+# ============================================================================
+# Adiciones a terrorist_orgs.yaml derivadas de búsqueda contra listas oficiales
+# actualizadas: US State Dept FTO/SDGT, EU Council 931, UN-1267, UK Home Office,
+# Canada Public Safety, Australia, India MHA UAPA.
+#
+# Política de matching: SOLO frases multi-palabra y siglas inequívocas.
+# Siglas demasiado ambiguas se omiten (ej. "AB" para Aryan Brotherhood
+# colisiona con muchas cosas; mejor capturar el nombre completo).
+# ============================================================================
+
+categories:
+
+  # ----------------------------------------------------------------
+  # Al-Qaeda regional affiliates y franquicias
+  # ----------------------------------------------------------------
+  jihadist_aq_affiliates:
+    severity: explicit
+    description: Filiales regionales y franquicias de Al-Qaeda
+    entries:
+      - canonical: "Al-Qaeda in the Arabian Peninsula"
+        aliases:
+          - "AQAP"
+          - "Al-Qa'ida in the Arabian Peninsula"
+          - "Al-Qaida in Yemen"
+          - "AQY"
+          - "Ansar al-Shari'a in Yemen"
+          - "Ansar al-Sharia in Yemen"
+
+      - canonical: "Al-Qaeda in the Islamic Maghreb"
+        aliases:
+          - "AQIM"
+          - "AQMI"
+          - "Al-Qa'ida in the Islamic Maghreb"
+          - "Salafist Group for Preaching and Combat"
+          - "GSPC"
+          - "Groupe Salafiste pour la Prédication et le Combat"
+
+      - canonical: "Al-Qaeda in Iraq"
+        aliases:
+          - "AQI"
+          - "Al-Qa'ida in Iraq"
+          - "Al-Qaida in Mesopotamia"
+          - "Tawhid wal-Jihad"
+          - "Tawhid and Jihad"
+          - "Monotheism and Jihad Group"
+          - "Zarqawi Network"
+
+      - canonical: "Al-Qaeda in the Indian Subcontinent"
+        aliases:
+          - "AQIS"
+          - "Qaedat al-Jihad in the Indian Subcontinent"
+
+      - canonical: "Jabhat al-Nusra"
+        aliases:
+          - "Al-Nusra Front"
+          - "Al-Nusrah Front"
+          - "Nusra Front"
+          - "Jabhat Fatah al-Sham"
+          - "Front for the Conquest of the Levant"
+          - "Hayat Tahrir al-Sham"
+          - "HTS"
+          - "Tahrir al-Sham"
+
+      - canonical: "Hurras al-Din"
+        aliases:
+          - "Tanzim Hurras al-Din"
+          - "Guardians of Religion Organization"
+          - "Al-Qaeda in Syria"
+
+  # ----------------------------------------------------------------
+  # ISIS province affiliates (Wilayats)
+  # ----------------------------------------------------------------
+  jihadist_isis_provinces:
+    severity: explicit
+    description: Provincias de ISIS designadas oficialmente
+    entries:
+      - canonical: "Islamic State Khorasan Province"
+        aliases:
+          - "ISKP"
+          - "ISIS-K"
+          - "ISIL-K"
+          - "IS-KP"
+          - "ISIL-KP"
+          - "Wilayat Khorasan"
+          - "Islamic State Khurasan"
+
+      - canonical: "Islamic State West Africa Province"
+        aliases:
+          - "ISWAP"
+          - "IS-WAP"
+          - "Wilayat Gharb Afriqiya"
+          - "Wilayat Gharb Ifriqiyyah"
+          - "ISIS-WA"
+
+      - canonical: "Islamic State Sinai Province"
+        aliases:
+          - "ISSP"
+          - "IS-Sinai"
+          - "Wilayat Sinai"
+          - "Ansar Bayt al-Maqdis"
+          - "Supporters of the Holy House"
+
+      - canonical: "Islamic State in Libya"
+        aliases:
+          - "Wilayat Libya"
+          - "ISIS-Libya"
+
+      - canonical: "Islamic State in the Greater Sahara"
+        aliases:
+          - "ISGS"
+          - "Islamic State Sahel Province"
+          - "Estado Islámico del Gran Sáhara"
+
+      - canonical: "Islamic State Mozambique"
+        aliases:
+          - "ISIS-Mozambique"
+          - "Ansar al-Sunna Mozambique"
+          - "Ahlu Sunnah Wa-Jamo"
+
+      - canonical: "Islamic State Somalia"
+        aliases:
+          - "Wilayat as-Sumal"
+
+      - canonical: "Islamic State East Asia"
+        aliases:
+          - "ISIS-EA"
+          - "Daulat ul Islamiya Wilayatul Mashriq"
+
+      - canonical: "Allied Democratic Forces"
+        aliases:
+          - "ADF"
+          - "Madinat al-Tawhid wa-l-Muwahhidin"
+          - "Islamic State Democratic Republic of the Congo"
+          - "ISIS-DRC"
+
+  # ----------------------------------------------------------------
+  # Pakistani / South Asian jihadist
+  # ----------------------------------------------------------------
+  jihadist_south_asian:
+    severity: explicit
+    description: Grupos yihadistas paquistaníes, kashmiríes, indios y bangladesíes
+    entries:
+      - canonical: "Tehrik-e Taliban Pakistan"
+        aliases:
+          - "TTP"
+          - "Tehrik-i-Taliban Pakistan"
+          - "Tehreek-e-Taliban Pakistan"
+          - "Pakistani Taliban"
+
+      - canonical: "Jamaat ul-Ahrar"
+        aliases:
+          - "JuA"
+          - "TTP Jamaat-ul-Ahrar"
+          - "Ahrar-ul-Hind"
+
+      - canonical: "Jaish-e-Mohammed"
+        aliases:
+          - "JeM"
+          - "Jaish-i-Mohammed"
+          - "Army of Mohammed"
+          - "Khuddam ul-Islam"
+          - "Tehrik ul-Furqaan"
+
+      - canonical: "Hizb-ul-Mujahideen"
+        aliases:
+          - "Hizbul Mujahideen"
+          - "Party of Holy Warriors"
+
+      - canonical: "Indian Mujahideen"
+        aliases:
+          - "Indian Mujahedeen"
+          - "Islamic Security Force - IM"
+
+      - canonical: "Harakat ul-Mujahideen"
+        aliases:
+          - "HuM"
+          - "Harkat-ul-Mujahideen"
+          - "Harkat-ul-Ansar"
+          - "HUA"
+          - "Movement of the Mujahideen"
+          - "Al-Faran"
+
+      - canonical: "Harakat ul-Jihad-i-Islami"
+        aliases:
+          - "HUJI"
+          - "Movement of Islamic Holy War"
+
+      - canonical: "Harakat ul-Jihad-i-Islami Bangladesh"
+        aliases:
+          - "HUJI-B"
+
+      - canonical: "Jamaat-ul-Mujahideen Bangladesh"
+        aliases:
+          - "JMB"
+          - "Neo-JMB"
+
+  # ----------------------------------------------------------------
+  # Houthis / Iranian proxies
+  # ----------------------------------------------------------------
+  jihadist_houthi_iranian:
+    severity: explicit
+    description: Houthis y proxies armados iraníes
+    entries:
+      - canonical: "Ansar Allah"
+        aliases:
+          - "Ansarallah"
+          - "Ansarullah"
+          - "Houthis"
+          - "Houthi Movement"
+          - "Helpers of God"
+          - "Partisans of God"
+          - "al-Huthi"
+          - "Believing Youth"
+
+      - canonical: "Islamic Revolutionary Guard Corps"
+        aliases:
+          - "IRGC"
+          - "Iranian Revolutionary Guards"
+          - "Army of the Guardians of the Islamic Revolution"
+
+      - canonical: "Quds Force"
+        aliases:
+          - "IRGC-QF"
+          - "Qods Force"
+          - "Al-Quds Force"
+          - "Jerusalem Corps"
+          - "Jerusalem Force"
+
+      - canonical: "Fatemiyoun Division"
+        aliases:
+          - "Liwa Fatemiyoun"
+          - "Fatemiyoun Brigade"
+          - "Hezbollah Afghanistan"
+
+      - canonical: "Zainabiyoun Brigade"
+        aliases:
+          - "Liwa Zainabiyoun"
+          - "Zaynabiyoun"
+          - "Hezbollah Pakistan"
+
+  # ----------------------------------------------------------------
+  # West African Sahel
+  # ----------------------------------------------------------------
+  jihadist_sahel:
+    severity: explicit
+    description: Yihadistas del Sahel y África occidental
+    entries:
+      - canonical: "Jamaat Nusrat al-Islam wal-Muslimin"
+        aliases:
+          - "JNIM"
+          - "Group for the Support of Islam and Muslims"
+          - "Nusrat al-Islam wal-Muslimeen"
+          - "Ansar al-Dine"
+          - "Ansar Dine"
+          - "Macina Liberation Front"
+          - "Katibat Macina"
+
+      - canonical: "Ansaroul Islam"
+        aliases:
+          - "Ansar ul Islam"
+          - "Defenders of Islam"
+
+      - canonical: "Ansaru"
+        aliases:
+          - "Ansarul Muslimina Fi Biladis Sudan"
+          - "Vanguard for the Protection of Muslims in Black Africa"
+
+  # ----------------------------------------------------------------
+  # Otros grupos yihadistas regionales
+  # ----------------------------------------------------------------
+  jihadist_regional_other:
+    severity: explicit
+    description: Otros grupos yihadistas regionales designados
+    entries:
+      - canonical: "Al-Gama'a al-Islamiyya"
+        aliases:
+          - "Egyptian Islamic Group"
+          - "Gama'at al-Islamiyya"
+
+      - canonical: "Egyptian Islamic Jihad"
+        aliases:
+          - "Al-Jihad"
+          - "Tanzim al-Jihad"
+          - "Vanguards of Conquest"
+
+      - canonical: "Abdallah Azzam Brigades"
+        aliases:
+          - "Abdullah Azzam Brigades"
+          - "Ziyad al-Jarrah Battalions"
+          - "Yusuf al-'Uyayri Battalions"
+
+      - canonical: "Asbat al-Ansar"
+        aliases:
+          - "Osbat al-Ansar"
+          - "Usbat al-Ansar"
+          - "League of Partisans"
+          - "Band of Helpers"
+
+      - canonical: "Islamic Movement of Uzbekistan"
+        aliases:
+          - "IMU"
+          - "Islamic Movement of Turkestan"
+          - "Islamic Party of Turkestan"
+
+      - canonical: "Turkestan Islamic Party"
+        aliases:
+          - "East Turkestan Islamic Movement"
+          - "ETIM"
+          - "East Turkestan Islamic Party"
+          - "Hizb al-Islami al-Turkistani"
+
+      - canonical: "Caucasus Emirate"
+        aliases:
+          - "Imarat Kavkaz"
+          - "Islamic Emirate of the Caucasus"
+
+      - canonical: "Jemaah Anshorut Daulah"
+        aliases:
+          - "Jamaah Ansharut Daulah"
+          - "Partisans of the Caliphate"
+
+      - canonical: "Mujahidin Indonesia Timur"
+        aliases:
+          - "Mujahideen of Eastern Indonesia"
+          - "East Indonesia Mujahideen"
+
+      - canonical: "Hizb ut-Tahrir"
+        aliases:
+          - "Hizb-ut-Tahrir"
+          - "Party of Liberation"
+          - "Islamic Party of Liberation"
+
+      - canonical: "Al-Ashtar Brigades"
+        aliases:
+          - "Saraya al-Ashtar"
+          - "Wa'ad Allah Brigades"
+          - "Imam al-Mahdi Brigades"
+
+      - canonical: "Hasm Movement"
+        aliases:
+          - "Harakat Sawa'd Misr"
+          - "Harakat Hasm"
+          - "Liwa al-Thawra"
+
+  # ----------------------------------------------------------------
+  # Separatistas/nacionalistas armados con designación
+  # ----------------------------------------------------------------
+  separatist_armed_extended:
+    severity: explicit
+    description: Grupos separatistas y nacionalistas armados adicionales
+    entries:
+      - canonical: "Baloch Liberation Army"
+        aliases:
+          - "Balochistan Liberation Army"
+          - "Majeed Brigade"
+
+      - canonical: "Communist Party of the Philippines New People's Army"
+        aliases:
+          - "CPP/NPA"
+          - "New People's Army"
+          - "Bagong Hukbong Bayan"
+
+      - canonical: "United Liberation Front of Asom"
+        aliases:
+          - "ULFA"
+          - "United Liberation Front of Assam"
+          - "ULFA-Independent"
+
+      - canonical: "National Democratic Front of Bodoland"
+        aliases:
+          - "NDFB"
+          - "NDFB-Songbijit"
+
+      - canonical: "Jammu Kashmir Liberation Front"
+        aliases:
+          - "JKLF"
+          - "Jammu and Kashmir Liberation Front"
+
+      - canonical: "Babbar Khalsa International"
+        aliases:
+          - "Babbar Khalsa"
+          - "BKI"
+
+      - canonical: "International Sikh Youth Federation"
+        aliases:
+          - "ISYF"
+
+      - canonical: "Khalistan Tiger Force"
+        aliases: []
+
+      - canonical: "Khalistan Zindabad Force"
+        aliases: []
+
+      - canonical: "Khalistan Commando Force"
+        aliases: []
+
+      - canonical: "Khalistan Liberation Force"
+        aliases: []
+
+  # ----------------------------------------------------------------
+  # Paramilitares Irlanda del Norte (loyalist & republican)
+  # ----------------------------------------------------------------
+  ni_paramilitary:
+    severity: explicit
+    description: Grupos paramilitares de Irlanda del Norte
+    entries:
+      - canonical: "Real Irish Republican Army"
+        aliases:
+          - "RIRA"
+          - "Real IRA"
+          - "32 County Sovereignty Movement"
+          - "Óglaigh na hÉireann"
+          - "Oglaigh na hEireann"
+          - "New IRA"
+
+      - canonical: "Continuity Irish Republican Army"
+        aliases:
+          - "CIRA"
+          - "Continuity IRA"
+          - "Continuity Army Council"
+
+      - canonical: "Irish National Liberation Army"
+        aliases:
+          - "INLA"
+          - "Irish People's Liberation Organisation"
+
+      - canonical: "Loyalist Volunteer Force"
+        aliases:
+          - "LVF"
+
+      - canonical: "Ulster Defence Association"
+        aliases:
+          - "UDA"
+          - "Ulster Freedom Fighters"
+          - "UFF"
+
+      - canonical: "Ulster Volunteer Force"
+        aliases:
+          - "UVF"
+          - "Red Hand Commando"
+
+      - canonical: "Red Hand Defenders"
+        aliases:
+          - "RHD"
+
+      - canonical: "Orange Volunteers"
+        aliases: []
+
+      - canonical: "Cumann na mBan"
+        aliases:
+          - "Irish Republican Women's Council"
+
+      - canonical: "Fianna na hEireann"
+        aliases:
+          - "Fianna Éireann"
+          - "Soldiers of Ireland"
+
+      - canonical: "Saor Eire"
+        aliases:
+          - "Saor Éire"
+
+  # ----------------------------------------------------------------
+  # Grupos neonazis acelerationistas (designados terroristas)
+  # ----------------------------------------------------------------
+  far_right_accelerationist:
+    severity: explicit
+    description: Grupos neonazis acelerationistas designados oficialmente como terroristas
+    entries:
+      - canonical: "Feuerkrieg Division"
+        aliases:
+          - "FKD"
+
+      - canonical: "Sonnenkrieg Division"
+        aliases:
+          - "SKD"
+
+      - canonical: "National Action"
+        aliases:
+          - "Scottish Dawn"
+          - "NS131"
+          - "System Resistance Network"
+
+      - canonical: "Maniacs Murder Cult"
+        aliases:
+          - "Maniac Murder Cult"
+          - "MKU"
+
+      - canonical: "Terrorgram Collective"
+        aliases:
+          - "Terrorgram"
+          - "The Terrorgram Collective"
+
+      - canonical: "Aryan Strikeforce"
+        aliases:
+          - "Aryan Strike Force"
+
+      - canonical: "Order of Nine Angles"
+        aliases:
+          - "O9A"
+          - "ONA"
+
+  # ----------------------------------------------------------------
+  # Marxista/anarquista designado (mayormente histórico, citado en metal)
+  # ----------------------------------------------------------------
+  far_left_militant:
+    severity: explicit
+    description: Grupos marxistas/anarquistas armados — algunos defunct pero referenciados habitualmente
+    entries:
+      - canonical: "Revolutionary People's Liberation Party-Front"
+        aliases:
+          - "DHKP-C"
+          - "DHKP/C"
+          - "Devrimci Halk Kurtulus Partisi-Cephesi"
+          - "Dev Sol"
+          - "Revolutionary Left"
+
+      - canonical: "Revolutionary Organization 17 November"
+        aliases:
+          - "November 17"
+          - "Epanastatiki Organosi 17 Noemvri"
+
+      - canonical: "Revolutionary Struggle"
+        aliases:
+          - "Epanastatikos Agonas"
+
+      - canonical: "Revolutionary People's Struggle"
+        aliases:
+          - "Epanastatikos Laikos Agonas"
+
+      - canonical: "Communist Party of Turkey Marxist-Leninist"
+        aliases:
+          - "TKP/ML"
+          - "TIKKO"
+          - "Turkish Workers' and Peasants' Liberation Army"
+
+      - canonical: "Red Brigades"
+        aliases:
+          - "Brigate Rosse"
+          - "Red Brigades for the Construction of the Combatant Communist Party"
+          - "New Red Brigades"
+
+      - canonical: "Red Army Faction"
+        aliases:
+          - "Rote Armee Fraktion"
+          - "Baader-Meinhof Group"
+          - "Baader-Meinhof Gang"
+          - "Baader-Meinhof"
+
+      - canonical: "Japanese Red Army"
+        aliases:
+          - "Nihon Sekigun"
+          - "Anti-Imperialist International Brigade"
+
+      - canonical: "Action Directe"
+        aliases:
+          - "Direct Action"
+
+  # ----------------------------------------------------------------
+  # Etnonacionalista, ultranacionalista, mercenarios
+  # ----------------------------------------------------------------
+  ethnonationalist_designated:
+    severity: explicit
+    description: Otros grupos etnonacionalistas/religiosos y mercenarios designados
+    entries:
+      - canonical: "Kahane Chai"
+        aliases:
+          - "Kach"
+          - "Kahane Lives"
+          - "Dikuy Bogdim"
+          - "State of Judea"
+          - "Sword of David"
+          - "Judean Legion"
+          - "Kfar Tapuah Fund"
+          - "Way of the Torah"
+
+      - canonical: "Jewish Defense League"
+        aliases:
+          - "JDL"
+
+      - canonical: "Palestine Action"
+        aliases: []
+
+      - canonical: "Samidoun"
+        aliases:
+          - "Samidoun Palestinian Prisoner Solidarity Network"
+
+      - canonical: "Wagner Group"
+        aliases:
+          - "Gruppa Vagnera"
+          - "PMC Wagner"
+          - "ChVK Wagner"
+
+  # ----------------------------------------------------------------
+  # Líderes terroristas individuales (yihadistas de alto perfil)
+  # ----------------------------------------------------------------
+  terrorist_leaders_jihadist:
+    severity: explicit
+    description: Líderes terroristas yihadistas mediáticos referenciados habitualmente
+    entries:
+      - canonical: "Osama bin Laden"
+        aliases:
+          - "Usama bin Laden"
+          - "Bin Laden"
+          - "Sheikh Osama"
+
+      - canonical: "Ayman al-Zawahiri"
+        aliases:
+          - "Al-Zawahiri"
+          - "Zawahiri"
+
+      - canonical: "Abu Bakr al-Baghdadi"
+        aliases:
+          - "Al-Baghdadi"
+          - "Caliph Ibrahim"
+
+      - canonical: "Abu Musab al-Zarqawi"
+        aliases:
+          - "Al-Zarqawi"
+          - "Zarqawi"
+
+      - canonical: "Khalid Sheikh Mohammed"
+        aliases:
+          - "KSM"
+          - "Khaled Sheikh Mohammed"
+
+      - canonical: "Mohamed Atta"
+        aliases:
+          - "Mohammed Atta"
+
+      - canonical: "Shoko Asahara"
+        aliases:
+          - "Chizuo Matsumoto"
+
+      - canonical: "Joseph Kony"
+        aliases:
+          - "Lord's Resistance Army"
+          - "LRA Uganda"
+
+      - canonical: "Abimael Guzmán"
+        aliases:
+          - "Abimael Guzman"
+          - "Presidente Gonzalo"
+
+      - canonical: "Shamil Basayev"
+        aliases:
+          - "Chechen warlord Basayev"

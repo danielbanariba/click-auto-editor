@@ -1,0 +1,114 @@
+# ============================================================================
+# Terrorismo doméstico en EE.UU. — individuos y manifiestos
+# ============================================================================
+# Casos que YouTube flagea agresivamente por elogio / promoción.
+# Incluye los nombres y los alias/firmas que usaron los perpetradores.
+#
+# CRÍTICO: "Freedom Club" / "FC" es la firma del Unabomber — éste es el
+# alias por el que la banda Collapsed Mainframe recibió strike en su
+# álbum "Theater of Tyranny" (2023).
+# ============================================================================
+
+categories:
+
+  unabomber:
+    severity: explicit
+    description: Theodore Kaczynski y su manifiesto "Industrial Society and Its Future"
+    entries:
+      - canonical: "Theodore Kaczynski"
+        aliases:
+          - "Ted Kaczynski"
+          - "Kaczynski"
+          - "Unabomber"
+          - "Unabomer"
+          - "Una bomber"
+          - "Freedom Club"          # firma del manifiesto
+          - "Industrial Society and Its Future"
+
+  oklahoma_city:
+    severity: explicit
+    description: Atentado de Oklahoma City 1995
+    entries:
+      - canonical: "Timothy McVeigh"
+        aliases:
+          - "Tim McVeigh"
+          - "McVeigh"
+      - canonical: "Terry Nichols"
+        aliases:
+          - "Nichols"
+
+  olympic_park:
+    severity: explicit
+    description: Atentado Olímpico Atlanta 1996 y otros
+    entries:
+      - canonical: "Eric Rudolph"
+        aliases:
+          - "Olympic Park bomber"
+
+  charlottesville:
+    severity: explicit
+    description: Charlottesville Unite the Right 2017
+    entries:
+      - canonical: "James Alex Fields"
+        aliases:
+          - "James Fields"
+          - "Alex Fields"
+
+  far_right_groups_us:
+    severity: explicit
+    description: Grupos de extrema derecha activos en EE.UU.
+    entries:
+      - canonical: "Ku Klux Klan"
+        aliases:
+          - "KKK"
+          - "Klan"
+          - "Knights of the Ku Klux Klan"
+
+      - canonical: "Aryan Nations"
+        aliases:
+          - "Aryan Brotherhood"
+
+      - canonical: "Proud Boys"
+        aliases: []
+
+      - canonical: "Oath Keepers"
+        aliases: []
+
+      - canonical: "Three Percenters"
+        aliases:
+          - "III Percenters"
+          - "3 Percenters"
+          - "3%ers"
+
+      - canonical: "Patriot Front"
+        aliases: []
+
+      - canonical: "National Socialist Movement"
+        aliases:
+          - "NSM"
+          - "American Nazi Party"
+
+      - canonical: "Stormfront"
+        aliases: []
+
+      - canonical: "Boogaloo Boys"
+        aliases:
+          - "Boogaloo Bois"
+          - "Boogaloo movement"
+
+  left_militant_us:
+    severity: explicit
+    description: Grupos militantes históricos de izquierda en EE.UU.
+    entries:
+      - canonical: "Weather Underground"
+        aliases:
+          - "Weathermen"
+          - "Weather Underground Organization"
+
+      - canonical: "Symbionese Liberation Army"
+        aliases:
+          - "SLA"
+
+      - canonical: "Black Liberation Army"
+        aliases:
+          - "BLA"
