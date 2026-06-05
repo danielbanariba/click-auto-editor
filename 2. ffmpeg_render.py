@@ -2768,7 +2768,7 @@ def render_video(folder_path, folder_name, show_progress=False):
 
             for file in os.listdir(folder_path):
                 if file.lower().endswith(
-                    (".mp3", ".flac", ".wav", ".m4a", ".png", ".jpg", ".jpeg", ".txt")
+                    (".mp3", ".flac", ".wav", ".m4a", ".png", ".jpg", ".jpeg", ".txt", ".cue")
                 ):
                     shutil.copy2(folder_path / file, temp_folder_path / file)
 

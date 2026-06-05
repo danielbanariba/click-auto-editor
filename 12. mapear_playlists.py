@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -10,6 +11,7 @@ from pathlib import Path
 
 from googleapiclient.errors import HttpError
 
+from paises import nombre_pais_en
 from subir_video.authenticate import (
     authenticate,
     authenticate_next,
@@ -22,6 +24,29 @@ DEFAULT_STATE = Path(__file__).resolve().parent / "mapear_playlists_state.json"
 DEFAULT_PLAYLIST_LINKS_CACHE = (
     Path(__file__).resolve().parent / "data" / "playlist_links_cache.json"
 )
+DEFAULT_LOCK = Path(__file__).resolve().parent / "mapear_playlists.lock"
+
+_lock_handle = None
+
+
+def adquirir_lock(lock_path=DEFAULT_LOCK):
+    """Toma un lock exclusivo no bloqueante. Evita instancias concurrentes
+    (servicio systemd + corrida manual) que crean playlists duplicadas.
+
+    Es idempotente: si ESTE proceso ya tiene el lock, devuelve True sin
+    reintentar (main() se re-llama a si mismo al rotar credenciales, y un
+    segundo flock desde el mismo proceso sobre otro descriptor fallaria)."""
+    global _lock_handle
+    if _lock_handle is not None:
+        return True
+    handle = open(lock_path, "w", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return False
+    _lock_handle = handle
+    return True
 
 
 class RateLimitError(RuntimeError):
@@ -498,6 +523,10 @@ def split_countries(value):
         key = normalize_title(item)
         if key in {"unknown", "desconocido", "n/a", "na"}:
             continue
+        # Canonicaliza a un unico nombre en ingles para no duplicar playlists
+        # por idioma o variante ("Republica Checa"/"Czech Republic" -> "Czechia").
+        item = nombre_pais_en(item)
+        key = normalize_title(item)
         if key in seen:
             continue
         seen.add(key)
@@ -847,6 +876,13 @@ def main(youtube=None):
         help="Solo actualiza data/playlist_links_cache.json y termina.",
     )
     args = parser.parse_args()
+
+    if not adquirir_lock():
+        print(
+            "Ya hay otra instancia de mapear_playlists corriendo "
+            f"(lock: {DEFAULT_LOCK}). Se omite esta ejecucion."
+        )
+        return
 
     pause = (
         args.pausa

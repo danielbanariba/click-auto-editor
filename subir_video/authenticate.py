@@ -17,7 +17,8 @@ SCOPES = [
 # Carpeta de credenciales
 CREDENTIALS_DIR = Path(__file__).resolve().parent.parent / "credentials"
 
-# Estado de credenciales agotadas (por sesion)
+# Credenciales que NO hay que volver a usar en esta sesion: agotadas (cuota) o
+# revocadas/expiradas (invalid_grant). Ambas se saltean al elegir credencial.
 _exhausted_credentials = set()
 
 
@@ -64,9 +65,17 @@ def get_credential_sets(prefix=None):
     return pairs
 
 
-def authenticate_with_credentials(secrets_path, token_path):
+def authenticate_with_credentials(secrets_path, token_path, interactive=True):
     """
     Autentica usando un par especifico de credenciales.
+
+    interactive=True (default): si el token esta muerto o no existe, abre el
+    browser para reautenticar (flujo de consentimiento).
+
+    interactive=False: NO abre browser. Si el token no se puede refrescar
+    (revocado/expirado: invalid_grant) o no existe, propaga RefreshError. Esto
+    permite que la verificacion y la rotacion salteen credenciales muertas sin
+    colgarse esperando interaccion humana (clave en servicios/cron).
     """
     secrets_file = Path(secrets_path)
     token_file = Path(token_path)
@@ -83,12 +92,21 @@ def authenticate_with_credentials(secrets_path, token_path):
             credentials = None
 
     if not credentials or not credentials.valid:
+        refresh_error = None
         if credentials and credentials.expired and credentials.refresh_token:
             try:
                 credentials.refresh(Request())
-            except RefreshError:
+            except RefreshError as exc:
+                refresh_error = exc
                 credentials = None
         if not credentials or not credentials.valid:
+            if not interactive:
+                # Sin interaccion no abrimos browser: propagamos para que el
+                # caller (verificacion/rotacion) saltee esta credencial muerta.
+                raise refresh_error or RefreshError(
+                    f"Sin token valido para {secrets_file.name} en modo "
+                    f"no-interactivo (no se abre browser)."
+                )
             flow = InstalledAppFlow.from_client_secrets_file(str(secrets_file), SCOPES)
             credentials = flow.run_local_server(host="127.0.0.1", port=0)
         token_file.parent.mkdir(parents=True, exist_ok=True)
@@ -123,9 +141,24 @@ def authenticate(prefix=None):
             "Coloca archivos client_secrets_*.json en la carpeta credentials/"
         )
 
+    # 1) Preferir una credencial que funcione SIN browser (token valido o
+    #    refrescable). Saltar las muertas/revocadas (invalid_grant) sin marcar
+    #    nada: una credencial muerta puede revivir con reautenticacion.
+    for secrets_path, token_path in available:
+        try:
+            client = authenticate_with_credentials(
+                secrets_path, token_path, interactive=False
+            )
+        except RefreshError:
+            continue
+        print(f"Usando credenciales: {secrets_path.name}")
+        return client
+
+    # 2) Ninguna anduvo sin interaccion (primer setup, o todas revocadas):
+    #    reautenticar la primera por browser.
     secrets_path, token_path = available[0]
-    print(f"Usando credenciales: {secrets_path.name}")
-    return authenticate_with_credentials(secrets_path, token_path)
+    print(f"Reautenticando (browser): {secrets_path.name}")
+    return authenticate_with_credentials(secrets_path, token_path, interactive=True)
 
 
 def mark_credential_exhausted(secrets_path):
@@ -134,6 +167,16 @@ def mark_credential_exhausted(secrets_path):
     """
     _exhausted_credentials.add(str(secrets_path))
     print(f"Credencial agotada: {Path(secrets_path).name}")
+
+
+def mark_credential_revoked(secrets_path):
+    """
+    Marca una credencial como inservible por token revocado/expirado
+    (invalid_grant). Usa el mismo set de skip que las agotadas: no se vuelve a
+    intentar en esta sesion, pero el log deja claro que NO es cuota.
+    """
+    _exhausted_credentials.add(str(secrets_path))
+    print(f"Credencial revocada/expirada (reautenticar): {Path(secrets_path).name}")
 
 
 def get_current_credential_path(prefix=None):
@@ -165,24 +208,31 @@ def probar_credenciales_disponibles(prefix="upload"):
     quotaExceeded o dailyLimitExceeded, marca esa credencial como agotada
     en la sesion. Si responde OK, la considera sana.
 
-    Retorna una tupla (youtube_sano, sanas, agotadas) donde:
+    No abre browser: prueba cada token con interactive=False, asi un token
+    revocado/expirado se reporta como muerto en vez de colgar el proceso (clave
+    en servicios/cron).
+
+    Retorna una tupla (youtube_sano, sanas, agotadas, muertas) donde:
       - youtube_sano: cliente youtube ya autenticado contra la primera
         credencial sana, o None si no hay ninguna.
       - sanas: lista de Path de client_secrets sanos.
-      - agotadas: lista de Path de client_secrets agotados.
+      - agotadas: lista de Path de client_secrets con cuota agotada.
+      - muertas: lista de Path de client_secrets con token revocado/expirado
+        (invalid_grant); hay que reautenticarlas.
 
-    Side effect: las credenciales agotadas quedan registradas en
-    _exhausted_credentials, asi que llamadas posteriores a authenticate()
-    las saltean.
+    Side effect: las credenciales agotadas y muertas quedan registradas en
+    _exhausted_credentials, asi que llamadas posteriores (authenticate /
+    authenticate_next) las saltean.
     """
     from googleapiclient.errors import HttpError
 
     pairs = get_credential_sets(prefix)
     if not pairs:
-        return None, [], []
+        return None, [], [], []
 
     sanas = []
     agotadas = []
+    muertas = []
     youtube_sano = None
 
     for secrets_path, token_path in pairs:
@@ -190,8 +240,15 @@ def probar_credenciales_disponibles(prefix="upload"):
             agotadas.append(secrets_path)
             continue
         try:
-            yt = authenticate_with_credentials(secrets_path, token_path)
+            yt = authenticate_with_credentials(
+                secrets_path, token_path, interactive=False
+            )
             yt.channels().list(part="id", mine=True).execute()
+        except RefreshError:
+            # Token revocado/expirado (invalid_grant) o ausente: credencial muerta.
+            mark_credential_revoked(secrets_path)
+            muertas.append(secrets_path)
+            continue
         except HttpError as exc:
             from subir_video.quota_errors import is_quota_error
 
@@ -208,7 +265,7 @@ def probar_credenciales_disponibles(prefix="upload"):
         if youtube_sano is None:
             youtube_sano = yt
 
-    return youtube_sano, sanas, agotadas
+    return youtube_sano, sanas, agotadas, muertas
 
 
 def authenticate_next(prefix=None):
@@ -228,15 +285,23 @@ def authenticate_next(prefix=None):
     pairs = get_credential_sets(prefix)
     available = [(s, t) for s, t in pairs if str(s) not in _exhausted_credentials]
 
-    if not available:
-        pool = prefix or "disponibles"
-        print(
-            f"Credenciales del pool '{pool}' agotadas. "
-            f"No se rota a otros pools (aislamiento). "
-            f"Agrega mas client_secrets_{prefix or '*'}_*.json en credentials/"
-        )
-        return None
+    # Recorrer las disponibles saltando tokens muertos/revocados (invalid_grant)
+    # SIN abrir browser. Asi no se cuelga si la siguiente del pool tambien murio.
+    for secrets_path, token_path in available:
+        try:
+            client = authenticate_with_credentials(
+                secrets_path, token_path, interactive=False
+            )
+        except RefreshError:
+            mark_credential_revoked(secrets_path)
+            continue
+        print(f"Cambiando a credenciales: {secrets_path.name}")
+        return client
 
-    secrets_path, token_path = available[0]
-    print(f"Cambiando a credenciales: {secrets_path.name}")
-    return authenticate_with_credentials(secrets_path, token_path)
+    pool = prefix or "disponibles"
+    print(
+        f"Credenciales del pool '{pool}' agotadas o revocadas. "
+        f"No se rota a otros pools (aislamiento). "
+        f"Agrega o reautentica client_secrets_{prefix or '*'}_*.json en credentials/"
+    )
+    return None

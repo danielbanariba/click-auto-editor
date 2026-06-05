@@ -24,6 +24,7 @@ import requests
 import httplib2
 import numpy as np
 from PIL import Image
+from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from mutagen import File as MutagenFile
@@ -34,7 +35,11 @@ from subir_video.authenticate import (
     authenticate_next,
     probar_credenciales_disponibles,
 )
-from subir_video.quota_errors import is_quota_error, is_upload_limit_error
+from subir_video.quota_errors import (
+    is_invalid_grant_error,
+    is_quota_error,
+    is_upload_limit_error,
+)
 from limpieza.censura import censor_profanity, contains_profanity_fragment
 from limpieza.extremismo import redact_extremism
 
@@ -1821,7 +1826,16 @@ def collect_audio_tracks(folder_path):
     folder_name = folder_path.name.lower()
     audio_durations = {}
 
-    for audio_path in folder_path.iterdir():
+    try:
+        entries = list(folder_path.iterdir())
+    except (FileNotFoundError, NotADirectoryError):
+        # upload_video/ es un directorio de staging: otra instancia o una
+        # limpieza externa pudo mover/borrar la carpeta entre la seleccion
+        # (fase 1) y esta busqueda de metadata (fase 2). No es fatal, se omite.
+        print(f"La carpeta desaparecio antes de procesarla, se omite: {folder_path}")
+        return tracks, context
+
+    for audio_path in entries:
         if not audio_path.is_file():
             continue
         if audio_path.suffix.lower() not in audio_exts:
@@ -3266,15 +3280,22 @@ def main():
     cargar_env()
 
     print("Verificando cuota de credenciales upload...")
-    youtube, sanas, agotadas = probar_credenciales_disponibles(prefix="upload")
+    youtube, sanas, agotadas, muertas = probar_credenciales_disponibles(prefix="upload")
     if agotadas:
         print(f"Credenciales agotadas ({len(agotadas)}):")
         for s in agotadas:
             print(f"  - {s.name}")
+    if muertas:
+        print(f"Credenciales revocadas/expiradas ({len(muertas)}):")
+        for s in muertas:
+            print(
+                f"  ✗ {s.name}  (reautenticá: borrá su token_*.json y reejecutá, "
+                f"o publicá la app OAuth para que el refresh token no caduque)"
+            )
     if not youtube:
         print(
-            "❌ No hay credenciales upload con cuota disponible. "
-            "Esperá ~24h o agregá nuevas client_secrets_upload_*.json en credentials/."
+            "❌ No hay credenciales upload utilizables. "
+            "Esperá ~24h (cuota) o reautenticá/agregá client_secrets_upload_*.json en credentials/."
         )
         return
     print(f"Credenciales upload con cuota disponible: {len(sanas)}")
@@ -3465,14 +3486,25 @@ def main():
             mostrar_progreso_busqueda(0, total_items)
             for idx, item in enumerate(pending_items, start=1):
                 folder_path = item["folder"]
-                metadata = procesar_carpeta(
-                    folder_path,
-                    session,
-                    generos,
-                    generos_lookup,
-                    repertorio,
-                    allow_genre_fallback,
-                )
+                try:
+                    metadata = procesar_carpeta(
+                        folder_path,
+                        session,
+                        generos,
+                        generos_lookup,
+                        repertorio,
+                        allow_genre_fallback,
+                    )
+                except (FileNotFoundError, NotADirectoryError):
+                    # Red de seguridad: si la carpeta se borra/mueve en plena
+                    # fase 2 (otra instancia, limpieza externa), se omite ese
+                    # item sin abortar todo el lote ya programado.
+                    sys.stdout.write(
+                        f"\n[!] La carpeta ya no existe, se omite: {folder_path.name}\n"
+                    )
+                    sys.stdout.flush()
+                    mostrar_progreso_busqueda(idx, total_items)
+                    continue
                 mostrar_progreso_busqueda(idx, total_items)
                 if metadata:
                     item["metadata"] = metadata
@@ -3581,6 +3613,24 @@ def main():
                             print("No hay mas credenciales disponibles. Abortando.")
                             return
                         print("Credencial rotada exitosamente. Reintentando subida...")
+                    except RefreshError as exc:
+                        # Token OAuth muerto a mitad de lote: rotar como con la cuota,
+                        # en vez de crashear y perder los videos que faltan.
+                        if not is_invalid_grant_error(exc):
+                            print(f"Error transitorio refrescando token: {exc}")
+                            total_failed_api += 1
+                            break
+                        print(f"Token de upload revocado/expirado: {exc}")
+                        print("Rotando a otra credencial de upload...")
+                        youtube = authenticate_next(prefix="upload")
+                        if youtube is None:
+                            print(
+                                "No hay mas credenciales de upload sanas. "
+                                "Reautenticá la muerta (borrá su token_*.json) "
+                                "o publicá la app OAuth para que no caduque."
+                            )
+                            return
+                        print("Credencial rotada. Reintentando subida...")
                     except UploadLimitExceededError as exc:
                         print(f"\n{'=' * 60}")
                         print(f"LIMITE DE SUBIDAS DEL CANAL ALCANZADO")
@@ -3693,6 +3743,24 @@ def main():
                         print("No hay mas credenciales disponibles. Abortando.")
                         return
                     print("Credencial rotada exitosamente. Reintentando subida...")
+                except RefreshError as exc:
+                    # Token OAuth muerto a mitad de subida: rotar como con la cuota,
+                    # en vez de crashear y cortar la corrida.
+                    if not is_invalid_grant_error(exc):
+                        print(f"Error transitorio refrescando token: {exc}")
+                        total_failed_api += 1
+                        break
+                    print(f"Token de upload revocado/expirado: {exc}")
+                    print("Rotando a otra credencial de upload...")
+                    youtube = authenticate_next(prefix="upload")
+                    if youtube is None:
+                        print(
+                            "No hay mas credenciales de upload sanas. "
+                            "Reautenticá la muerta (borrá su token_*.json) "
+                            "o publicá la app OAuth para que no caduque."
+                        )
+                        return
+                    print("Credencial rotada. Reintentando subida...")
                 except UploadLimitExceededError as exc:
                     print(f"\n{'=' * 60}")
                     print(f"LIMITE DE SUBIDAS DEL CANAL ALCANZADO")
