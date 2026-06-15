@@ -148,7 +148,8 @@ bool FFmpegEncoder::open_internal(
     codec_ctx_->height = height;
     codec_ctx_->time_base = AVRational{1, static_cast<int>(fps * 1000)};
     codec_ctx_->framerate = AVRational{static_cast<int>(fps * 1000), 1000};
-    codec_ctx_->gop_size = std::max(1, static_cast<int>(std::round(fps / 2.0)));
+    // GOP de 5s: contenido casi estático; keyframes 4K cada 0.5s inflan el archivo 3-7x.
+    codec_ctx_->gop_size = std::max(1, static_cast<int>(std::round(fps * 5.0)));
     codec_ctx_->max_b_frames = ::vhs::VIDEO_B_FRAMES;
     codec_ctx_->bit_rate = ::vhs::VIDEO_BITRATE;
     codec_ctx_->rc_max_rate = ::vhs::VIDEO_MAXRATE;
@@ -231,7 +232,8 @@ bool FFmpegEncoder::open_internal(
         }
     }
 
-    av_opt_set(format_ctx_->priv_data, "movflags", "+faststart", 0);
+    // Sin +faststart: este MP4 es intermedio (Python lo re-muxea con el audio);
+    // el rewrite del moov atom costaba una reescritura completa del archivo.
 
     // Write header
     if (avformat_write_header(format_ctx_, nullptr) < 0) {

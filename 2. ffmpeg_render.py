@@ -10,8 +10,14 @@ from dataclasses import dataclass
 import requests
 import numpy as np
 import io
+import threading
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    wait as futures_wait,
+)
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import time
 import sys
@@ -59,6 +65,7 @@ from config import (
     VHS_CPP_BIN,
     VHS_CPP_INTENSITY,
     VHS_CPP_OVERLAY,
+    VHS_CPP_OVERLAY_ENABLED,
     ALLOW_FFMPEG_FALLBACK,
     DISABLE_CPP_ON_CUDA,
     CUDA_FAIL_FAST,
@@ -311,7 +318,8 @@ def has_enough_disk_space(min_gb: float = None) -> bool:
     if min_gb is None:
         min_gb = MIN_FREE_SPACE_GB
     free_gb = get_free_space_gb(DIR_RENDERIZANDO)
-    return free_gb >= min_gb
+    # Los videos aún en cola de finalización van a ocupar ese espacio en breve.
+    return free_gb >= min_gb + get_pending_finalize_gb()
 
 
 def format_size_gb(gb: float) -> str:
@@ -887,6 +895,198 @@ def move_folder_to_censored(source_folder: Path, folder_name: str, reason=None):
     except Exception as exc:
         print(f"[CENSURA] No se pudo mover {folder_name} a revision: {exc}")
         return None
+
+
+# ============================================================================
+# FINALIZACIÓN EN SEGUNDO PLANO
+# El move del video final (ramdisk→HDD, varios GB) corre en un hilo aparte
+# para que la GPU pueda arrancar el siguiente render de inmediato.
+# Solo se usa en el proceso principal (modo secuencial/test); en los workers
+# del modo paralelo la finalización sigue siendo síncrona.
+# ============================================================================
+
+FINALIZE_EXECUTOR = None
+FINALIZE_FUTURES = []
+PENDING_FINALIZE_BYTES = 0
+FINALIZE_FAILED = 0
+FINALIZE_LOCK = threading.Lock()
+
+# Señal para abortar la preparación en curso del prefetch (Ctrl+C / stop).
+PREP_CANCEL_EVENT = threading.Event()
+
+# Mezclas de audio en vuelo: las mata el except de render_video si una
+# excepción no controlada saltea fail_cpp.
+ACTIVE_AUDIO_PROCS = set()
+
+
+def kill_active_audio_procs():
+    for proc in list(ACTIVE_AUDIO_PROCS):
+        ACTIVE_AUDIO_PROCS.discard(proc)
+        if proc.poll() is None:
+            proc.kill()
+            try:
+                proc.communicate(timeout=10)
+            except Exception:
+                pass
+
+
+def get_pending_finalize_gb() -> float:
+    with FINALIZE_LOCK:
+        return PENDING_FINALIZE_BYTES / (1024**3)
+
+
+def log_render_timing(folder_name, fases):
+    """
+    Apendea tiempos por fase a data/render_times.jsonl (línea base medible).
+    """
+    try:
+        data_dir = Path(__file__).parent / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "folder": folder_name,
+        }
+        for key, value in fases.items():
+            if isinstance(value, (int, float)):
+                entry[key] = round(value, 1)
+        with open(data_dir / "render_times.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def finalize_render_output(
+    final_video,
+    temp_folder_path,
+    track_overlays_path,
+    original_folder_path,
+    folder_name,
+    show_progress,
+    start_time,
+    timings=None,
+):
+    """
+    Mueve el video final al disco destino, limpia temporales y mueve la
+    carpeta a la cola de subida. Puede correr en un hilo de fondo.
+    """
+    move_start = time.time()
+    if temp_folder_path:
+        final_dest = original_folder_path / final_video.name
+        if final_video.exists():
+            if show_progress:
+                log_verbose("[SSD] Moviendo video final al disco destino...")
+            try:
+                shutil.move(str(final_video), str(final_dest))
+            except OSError:
+                # Rescate ante CUALQUIER fallo del move: el video son horas de
+                # render y cleanup_temp() borraría el temp al salir.
+                rescue_dir = SSD_TEMP_DIR / "_rescate"
+                try:
+                    rescue_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.move(
+                        str(final_video),
+                        str(get_unique_file_path(rescue_dir, final_video.name)),
+                    )
+                    print(
+                        f"[FINALIZE] {folder_name}: video rescatado en {rescue_dir}"
+                    )
+                except Exception:
+                    pass
+                raise
+        if temp_folder_path.exists():
+            shutil.rmtree(temp_folder_path)
+    if track_overlays_path:
+        try:
+            shutil.rmtree(Path(track_overlays_path))
+        except Exception:
+            pass
+
+    destination_folder = move_folder_to_upload(
+        original_folder_path, folder_name, show_progress
+    )
+    elapsed = time.time() - start_time
+    if timings is not None:
+        timings["move_s"] = time.time() - move_start
+        timings["total_s"] = elapsed
+        log_render_timing(folder_name, timings)
+    if show_progress:
+        log_verbose(f"\n[ÉXITO] {folder_name} renderizado en {format_time(elapsed)}")
+    else:
+        log_verbose(f"[ÉXITO] {folder_name} renderizado en {elapsed:.1f}s")
+    log_verbose(f"[UPLOAD] Carpeta movida a: {destination_folder}")
+
+
+def submit_finalize_job(**kwargs):
+    """
+    Encola la finalización en el hilo de fondo, contabilizando los bytes
+    pendientes para que el control de espacio en disco los descuente.
+    """
+    global FINALIZE_EXECUTOR, PENDING_FINALIZE_BYTES
+
+    final_video = kwargs["final_video"]
+    folder_name = kwargs["folder_name"]
+    pending = 0
+    if kwargs.get("temp_folder_path"):
+        try:
+            pending = final_video.stat().st_size
+        except OSError:
+            pending = 0
+
+    with FINALIZE_LOCK:
+        if FINALIZE_EXECUTOR is None:
+            FINALIZE_EXECUTOR = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="finalize"
+            )
+        PENDING_FINALIZE_BYTES += pending
+
+    def runner():
+        global PENDING_FINALIZE_BYTES
+        try:
+            finalize_render_output(**kwargs)
+        finally:
+            with FINALIZE_LOCK:
+                PENDING_FINALIZE_BYTES -= pending
+
+    FINALIZE_FUTURES.append((folder_name, FINALIZE_EXECUTOR.submit(runner)))
+
+
+def check_finalize_failures():
+    """
+    Revisa finalizaciones terminadas. Retorna "read_only"/"no_space" si hubo
+    un error crítico de almacenamiento, o None.
+    """
+    global FINALIZE_FAILED
+    stop_reason = None
+    for item in list(FINALIZE_FUTURES):
+        folder_name, future = item
+        if not future.done():
+            continue
+        FINALIZE_FUTURES.remove(item)
+        exc = future.exception()
+        if exc is None:
+            continue
+        FINALIZE_FAILED += 1
+        print(f"[FINALIZE] Error finalizando {folder_name}: {exc}")
+        if is_read_only_filesystem_error(exc):
+            stop_reason = "read_only"
+        elif is_no_space_error(exc):
+            stop_reason = "no_space"
+    return stop_reason
+
+
+def wait_for_finalize_jobs():
+    """
+    Espera los moves pendientes (llamar antes de limpiar temporales o salir).
+    """
+    if FINALIZE_EXECUTOR is None:
+        return None
+    pending = [future for _, future in FINALIZE_FUTURES if not future.done()]
+    if pending:
+        print(
+            f"[FINALIZE] Esperando {len(pending)} movimiento(s) a disco en segundo plano..."
+        )
+        futures_wait(pending)
+    return check_finalize_failures()
 
 
 def get_complementary_color(r, g, b):
@@ -1555,13 +1755,55 @@ def obtener_tracklist_api(session, post_id):
     return parse_tracklist_raw(raw)
 
 
+DEATHGRIND_CACHE_PATH = Path(__file__).parent / "data" / "deathgrind_tracklist_cache.json"
+DEATHGRIND_CACHE = None
+DEATHGRIND_CACHE_LOCK = threading.Lock()
+
+
+def _deathgrind_cache_key(band_name, album_name):
+    return f"{normalize_name(band_name)}|{normalize_album_name(album_name or '')}"
+
+
+def load_deathgrind_cache():
+    global DEATHGRIND_CACHE
+    with DEATHGRIND_CACHE_LOCK:
+        if DEATHGRIND_CACHE is None:
+            try:
+                DEATHGRIND_CACHE = json.loads(
+                    DEATHGRIND_CACHE_PATH.read_text(encoding="utf-8")
+                )
+            except Exception:
+                DEATHGRIND_CACHE = {}
+        return DEATHGRIND_CACHE
+
+
+def save_deathgrind_titles(cache_key, titles):
+    cache = load_deathgrind_cache()
+    with DEATHGRIND_CACHE_LOCK:
+        cache[cache_key] = list(titles)
+        try:
+            DEATHGRIND_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = DEATHGRIND_CACHE_PATH.with_suffix(".json.tmp")
+            tmp_path.write_text(
+                json.dumps(cache, ensure_ascii=False), encoding="utf-8"
+            )
+            tmp_path.replace(DEATHGRIND_CACHE_PATH)
+        except Exception:
+            pass
+
+
 def obtener_tracklist_deathgrind(folder_name, audio_count):
+    band_name, album_name = parse_band_album_from_folder(folder_name)
+    cache_key = _deathgrind_cache_key(band_name, album_name)
+    cached = load_deathgrind_cache().get(cache_key)
+    if cached and len(cached) == audio_count:
+        return list(cached)
+
     cargar_env()
     session = crear_sesion_autenticada()
     if not session:
         return []
 
-    band_name, album_name = parse_band_album_from_folder(folder_name)
     csv_path = get_repertorio_csv_path()
     post_id = buscar_post_id_en_csv(csv_path, band_name, album_name)
     if not post_id:
@@ -1571,6 +1813,7 @@ def obtener_tracklist_deathgrind(folder_name, audio_count):
 
     titles = obtener_tracklist_api(session, post_id)
     if titles and len(titles) == audio_count:
+        save_deathgrind_titles(cache_key, titles)
         return titles
     return []
 
@@ -1944,7 +2187,17 @@ def generate_tracklist_overlays(
             sum(len(line_texts_by_track[i]) for i in range(start, end))
         )
 
-    for highlight_idx in range(total_tracks):
+    thread_fonts = threading.local()
+
+    def get_thread_fonts():
+        # FreeType no es thread-safe por cara: cada hilo carga sus propias fuentes.
+        if not hasattr(thread_fonts, "base"):
+            thread_fonts.base = load_font(font_size, bold=True)
+            thread_fonts.highlight = load_font(highlight_size, bold=True)
+        return thread_fonts.base, thread_fonts.highlight
+
+    def render_overlay(highlight_idx):
+        base_font_t, highlight_font_t = get_thread_fonts()
         page_index = highlight_idx // page_size
         page_start = page_index * page_size
         page_end = min(page_start + page_size, total_tracks)
@@ -1957,7 +2210,6 @@ def generate_tracklist_overlays(
         start_y = max(top_margin, int((height - page_height) / 2))
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         overlay.paste(cover_resized, (left_margin, cover_y), cover_resized)
-        draw = ImageDraw.Draw(overlay)
 
         shadow_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         shadow_draw = ImageDraw.Draw(shadow_layer)
@@ -1966,7 +2218,7 @@ def generate_tracklist_overlays(
         for idx in range(page_start, page_end):
             lines = line_texts_by_track[idx]
             is_highlight = idx == highlight_idx
-            font_to_use = highlight_font if is_highlight else base_font
+            font_to_use = highlight_font_t if is_highlight else base_font_t
             line_height = highlight_line_height if is_highlight else base_line_height
             shadow_alpha = (
                 TRACKLIST_TEXT_SHADOW_ALPHA_HIGHLIGHT
@@ -2000,7 +2252,7 @@ def generate_tracklist_overlays(
             is_highlight = idx == highlight_idx
             alpha = highlight_alpha if is_highlight else base_alpha
             fill = (text_color[0], text_color[1], text_color[2], alpha)
-            font_to_use = highlight_font if is_highlight else base_font
+            font_to_use = highlight_font_t if is_highlight else base_font_t
             line_height = highlight_line_height if is_highlight else base_line_height
 
             for line_text in lines:
@@ -2008,7 +2260,18 @@ def generate_tracklist_overlays(
                 y += line_height
 
         out_path = output_dir / f"track_{highlight_idx:03d}.png"
-        overlay.save(out_path, "PNG")
+        # compress_level=1: PNGs temporales que consume vhs_render; el peso extra
+        # en ramdisk es irrelevante frente al costo de zlib nivel 6 en 4K.
+        overlay.save(out_path, "PNG", compress_level=1)
+
+    cover_resized.load()
+    overlay_workers = min(4, os.cpu_count() or 2, total_tracks)
+    if overlay_workers > 1:
+        with ThreadPoolExecutor(max_workers=overlay_workers) as overlay_pool:
+            list(overlay_pool.map(render_overlay, range(total_tracks)))
+    else:
+        for highlight_idx in range(total_tracks):
+            render_overlay(highlight_idx)
 
     tracklist_path = output_dir / "tracklist.tsv"
     with open(tracklist_path, "w", encoding="utf-8") as f:
@@ -2148,51 +2411,76 @@ def generate_wiggle_expression(seed):
     return np.random.uniform(-3, 3)
 
 
+AUDIO_INFO_CACHE = {}
+AUDIO_INFO_LOCK = threading.Lock()
+
+
+def get_audio_info(audio_path):
+    """
+    Duración (s) y bitrate (kbps) en una sola pasada, con caché por ruta.
+    Usa mutagen (sin subproceso); ffprobe único como respaldo.
+    """
+    key = str(audio_path)
+    with AUDIO_INFO_LOCK:
+        cached = AUDIO_INFO_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    duration = 0.0
+    bitrate = 0
+    try:
+        info = getattr(MutagenFile(key), "info", None)
+        if info is not None:
+            duration = float(getattr(info, "length", 0) or 0)
+            bitrate = int((getattr(info, "bitrate", 0) or 0) / 1000)
+    except Exception:
+        pass
+
+    if duration <= 0 or bitrate <= 0:
+        try:
+            cmd = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "format=duration:stream=bit_rate",
+                "-of",
+                "json",
+                key,
+            ]
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, errors="replace"
+            )
+            data = json.loads(result.stdout or "{}")
+            if duration <= 0:
+                duration = float(data.get("format", {}).get("duration", 0) or 0)
+            if bitrate <= 0:
+                streams = data.get("streams") or [{}]
+                bitrate = int(int(streams[0].get("bit_rate", 0) or 0) / 1000)
+        except Exception:
+            pass
+
+    info_tuple = (duration, max(0, bitrate))
+    if duration > 0:
+        with AUDIO_INFO_LOCK:
+            AUDIO_INFO_CACHE[key] = info_tuple
+    return info_tuple
+
+
 def get_audio_duration(audio_path):
     """
-    Obtiene la duración del audio en segundos usando ffprobe
+    Obtiene la duración del audio en segundos (con caché).
     """
-    try:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(audio_path),
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
-        return float(result.stdout.strip())
-    except Exception:
-        return 0
+    return get_audio_info(audio_path)[0]
 
 
 def get_audio_bitrate_kbps(audio_path):
     """
-    Obtiene el bitrate del audio en kbps usando ffprobe.
+    Obtiene el bitrate del audio en kbps (con caché).
     """
-    try:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "a:0",
-            "-show_entries",
-            "stream=bit_rate",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(audio_path),
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
-        bitrate_str = result.stdout.strip()
-        if not bitrate_str:
-            return 0
-        return max(0, int(int(bitrate_str) / 1000))
-    except Exception:
-        return 0
+    return get_audio_info(audio_path)[1]
 
 
 def pick_output_audio_bitrate(audio_files):
@@ -2403,6 +2691,111 @@ def cleanup_temp_render(
             pass
 
 
+VHS_NOISE_SOURCE = Path(__file__).parent / "content" / "vhs_noise.mp4"
+VHS_NOISE_4K = Path(__file__).parent / "content" / "vhs_noise_4k.mp4"
+
+
+def ensure_vhs_noise_4k():
+    """
+    Pre-escala el ruido VHS a 4K/24fps yuv420p una sola vez. El original es
+    1080p/30fps yuv444p a 133 Mbps: sin soporte NVDEC y con escalado por frame.
+    """
+    if VHS_NOISE_4K.exists():
+        return VHS_NOISE_4K
+    if not VHS_NOISE_SOURCE.exists():
+        return VHS_NOISE_SOURCE
+
+    base_cmd = [
+        "ffmpeg",
+        "-y",
+        "-nostats",
+        "-loglevel",
+        "error",
+        "-i",
+        str(VHS_NOISE_SOURCE),
+        "-vf",
+        f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:flags=bilinear,fps={FPS},format=yuv420p",
+        "-an",
+    ]
+    encoders = (
+        ["-c:v", "h264_nvenc", "-preset", "p1", "-cq", "28"],
+        ["-c:v", "libx264", "-preset", "veryfast", "-crf", "26"],
+    )
+    # tmp + rename atómico: un encode interrumpido o dos workers en paralelo
+    # nunca deben dejar un MP4 truncado visible en el path final.
+    tmp_output = VHS_NOISE_4K.with_suffix(f".{os.getpid()}.tmp.mp4")
+    for encoder_args in encoders:
+        try:
+            result = subprocess.run(
+                [*base_cmd, *encoder_args, str(tmp_output)],
+                capture_output=True,
+                text=True,
+                errors="replace",
+            )
+        except Exception:
+            break
+        if result.returncode == 0 and tmp_output.exists():
+            try:
+                tmp_output.replace(VHS_NOISE_4K)
+            except OSError:
+                break
+            log_verbose(f"[VHS] Overlay 4K generado: {VHS_NOISE_4K}")
+            return VHS_NOISE_4K
+    if tmp_output.exists():
+        try:
+            tmp_output.unlink()
+        except OSError:
+            pass
+    return VHS_NOISE_SOURCE
+
+
+def precompute_static_background(cover_main, folder_path, folder_name):
+    """
+    Renderiza el fondo VHS una sola vez por álbum: la portada es una imagen
+    fija, así que la cadena de blur/grading produce el mismo frame siempre
+    (evaluarla por frame corría a ~6.7 fps en 4K).
+    """
+    bg_png = folder_path / f"{folder_name}__bg.png"
+    bg_filter = (
+        f"[0:v]scale={int(VIDEO_WIDTH * 1.2)}:-1:flags=lanczos,"
+        f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
+        "format=yuv444p,split=3[luma][chroma1][chroma2];"
+        "[luma]extractplanes=y[y];"
+        "[chroma1]extractplanes=u,gblur=sigma=12:sigmaV=0[u];"
+        "[chroma2]extractplanes=v,gblur=sigma=12:sigmaV=0[v];"
+        "[y][u][v]mergeplanes=0x001020:yuv444p,format=yuv420p,gblur=sigma=20,"
+        "rgbashift=rh=-4:bh=4:rv=1:bv=-1:edge=wrap,"
+        "eq=saturation=0.5:contrast=1.2:brightness=0.02:gamma=1.15,"
+        "colorlevels=rimax=0.9:gimax=0.9:bimax=0.9:romin=0.05:gomin=0.05:bomin=0.05,"
+        "colortemperature=temperature=5500[bg]"
+    )
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-nostats",
+        "-loglevel",
+        "error",
+        "-i",
+        str(cover_main),
+        "-filter_complex",
+        bg_filter,
+        "-map",
+        "[bg]",
+        "-frames:v",
+        "1",
+        str(bg_png),
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, errors="replace"
+        )
+    except Exception:
+        return None
+    if result.returncode != 0 or not bg_png.exists():
+        return None
+    return bg_png
+
+
 def render_video_with_cpp(
     folder_path,
     original_folder_path,
@@ -2418,16 +2811,29 @@ def render_video_with_cpp(
     start_time,
     temp_folder_path,
     use_gpu,
+    prep_seconds=0.0,
 ):
     """
-    Genera el video completo en C++/CUDA y deja el audio al final con FFmpeg.
+    Genera el video completo en C++/CUDA con la mezcla de audio corriendo en
+    paralelo (son independientes hasta el mux).
     Retorna (success, error_kind) donde error_kind puede ser "cuda" u otro motivo.
     """
     video_only = folder_path / f"{folder_name}__video.mp4"
     audio_only = folder_path / f"{folder_name}__audio.m4a"
     final_video = folder_path / f"{folder_name}.mp4"
+    audio_proc = None
+    timings = {"prep_s": prep_seconds}
 
     def fail_cpp(reason):
+        # Reapear la mezcla de audio en curso para no dejar un ffmpeg huérfano.
+        if audio_proc is not None:
+            ACTIVE_AUDIO_PROCS.discard(audio_proc)
+            if audio_proc.poll() is None:
+                audio_proc.kill()
+                try:
+                    audio_proc.communicate(timeout=10)
+                except Exception:
+                    pass
         # Si hay fallback FFmpeg, no borrar la carpeta temporal (se sigue usando).
         if reason != "cuda" or not ALLOW_FFMPEG_FALLBACK:
             cleanup_temp_render(
@@ -2465,7 +2871,7 @@ def render_video_with_cpp(
 {audio_concat_line};
 [0:a]atrim=0:{INTRO_DURATION}[intro_audio];
 [all_music]adelay=delays={int(INTRO_DURATION * 1000)}:all=1[music_delayed];
-[intro_audio][music_delayed]amix=inputs=2:duration=longest[outa]
+[intro_audio][music_delayed]amix=inputs=2:duration=longest:normalize=0[outa]
 """.strip()
 
     output_audio_bitrate = pick_output_audio_bitrate(audio_files)
@@ -2473,6 +2879,11 @@ def render_video_with_cpp(
     audio_cmd = [
         "ffmpeg",
         "-y",
+        # Sin -stats: el stderr va a un PIPE que se drena recién en el mux;
+        # las líneas de progreso llenarían el buffer y bloquearían el proceso.
+        "-nostats",
+        "-loglevel",
+        "error",
         "-threads",
         "0",
         "-i",
@@ -2492,21 +2903,18 @@ def render_video_with_cpp(
         str(AUDIO_SAMPLE_RATE),
         "-ac",
         "2",
-        "-movflags",
-        "+faststart",
         str(audio_only),
     ]
 
-    audio_success, audio_stderr = run_ffmpeg_command(
-        audio_cmd, False, 0, folder_name, start_time
+    # La mezcla (CPU) corre en paralelo al render CUDA; se espera antes del mux.
+    audio_proc = subprocess.Popen(
+        audio_cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
     )
-    if not audio_success:
-        storage_reason = detect_storage_failure(audio_stderr)
-        if storage_reason:
-            return fail_cpp(storage_reason)
-        print(f"\n[ERROR] FFmpeg falló generando audio en {folder_name}")
-        log_verbose(f"STDERR: {audio_stderr[-500:]}")
-        return fail_cpp("audio")
+    ACTIVE_AUDIO_PROCS.add(audio_proc)
 
     if show_progress:
         log_verbose("[VHS GPU] Generando video con CUDA...")
@@ -2537,13 +2945,15 @@ def render_video_with_cpp(
         base_cpp_cmd.extend(["--tracklist", str(tracklist_path)])
         base_cpp_cmd.extend(["--track-overlays", str(track_overlays_path)])
 
+    overlay_enabled = VHS_CPP_OVERLAY_ENABLED and VHS_CPP_OVERLAY.exists()
     cpp_cmd = base_cpp_cmd.copy()
 
-    if VHS_CPP_OVERLAY.exists():
+    if overlay_enabled:
         cpp_cmd.extend(["--vhs-overlay", str(VHS_CPP_OVERLAY)])
-    else:
+    elif VHS_CPP_OVERLAY_ENABLED:
         log_verbose(f"[VHS GPU] Overlay no encontrado: {VHS_CPP_OVERLAY}")
 
+    gpu_start = time.time()
     cpp_returncode, cpp_stderr = run_cpp_command(
         cpp_cmd, show_progress, total_duration=audio_duration, folder_name=folder_name
     )
@@ -2558,23 +2968,26 @@ def render_video_with_cpp(
         # Reintento sin overlay si hay error CUDA
         if is_cuda_failure(cpp_stderr) and CUDA_FAIL_FAST:
             return fail_cpp("cuda")
-        if is_cuda_failure(cpp_stderr) and VHS_CPP_OVERLAY.exists():
-            log_verbose(
-                f"[VHS GPU] {folder_name} reintentando sin overlay por error CUDA..."
-            )
-            retry_code, retry_stderr = run_cpp_command(
-                cpp_cmd_no_overlay,
-                show_progress,
-                total_duration=audio_duration,
-                folder_name=folder_name,
-            )
-            if retry_code == 0:
-                log_verbose(f"[VHS GPU] {folder_name} renderizado sin overlay")
-            else:
-                if not show_progress and retry_stderr:
-                    log_verbose(f"STDERR: {retry_stderr[-500:]}")
-                cpp_stderr = retry_stderr
-                cpp_returncode = retry_code
+        if is_cuda_failure(cpp_stderr):
+            if overlay_enabled:
+                log_verbose(
+                    f"[VHS GPU] {folder_name} reintentando sin overlay por error CUDA..."
+                )
+                retry_code, retry_stderr = run_cpp_command(
+                    cpp_cmd_no_overlay,
+                    show_progress,
+                    total_duration=audio_duration,
+                    folder_name=folder_name,
+                )
+                if retry_code == 0:
+                    log_verbose(f"[VHS GPU] {folder_name} renderizado sin overlay")
+                else:
+                    if not show_progress and retry_stderr:
+                        log_verbose(f"STDERR: {retry_stderr[-500:]}")
+                    cpp_stderr = retry_stderr
+                    cpp_returncode = retry_code
+            # Sin overlay activo no hay reintento equivalente acá: el error CUDA
+            # debe seguir hacia los reintentos en modo seguro de más abajo.
         else:
             storage_reason = detect_storage_failure(cpp_stderr)
             if storage_reason:
@@ -2594,7 +3007,7 @@ def render_video_with_cpp(
                     f"[VHS GPU] {folder_name} reintentando en modo seguro (sin tracking errors)..."
                 )
         tracking_env = {"VHS_DISABLE_TRACKING_ERRORS": "1"}
-        retry_cmd = cpp_cmd_no_overlay if VHS_CPP_OVERLAY.exists() else cpp_cmd
+        retry_cmd = cpp_cmd_no_overlay if overlay_enabled else cpp_cmd
         retry_code, retry_stderr = run_cpp_command(
             retry_cmd,
             show_progress,
@@ -2619,7 +3032,7 @@ def render_video_with_cpp(
                 f"[VHS GPU] {folder_name} reintentando con NVENC sin hwframes..."
             )
         hwframes_env = {"VHS_NVENC_NO_HWFRAMES": "1"}
-        retry_cmd = cpp_cmd_no_overlay if VHS_CPP_OVERLAY.exists() else cpp_cmd
+        retry_cmd = cpp_cmd_no_overlay if overlay_enabled else cpp_cmd
         retry_code, retry_stderr = run_cpp_command(
             retry_cmd,
             show_progress,
@@ -2644,7 +3057,7 @@ def render_video_with_cpp(
                 f"[VHS GPU] {folder_name} reintentando en modo seguro (sin color bleeding/noise)..."
             )
         safe_env = {"VHS_SAFE_MODE": "1"}
-        retry_cmd = cpp_cmd_no_overlay if VHS_CPP_OVERLAY.exists() else cpp_cmd
+        retry_cmd = cpp_cmd_no_overlay if overlay_enabled else cpp_cmd
         retry_code, retry_stderr = run_cpp_command(
             retry_cmd,
             show_progress,
@@ -2663,11 +3076,31 @@ def render_video_with_cpp(
                 return fail_cpp(storage_reason)
             return fail_cpp("cuda")
 
+    timings["gpu_s"] = time.time() - gpu_start
+
+    audio_wait_start = time.time()
+    try:
+        _, audio_stderr = audio_proc.communicate()
+    except Exception as exc:
+        audio_proc.kill()
+        audio_stderr = str(exc)
+    ACTIVE_AUDIO_PROCS.discard(audio_proc)
+    timings["audio_wait_s"] = time.time() - audio_wait_start
+    if audio_proc.returncode != 0:
+        storage_reason = detect_storage_failure(audio_stderr)
+        if storage_reason:
+            return fail_cpp(storage_reason)
+        print(f"\n[ERROR] FFmpeg falló generando audio en {folder_name}")
+        log_verbose(f"STDERR: {(audio_stderr or '')[-500:]}")
+        return fail_cpp("audio")
+
     if show_progress:
         log_verbose("[MUX] Pegando audio al video final...")
     else:
         log_verbose(f"[MUX] {folder_name} pegando audio al video final...")
 
+    # Sin +faststart: la subida vía API de YouTube no lo necesita y el rewrite
+    # del moov atom duplica transitoriamente el archivo en el ramdisk de 20GB.
     mux_cmd = [
         "ffmpeg",
         "-y",
@@ -2683,15 +3116,15 @@ def render_video_with_cpp(
         "copy",
         "-c:a",
         "copy",
-        "-movflags",
-        "+faststart",
         "-shortest",
         str(final_video),
     ]
 
+    mux_start = time.time()
     mux_success, mux_stderr = run_ffmpeg_command(
         mux_cmd, False, 0, folder_name, start_time
     )
+    timings["mux_s"] = time.time() - mux_start
     if not mux_success:
         storage_reason = detect_storage_failure(mux_stderr)
         if storage_reason:
@@ -2705,49 +3138,66 @@ def render_video_with_cpp(
             if temp_file.exists():
                 temp_file.unlink()
 
-    if USE_SSD_TEMP and temp_folder_path:
-        output_video = final_video
-        final_dest = original_folder_path / f"{folder_name}.mp4"
-        if output_video.exists():
-            if show_progress:
-                log_verbose("[SSD] Moviendo video final al disco destino...")
-            shutil.move(str(output_video), str(final_dest))
-        if temp_folder_path.exists():
-            shutil.rmtree(temp_folder_path)
-
-    if track_overlays_path:
-        try:
-            shutil.rmtree(track_overlays_path)
-        except Exception:
-            pass
-
-    destination_folder = move_folder_to_upload(
-        original_folder_path, folder_name, show_progress
+    finalize_kwargs = dict(
+        final_video=final_video,
+        temp_folder_path=temp_folder_path if USE_SSD_TEMP else None,
+        track_overlays_path=track_overlays_path,
+        original_folder_path=original_folder_path,
+        folder_name=folder_name,
+        show_progress=show_progress,
+        start_time=start_time,
+        timings=timings,
     )
-    elapsed = time.time() - start_time
     if show_progress:
-        log_verbose(f"\n[ÉXITO] {folder_name} renderizado en {format_time(elapsed)}")
-        log_verbose(f"[UPLOAD] Carpeta movida a: {destination_folder}")
+        # Proceso principal (secuencial/test): mover a HDD en segundo plano
+        # para que el siguiente render arranque de inmediato.
+        submit_finalize_job(**finalize_kwargs)
     else:
-        log_verbose(f"[ÉXITO] {folder_name} renderizado en {elapsed:.1f}s")
-        log_verbose(f"[UPLOAD] Carpeta movida a: {destination_folder}")
+        # Workers del modo paralelo: finalización síncrona (el proceso puede
+        # terminar apenas retorna y un hilo de fondo quedaría huérfano).
+        finalize_render_output(**finalize_kwargs)
 
     return True, None
 
 
-def render_video(folder_path, folder_name, show_progress=False):
+@dataclass
+class RenderJob:
+    """Resultado de la preparación de un álbum, listo para la fase GPU."""
+
+    original_folder_path: Path
+    folder_name: str
+    folder_path: Path
+    temp_folder_path: Path = None
+    audio_files: list = None
+    cover_main: Path = None
+    cover_overlay: Path = None
+    audio_duration: float = 0.0
+    total_duration: float = 0.0
+    tracklist_path: Path = None
+    track_overlays_path: Path = None
+    prep_seconds: float = 0.0
+    error: str = None
+    stop_result: RenderResult = None
+
+
+def prepare_render_job(folder_path, folder_name, show_progress=False):
     """
-    Renderiza un video completo usando FFmpeg
-    show_progress: Si True, muestra barra de progreso en tiempo real (solo para modo single)
+    Prepara todo lo que no necesita GPU: copia a almacenamiento rápido, probes,
+    portada/sombra, tracklist (API DeathGrind) y overlays. Diseñado para correr
+    en un hilo de prefetch mientras la GPU renderiza el álbum anterior.
     """
+    job = RenderJob(
+        original_folder_path=folder_path,
+        folder_name=folder_name,
+        folder_path=folder_path,
+    )
+    prep_start = time.time()
     original_folder_path = folder_path
     temp_folder_path = None
-    use_gpu = resolve_gpu_usage()
 
     try:
         if not show_progress:
             log_verbose(f"[INICIO] Procesando: {folder_name}")
-        start_time = time.time()
 
         # ================================================================
         # PASO 1: Copiar a almacenamiento rápido (RAM > SSD)
@@ -2767,6 +3217,12 @@ def render_video(folder_path, folder_name, show_progress=False):
             temp_folder_path.mkdir(parents=True)
 
             for file in os.listdir(folder_path):
+                if PREP_CANCEL_EVENT.is_set():
+                    cleanup_temp_folder(temp_folder_path)
+                    job.stop_result = RenderResult(
+                        success=False, reason="cancelled", move_to_error=False
+                    )
+                    return job
                 if file.lower().endswith(
                     (".mp3", ".flac", ".wav", ".m4a", ".png", ".jpg", ".jpeg", ".txt", ".cue")
                 ):
@@ -2860,7 +3316,8 @@ def render_video(folder_path, folder_name, show_progress=False):
 
         if not audio_files or not cover_file:
             cleanup_temp_folder(temp_folder_path)
-            return RenderResult(success=False, reason="missing_inputs")
+            job.error = "missing_inputs"
+            return job
 
         if show_progress and len(audio_files) > 1:
             log_verbose(
@@ -2891,6 +3348,12 @@ def render_video(folder_path, folder_name, show_progress=False):
 
         tracklist_path = None
         track_overlays_path = None
+        if PREP_CANCEL_EVENT.is_set():
+            cleanup_temp_folder(temp_folder_path)
+            job.stop_result = RenderResult(
+                success=False, reason="cancelled", move_to_error=False
+            )
+            return job
         if USE_CPP_VHS:
             cue_tracks = detect_cue_tracks(folder_path, audio_files, audio_duration)
             if cue_tracks:
@@ -2922,12 +3385,96 @@ def render_video(folder_path, folder_name, show_progress=False):
                     height=VIDEO_HEIGHT,
                 )
 
-        output_audio_bitrate = pick_output_audio_bitrate(audio_files)
+        job.folder_path = folder_path
+        job.temp_folder_path = temp_folder_path
+        job.audio_files = audio_files
+        job.cover_main = cover_main
+        job.cover_overlay = cover_overlay
+        job.audio_duration = audio_duration
+        job.total_duration = total_duration
+        job.tracklist_path = tracklist_path
+        job.track_overlays_path = track_overlays_path
+        job.prep_seconds = time.time() - prep_start
+        return job
 
+    except OSError as e:
+        cleanup_temp_folder(temp_folder_path)
+        if is_read_only_filesystem_error(e):
+            job.stop_result = build_storage_stop_result(
+                folder_name, "read_only", str(e)
+            )
+        elif is_no_space_error(e):
+            job.stop_result = build_storage_stop_result(
+                folder_name, "no_space", str(e)
+            )
+        else:
+            print(f"[EXCEPCIÓN] Error preparando {folder_name}: {e}")
+            job.error = "os_error"
+        return job
+    except Exception as e:
+        cleanup_temp_folder(temp_folder_path)
+        print(f"[EXCEPCIÓN] Error preparando {folder_name}: {e}")
+        job.error = "exception"
+        return job
+
+
+def render_video(folder_path, folder_name, show_progress=False, prepared_job=None):
+    """
+    Renderiza un video completo usando el binario C++/CUDA o FFmpeg.
+    show_progress: True solo en modo secuencial/test (proceso principal).
+    prepared_job: RenderJob ya preparado por el prefetch; si es None se prepara acá.
+    """
+    job = prepared_job
+    if job is None:
+        job = prepare_render_job(folder_path, folder_name, show_progress)
+    if job.stop_result is not None:
+        return job.stop_result
+    if job.error is not None:
+        return RenderResult(success=False, reason=job.error)
+
+    original_folder_path = job.original_folder_path
+    folder_path = job.folder_path
+    folder_name = job.folder_name
+    temp_folder_path = job.temp_folder_path
+    audio_files = job.audio_files
+    cover_main = job.cover_main
+    cover_overlay = job.cover_overlay
+    audio_duration = job.audio_duration
+    total_duration = job.total_duration
+    tracklist_path = job.tracklist_path
+    track_overlays_path = job.track_overlays_path
+    use_gpu = resolve_gpu_usage()
+    # start_time retrocedido para que el tiempo reportado incluya la preparación.
+    start_time = time.time() - job.prep_seconds
+
+    try:
         if show_progress:
             log_verbose(f"\n[RENDERIZANDO] {folder_name}")
             log_verbose(f"Duración estimada: {format_time(total_duration)}")
             log_verbose("")
+
+        # El video del álbum anterior puede seguir en el ramdisk mientras el
+        # hilo de finalización lo mueve al HDD. Si este render no entra en el
+        # espacio restante, esperar los moves (equivale al flujo síncrono viejo).
+        if (
+            temp_folder_path
+            and USE_RAMDISK
+            and RAMDISK_MOUNTED
+            and temp_folder_path.parent == RAMDISK_PATH
+            and FINALIZE_FUTURES
+        ):
+            estimated_bytes = estimate_temp_render_bytes(
+                total_duration=total_duration, cpp_pipeline=USE_CPP_VHS
+            )
+            try:
+                free_bytes = shutil.disk_usage(RAMDISK_PATH).free
+            except OSError:
+                free_bytes = None
+            if free_bytes is not None and estimated_bytes > free_bytes:
+                log_verbose(
+                    f"[RAM] {folder_name}: esperando moves pendientes para liberar espacio..."
+                )
+                wait_for_finalize_jobs()
 
         if USE_CPP_VHS:
             if DISABLE_CPP_ON_CUDA and CUDA_ERROR_FLAG.exists():
@@ -2955,6 +3502,7 @@ def render_video(folder_path, folder_name, show_progress=False):
                     start_time=start_time,
                     temp_folder_path=temp_folder_path,
                     use_gpu=use_gpu,
+                    prep_seconds=job.prep_seconds,
                 )
                 if cpp_success:
                     return RenderResult(success=True)
@@ -2983,6 +3531,7 @@ def render_video(folder_path, folder_name, show_progress=False):
                 pass
                 # continuar
 
+        output_audio_bitrate = pick_output_audio_bitrate(audio_files)
         cover_height = max(1, int(VIDEO_HEIGHT * 1.02))
 
         # Ruta de salida
@@ -2990,62 +3539,37 @@ def render_video(folder_path, folder_name, show_progress=False):
 
         # ====================================================================
         # FILTRO COMPLEJO DE FFMPEG CON VHS OVERLAY
+        # El fondo difuminado es ESTÁTICO: se precomputa una vez por álbum en
+        # lugar de evaluar la cadena de blur 4K en cada frame (~6.7 fps).
         # ====================================================================
 
-        # Flujo optimizado:
-        # [0] = Intro video
-        # [1] = Portada (para fondo difuminado + overlay)
-        # [2] = Video VHS noise (loop de 60s para overlay auténtico)
-        # [3+] = Archivos de audio
-        #
-        # El video VHS (content/vhs_noise.mp4) contiene:
-        # - Jitter irregular
-        # - Tracking errors
-        # - Noise granulado
-        # - Scanlines
-        # Se mezcla con el fondo usando blend para efecto auténtico
+        vhs_noise_video = ensure_vhs_noise_4k()
+        bg_image = precompute_static_background(
+            cover_main, folder_path, folder_name
+        )
 
-        # ================================================================
-        # Construir filtro de concatenación de audio dinámico
-        # ================================================================
         num_audios = len(audio_files)
 
-        # Índices de audio empiezan en 3 (después de intro, cover, vhs_noise)
+        # Inputs: [0]=intro, [1]=fondo precomputado o portada, [2]=ruido VHS,
+        # [3]=portada (solo con fondo precomputado), después los audios.
+        audio_base_idx = 4 if bg_image else 3
+
         if num_audios == 1:
-            audio_concat_filter = f"[3:a]"
-            audio_concat_output = "[all_music]"
-            audio_concat_line = f"{audio_concat_filter}acopy{audio_concat_output}"
+            audio_concat_line = f"[{audio_base_idx}:a]acopy[all_music]"
         else:
-            audio_inputs = "".join([f"[{i + 3}:a]" for i in range(num_audios)])
-            audio_concat_filter = f"{audio_inputs}concat=n={num_audios}:v=0:a=1"
-            audio_concat_output = "[all_music]"
-            audio_concat_line = f"{audio_concat_filter}{audio_concat_output}"
+            audio_inputs = "".join(
+                [f"[{i + audio_base_idx}:a]" for i in range(num_audios)]
+            )
+            audio_concat_line = (
+                f"{audio_inputs}concat=n={num_audios}:v=0:a=1[all_music]"
+            )
 
-        # VHS noise video path
-        vhs_noise_video = Path(__file__).parent / "content" / "vhs_noise.mp4"
-
-        # ============================================================
-        # FILTRO VHS CON VIDEO OVERLAY - Mucho más rápido
-        # ============================================================
-        # 1. Fondo: Portada difuminada con color bleeding y grading VHS
-        # 2. VHS Overlay: Video de ruido VHS en loop mezclado con blend
-        # 3. Portada: Cover limpio sin efectos (nítido)
-        # 4. Transición: Fade de intro a contenido
-        # ============================================================
-
-        # Determinar si usar filtros GPU (scale_cuda, overlay_cuda)
-        # Nota: Algunos filtros VHS no tienen equivalente CUDA, requieren CPU
-        if use_gpu:
-            # ============================================================
-            # FILTRO GPU OPTIMIZADO
-            # Pipeline: CUDA decode → hwdownload → CPU filters → hwupload → CUDA overlay → NVENC
-            #
-            # Los filtros VHS (color bleeding, eq, colorlevels) no tienen CUDA
-            # pero scale_cuda y overlay_cuda sí están disponibles
-            # ============================================================
-            filter_complex = f"""
-[0:v]hwdownload,format=nv12,scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:flags=lanczos,fps={FPS}[intro];
-[1:v]scale={int(VIDEO_WIDTH * 1.2)}:-1:flags=lanczos,crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},fps={FPS},
+        if bg_image:
+            bg_chain = f"[1:v]fps={FPS},format=yuv420p[bg_base];"
+            cover_input = "[3:v]"
+        else:
+            # Sin fondo precomputado: cadena completa por frame (camino lento).
+            bg_chain = f"""[1:v]scale={int(VIDEO_WIDTH * 1.2)}:-1:flags=lanczos,crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},fps={FPS},
 format=yuv444p,
 split=3[luma][chroma1][chroma2];
 [luma]extractplanes=y[y];
@@ -3057,47 +3581,22 @@ gblur=sigma=20,
 rgbashift=rh=-4:bh=4:rv=1:bv=-1:edge=wrap,
 eq=saturation=0.5:contrast=1.2:brightness=0.02:gamma=1.15,
 colorlevels=rimax=0.9:gimax=0.9:bimax=0.9:romin=0.05:gomin=0.05:bomin=0.05,
-colortemperature=temperature=5500[bg_base];
-[2:v]scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:flags=bilinear,fps={FPS},
-format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
-[bg_base][vhs_loop]blend=all_mode=softlight:all_opacity=0.55[bg];
-[1:v]scale=-1:{cover_height}:flags=lanczos,fps={FPS},format=yuva420p,unsharp=5:5:1.2:5:5:0.0[cover];
-[bg][cover]overlay=(W-w)/2:(H-h)/2[content];
-[intro][content]xfade=transition=fade:duration=1:offset={INTRO_DURATION - 1}[outv];
-{audio_concat_line};
-[0:a]atrim=0:{INTRO_DURATION}[intro_audio];
-[all_music]adelay=delays={int(INTRO_DURATION * 1000)}:all=1[music_delayed];
-[intro_audio][music_delayed]amix=inputs=2:duration=longest[outa]
-""".strip()
-        else:
-            # ============================================================
-            # FILTRO CPU (fallback)
-            # ============================================================
-            filter_complex = f"""
+colortemperature=temperature=5500[bg_base];"""
+            cover_input = "[1:v]"
+
+        filter_complex = f"""
 [0:v]scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:flags=lanczos,fps={FPS}[intro];
-[1:v]scale={int(VIDEO_WIDTH * 1.2)}:-1:flags=lanczos,crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},fps={FPS},
-format=yuv444p,
-split=3[luma][chroma1][chroma2];
-[luma]extractplanes=y[y];
-[chroma1]extractplanes=u,gblur=sigma=12:sigmaV=0[u];
-[chroma2]extractplanes=v,gblur=sigma=12:sigmaV=0[v];
-[y][u][v]mergeplanes=0x001020:yuv444p,
-format=yuv420p,
-gblur=sigma=20,
-rgbashift=rh=-4:bh=4:rv=1:bv=-1:edge=wrap,
-eq=saturation=0.5:contrast=1.2:brightness=0.02:gamma=1.15,
-colorlevels=rimax=0.9:gimax=0.9:bimax=0.9:romin=0.05:gomin=0.05:bomin=0.05,
-colortemperature=temperature=5500[bg_base];
+{bg_chain}
 [2:v]scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:flags=bilinear,fps={FPS},
 format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
 [bg_base][vhs_loop]blend=all_mode=softlight:all_opacity=0.55[bg];
-[1:v]scale=-1:{cover_height}:flags=lanczos,fps={FPS},format=yuva420p,unsharp=5:5:1.2:5:5:0.0[cover];
+{cover_input}scale=-1:{cover_height}:flags=lanczos,fps={FPS},format=yuva420p,unsharp=5:5:1.2:5:5:0.0[cover];
 [bg][cover]overlay=(W-w)/2:(H-h)/2[content];
 [intro][content]xfade=transition=fade:duration=1:offset={INTRO_DURATION - 1}[outv];
 {audio_concat_line};
 [0:a]atrim=0:{INTRO_DURATION}[intro_audio];
 [all_music]adelay=delays={int(INTRO_DURATION * 1000)}:all=1[music_delayed];
-[intro_audio][music_delayed]amix=inputs=2:duration=longest[outa]
+[intro_audio][music_delayed]amix=inputs=2:duration=longest:normalize=0[outa]
 """.strip()
 
         # Construir lista de inputs de audio
@@ -3105,45 +3604,35 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
         for audio_file in audio_files:
             audio_inputs_args.extend(["-i", str(audio_file)])
 
-        # Comando FFmpeg con VHS overlay
-        # Inputs:
-        #   [0] = Intro video
-        #   [1] = Portada (para fondo difuminado + cover limpio)
-        #   [2] = Video VHS noise (loop)
-        #   [3+] = Archivos de audio
+        input_args = ["-i", str(INTRO_VIDEO)]
+        if bg_image:
+            input_args.extend(["-loop", "1", "-t", "9999", "-i", str(bg_image)])
+            input_args.extend(["-stream_loop", "-1", "-i", str(vhs_noise_video)])
+            input_args.extend(["-loop", "1", "-t", "9999", "-i", str(cover_main)])
+        else:
+            input_args.extend(["-loop", "1", "-t", "9999", "-i", str(cover_main)])
+            input_args.extend(["-stream_loop", "-1", "-i", str(vhs_noise_video)])
+        input_args.extend(audio_inputs_args)
+
+        # Sin -hwaccel cuda: el grafo corre en CPU (no existe gblur CUDA) y el
+        # hwdownload que exigía solo agregaba una copia PCIe extra por frame.
+        common_args = [
+            "ffmpeg",
+            "-y",
+            "-threads",
+            "0",
+            *input_args,
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[outv]",
+            "-map",
+            "[outa]",
+        ]
 
         if use_gpu:
-            # Pipeline GPU optimizado:
-            # NVDEC (decode) → CUDA filters → NVENC (encode)
-            # Mantiene frames en VRAM evitando transferencias PCIe
             cmd = [
-                "ffmpeg",
-                "-y",
-                "-hwaccel",
-                "cuda",  # Usar NVDEC para decode
-                "-hwaccel_output_format",
-                "cuda",  # Mantener frames en GPU
-                "-threads",
-                "0",
-                "-i",
-                str(INTRO_VIDEO),  # [0] Intro (decode GPU)
-                "-loop",
-                "1",
-                "-t",
-                "9999",
-                "-i",
-                str(cover_main),  # [1] Portada
-                "-stream_loop",
-                "-1",
-                "-i",
-                str(vhs_noise_video),  # [2] VHS noise (decode CPU)
-                *audio_inputs_args,  # [3+] Audio
-                "-filter_complex",
-                filter_complex,
-                "-map",
-                "[outv]",
-                "-map",
-                "[outa]",
+                *common_args,
                 "-c:v",
                 "h264_nvenc",
                 "-preset",
@@ -3170,29 +3659,7 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
             ]
         else:
             cmd = [
-                "ffmpeg",
-                "-y",
-                "-threads",
-                "0",
-                "-i",
-                str(INTRO_VIDEO),  # [0] Intro
-                "-loop",
-                "1",
-                "-t",
-                "9999",
-                "-i",
-                str(cover_main),  # [1] Portada
-                "-stream_loop",
-                "-1",
-                "-i",
-                str(vhs_noise_video),  # [2] VHS noise (loop infinito)
-                *audio_inputs_args,  # [3+] Audio
-                "-filter_complex",
-                filter_complex,
-                "-map",
-                "[outv]",
-                "-map",
-                "[outa]",
+                *common_args,
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -3206,7 +3673,7 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                 "-bf",
                 "2",
                 "-g",
-                str(FPS // 2),
+                str(FPS * 5),
                 "-x264-params",
                 "open-gop=0",
                 "-pix_fmt",
@@ -3221,8 +3688,6 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                 str(AUDIO_SAMPLE_RATE),
                 "-ac",
                 "2",
-                "-movflags",
-                "+faststart",
                 "-shortest",
                 str(output_file),
             ]
@@ -3268,6 +3733,12 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
             process.wait()
             print()  # Nueva línea después de la barra de progreso
 
+            if bg_image and bg_image.exists():
+                try:
+                    bg_image.unlink()
+                except OSError:
+                    pass
+
             if process.returncode == 0:
                 # Mover video de SSD a disco original si aplica
                 if temp_folder_path:
@@ -3311,6 +3782,12 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
                 errors="replace",
             )
 
+            if bg_image and bg_image.exists():
+                try:
+                    bg_image.unlink()
+                except OSError:
+                    pass
+
             if result.returncode == 0:
                 # Mover video de SSD a disco original si aplica
                 if temp_folder_path:
@@ -3341,6 +3818,7 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
 
     except OSError as e:
         # Limpiar temporales en caso de excepción
+        kill_active_audio_procs()
         cleanup_temp_folder(temp_folder_path)
         if is_read_only_filesystem_error(e):
             return build_storage_stop_result(folder_name, "read_only", str(e))
@@ -3349,6 +3827,7 @@ format=yuv420p,loop=-1:size=1800,setpts=N/{FPS}/TB[vhs_loop];
         print(f"[EXCEPCIÓN] Error procesando {folder_name}: {e}")
         return RenderResult(success=False, reason="os_error")
     except Exception as e:
+        kill_active_audio_procs()
         cleanup_temp_folder(temp_folder_path)
         print(f"[EXCEPCIÓN] Error procesando {folder_name}: {e}")
         return RenderResult(success=False, reason="exception")
@@ -3398,6 +3877,9 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
     stopped_by_storage = False
     processed = 0
 
+    # Resolver NVENC una vez en el padre: los workers heredan el resultado por fork
+    # y se ahorran el encode de prueba (~1s con init de contexto CUDA) cada uno.
+    resolve_gpu_usage()
     executor = ProcessPoolExecutor(max_workers=MAX_PARALLEL_RENDERS)
 
     # En lugar de lanzar todos a la vez, lanzamos por lotes y verificamos espacio
@@ -3421,15 +3903,13 @@ def process_folders_parallel(folders_override=None, staging_ctx=None):
     cancelled = False
     try:
         while pending_futures:
-            # Esperar a que termine al menos uno
-            done_futures = []
-            for future in list(pending_futures.keys()):
-                if future.done():
-                    done_futures.append(future)
-
+            # Esperar a que termine al menos uno (sin busy-wait)
+            done_futures, _ = futures_wait(
+                list(pending_futures.keys()),
+                timeout=30,
+                return_when=FIRST_COMPLETED,
+            )
             if not done_futures:
-                # Ninguno terminó aún, esperar un poco
-                time.sleep(0.5)
                 continue
 
             for future in done_futures:
@@ -3591,6 +4071,19 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
     stopped_by_storage = False
     processed = 0
 
+    # Prefetch: prepara el álbum N+1 (copia, probes, API, overlays) mientras
+    # la GPU renderiza el N. Un solo worker: la preparación es I/O-bound.
+    prefetch_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prefetch")
+    next_job_future = None
+
+    def submit_prefetch(next_idx):
+        if next_idx < len(folders):
+            next_path, next_name = folders[next_idx]
+            return prefetch_pool.submit(
+                prepare_render_job, next_path, next_name, False
+            )
+        return None
+
     try:
         for i, (folder_path, folder_name) in enumerate(folders, 1):
             # Verificar espacio antes de cada render
@@ -3605,9 +4098,24 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
                 stopped_by_space = True
                 break
 
+            finalize_stop = check_finalize_failures()
+            if finalize_stop:
+                stopped_by_storage = True
+                break
+
             print(f"\n[INICIO] ({i}/{total}) Procesando: {folder_name}")
+            if next_job_future is not None:
+                job = next_job_future.result()
+            else:
+                job = prepare_render_job(
+                    folder_path, folder_name, show_progress=True
+                )
+            next_job_future = submit_prefetch(i)
+
             result = normalize_render_result(
-                render_video(folder_path, folder_name, show_progress=True)
+                render_video(
+                    folder_path, folder_name, show_progress=True, prepared_job=job
+                )
             )
             processed += 1
 
@@ -3643,8 +4151,21 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
     except KeyboardInterrupt:
         cancelled = True
         print("\n\nRenderizado cancelado por el usuario.")
+    finally:
+        # Abortar la preparación en curso para no bloquear la salida minutos.
+        PREP_CANCEL_EVENT.set()
+        prefetch_pool.shutdown(wait=True, cancel_futures=True)
+        PREP_CANCEL_EVENT.clear()
+        if next_job_future is not None:
+            try:
+                leftover_job = next_job_future.result(timeout=5)
+            except Exception:
+                leftover_job = None
+            if leftover_job is not None:
+                cleanup_temp_folder(leftover_job.temp_folder_path)
 
     if cancelled:
+        wait_for_finalize_jobs()
         cleanup_temp()
         if staging_ctx:
             for name in staging_ctx.get("staged_names", set()):
@@ -3652,6 +4173,10 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
                     staging_ctx["fast_audio"], staging_ctx["slow_audio"], name
                 )
         return
+
+    finalize_stop = wait_for_finalize_jobs()
+    if finalize_stop:
+        stopped_by_storage = True
 
     free_gb = get_free_space_gb(DIR_RENDERIZANDO)
     print(f"\n{'=' * 60}")
@@ -3662,6 +4187,11 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
     else:
         print("RENDERIZADO COMPLETADO")
     print(f"Procesados: {processed} | Exitosos: {successful} | Fallidos: {failed}")
+    if FINALIZE_FAILED:
+        print(
+            f"[ADVERTENCIA] {FINALIZE_FAILED} finalización(es) en segundo plano "
+            f"fallaron; revisá los mensajes [FINALIZE] y {SSD_TEMP_DIR / '_rescate'}"
+        )
     print(f"Espacio libre: {format_size_gb(free_gb)}")
     print(f"{'=' * 60}\n")
 
@@ -3701,6 +4231,12 @@ def render_single_video(specific_folder=None):
     result = normalize_render_result(
         render_video(folder_path, folder_name, show_progress=True)
     )
+
+    finalize_stop = wait_for_finalize_jobs()
+    if result.success and (finalize_stop or FINALIZE_FAILED):
+        result = RenderResult(
+            success=False, reason=finalize_stop or "finalize", move_to_error=False
+        )
 
     print(f"\n{'=' * 60}")
     if result.success:
@@ -3801,6 +4337,9 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\nRenderizado cancelado por el usuario.")
     finally:
+        # Esperar los moves en segundo plano antes de borrar temporales:
+        # cleanup_temp() arrasa el directorio del que todavía pueden leer.
+        wait_for_finalize_jobs()
         # Limpiar y desmontar ramdisk al terminar
         cleanup_temp()
         if USE_RAMDISK and RAMDISK_MOUNTED:

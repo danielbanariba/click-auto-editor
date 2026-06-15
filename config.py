@@ -92,7 +92,7 @@ MAX_FOLDERS_TO_PROCESS = 9999  # Sin límite fijo, se detiene por espacio en dis
 # Selección de carpetas/videos en scripts 1, 2 y 3
 # True  = orden aleatorio
 # False = orden descendente por año (más reciente primero)
-RANDOMIZE_VIDEO_SELECTION = False
+RANDOMIZE_VIDEO_SELECTION = True
 
 # Control inteligente de espacio en disco
 # El renderizado se detiene cuando queda menos de este espacio libre en DIR_UPLOAD
@@ -120,11 +120,11 @@ NVENC_EXTRA_OPTS = [
     "-bf",
     "2",
     "-g",
-    str(FPS // 2),
+    # GOP de 5s: el contenido es casi estático y keyframes 4K cada 0.5s
+    # inflan el archivo 3-7x sin beneficio (YouTube re-encodea igual).
+    str(FPS * 5),
     "-profile:v",
     "high",
-    "-movflags",
-    "+faststart",
     "-color_primaries",
     "bt709",
     "-color_trc",
@@ -154,6 +154,11 @@ USE_CPP_VHS = True
 VHS_CPP_BIN = PROJECT_ROOT / "cpp" / "build" / "vhs_render"
 VHS_CPP_INTENSITY = 1.0
 VHS_CPP_OVERLAY = PROJECT_ROOT / "content" / "vhs_noise.mp4"
+# DESACTIVADO: vhs_noise.mp4 es 1080p y el renderer C++ exige resolución exacta
+# del render (4K); con mismatch rellena los frames con gris 128 y el blend
+# softlight resulta invisible — solo cuesta ~1GB de VRAM y un pase GPU por frame.
+# Reactivar únicamente con un overlay ya escalado a 4K.
+VHS_CPP_OVERLAY_ENABLED = False
 # Si el render CUDA falla, usar FFmpeg como fallback para no perder el video
 ALLOW_FFMPEG_FALLBACK = True
 # Si ocurre un error CUDA, desactivar C++ para el resto del run
