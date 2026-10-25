@@ -539,11 +539,13 @@ bool CoverPipeline::process(
             const unsigned char* encode_buf = cur_output;
             if (d_intro_last && i < transition_frames) {
                 float progress = static_cast<float>(i + 1) / static_cast<float>(transition_frames);
+                // In place over the main picture. Writing into cur_input would race: the next-next
+                // iteration copies the clean background into it while the encoder thread may still
+                // be converting this frame.
                 effects::apply_vhs_transition(
-                    d_intro_last, cur_output, cur_input,
+                    d_intro_last, cur_output, cur_output,
                     width, height, progress, static_cast<int>(i), stream
                 );
-                encode_buf = cur_input; // transition writes result to cur_input
             }
 
             CUDA_CHECK(cudaEventRecord(events[buf_idx], stream));
