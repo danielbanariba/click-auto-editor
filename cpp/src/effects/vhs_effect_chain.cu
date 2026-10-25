@@ -1,75 +1,36 @@
 /**
  * VHS Effect Chain Implementation
  *
- * Orchestrates all 10 VHS effects in the correct order.
- * Uses ping-pong buffering for efficient in-place processing.
+ * One pass of the Arsenal VHS look per frame (see arsenal_vhs.cu), then the optional VHS noise
+ * overlay. No global random generator: the look is a function of the frame index and a fixed seed.
  */
 
 #include "vhs_effect_chain.hpp"
 #include "utils/cuda_utils.hpp"
-#include <cstdlib>
 #include <cmath>
+#include <cstdint>
 
 namespace vhs {
 namespace effects {
 
-static bool env_flag_enabled(const char* name) {
-    const char* env = std::getenv(name);
-    if (!env || env[0] == '\0' || env[0] == '0') {
-        return false;
+namespace {
+
+/** The frame index of a time in seconds at FPS (0 for a time that is not a usable number). */
+std::int64_t frame_index_of(float frame_time) {
+    const double frames = static_cast<double>(frame_time) * static_cast<double>(::vhs::FPS);
+    if (!std::isfinite(frames) || frames < 0.0 || frames > 9.0e15) {
+        return 0;
     }
-    return true;
+    return static_cast<std::int64_t>(std::llround(frames));
 }
 
-static bool safe_mode_enabled() {
-    static int cached = -1;
-    if (cached == -1) {
-        cached = env_flag_enabled("VHS_SAFE_MODE") ? 1 : 0;
-    }
-    return cached == 1;
-}
-
-static bool tracking_errors_disabled() {
-    static int cached = -1;
-    if (cached == -1) {
-        cached = (safe_mode_enabled() || env_flag_enabled("VHS_DISABLE_TRACKING_ERRORS")) ? 1 : 0;
-    }
-    return cached == 1;
-}
-
-static bool color_bleeding_disabled() {
-    static int cached = -1;
-    if (cached == -1) {
-        cached = (safe_mode_enabled() || env_flag_enabled("VHS_DISABLE_COLOR_BLEEDING")) ? 1 : 0;
-    }
-    return cached == 1;
-}
-
-static bool noise_disabled() {
-    static int cached = -1;
-    if (cached == -1) {
-        cached = (safe_mode_enabled() || env_flag_enabled("VHS_DISABLE_NOISE")) ? 1 : 0;
-    }
-    return cached == 1;
-}
-
-static bool overlay_disabled() {
-    static int cached = -1;
-    if (cached == -1) {
-        cached = (safe_mode_enabled() || env_flag_enabled("VHS_DISABLE_OVERLAY")) ? 1 : 0;
-    }
-    return cached == 1;
-}
+} // namespace
 
 VHSEffectChain::VHSEffectChain(int width, int height, const ::vhs::VHSParams& params)
     : width_(width)
     , height_(height)
     , params_(params)
-    , d_buffer_a_(nullptr)
-    , d_buffer_b_(nullptr)
-    , last_jitter_time_(0.0f)
-    , current_jitter_x_(0)
-    , current_jitter_y_(0)
+    , d_overlay_scratch_(nullptr)
     , initialized_(false)
 {
 }
@@ -80,38 +41,22 @@ VHSEffectChain::~VHSEffectChain() {
 
 void VHSEffectChain::init() {
     if (initialized_) return;
+    if (width_ <= 0 || height_ <= 0) return;  // nothing to draw on
 
-    // Allocate ping-pong buffers
-    size_t frame_size = width_ * height_ * 3 * sizeof(unsigned char);
-    CUDA_CHECK(cudaMalloc(&d_buffer_a_, frame_size));
-    CUDA_CHECK(cudaMalloc(&d_buffer_b_, frame_size));
-
-    // Initialize effect-specific resources
-    if (!color_bleeding_disabled()) {
-        init_color_bleeding_buffers(width_, height_);
-    }
-    if (!noise_disabled()) {
-        init_noise_rng(width_, height_, 42);
-    }
-
+    engine_.reset(new arsenal::Engine(width_, height_));
+    engine_->init();
     initialized_ = true;
 }
 
 void VHSEffectChain::cleanup() {
-    if (!initialized_) return;
-
-    if (d_buffer_a_) {
-        cudaFree(d_buffer_a_);
-        d_buffer_a_ = nullptr;
+    if (d_overlay_scratch_) {
+        cudaFree(d_overlay_scratch_);
+        d_overlay_scratch_ = nullptr;
     }
-    if (d_buffer_b_) {
-        cudaFree(d_buffer_b_);
-        d_buffer_b_ = nullptr;
+    if (engine_) {
+        engine_->cleanup();
+        engine_.reset();
     }
-
-    cleanup_color_bleeding_buffers();
-    cleanup_noise_rng();
-
     initialized_ = false;
 }
 
@@ -122,137 +67,28 @@ void VHSEffectChain::process_frame(
     float frame_time,
     cudaStream_t stream
 ) {
+    if (width_ <= 0 || height_ <= 0 || d_input == nullptr || d_output == nullptr) {
+        return;
+    }
     if (!initialized_) {
         init();
     }
 
-    // Ping-pong buffer pointers
-    unsigned char* src = d_buffer_a_;
-    unsigned char* dst = d_buffer_b_;
+    const arsenal::FrameInfo frame = arsenal::frame_info(frame_index_of(frame_time), static_cast<double>(::vhs::FPS));
+    const arsenal::Controls controls;  // the calibrated look
 
-    // Copy input to buffer A
-    size_t frame_size = width_ * height_ * 3;
-    CUDA_CHECK(cudaMemcpyAsync(d_buffer_a_, d_input, frame_size,
-                                      cudaMemcpyDeviceToDevice, stream));
-
-    // ========================================
-    // Effect 1: Color Bleeding
-    // ========================================
-    if (!color_bleeding_disabled()) {
-        apply_color_bleeding(src, dst, width_, height_,
-                            params_.color_bleeding_blur(), stream);
-        std::swap(src, dst);
+    if (d_vhs_overlay == nullptr) {
+        engine_->render(d_input, d_output, controls, frame, stream);
+        return;
     }
 
-    // ========================================
-    // Effect 2: Chromatic Aberration
-    // ========================================
-    apply_chromatic_aberration(src, dst, width_, height_,
-                               params_.chromatic_offset(), stream);
-    std::swap(src, dst);
-
-    // ========================================
-    // Effect 3: Horizontal Wobble
-    // ========================================
-    float wobble_time = frame_time * 2.0f;  // speed = 2.0
-    apply_horizontal_wobble(src, dst, width_, height_,
-                           params_.wobble_frequency(),
-                           params_.wobble_amplitude(),
-                           wobble_time, stream);
-    std::swap(src, dst);
-
-    // ========================================
-    // Effect 4: Tracking Errors (occasional)
-    // ========================================
-    if (!tracking_errors_disabled() &&
-        static_cast<float>(rand()) / RAND_MAX < params_.tracking_prob()) {
-        TrackingBand bands[8];
-        int num_bands;
-        generate_tracking_bands(bands, num_bands, height_,
-                               0.3f, params_.tracking_sigma());
-        apply_tracking_errors(src, dst, width_, height_, bands, num_bands, stream);
-        std::swap(src, dst);
+    if (d_overlay_scratch_ == nullptr) {
+        CUDA_CHECK(cudaMalloc(&d_overlay_scratch_, static_cast<size_t>(width_) * height_ * 3));
     }
-
-    // ========================================
-    // Effect 5: Position Jitter
-    // ========================================
-    float jitter_freq = params_.jitter_freq();
-    float jitter_interval = 1.0f / jitter_freq;
-
-    if (frame_time - last_jitter_time_ >= jitter_interval) {
-        // Generate new jitter offset
-        float amp_x = params_.jitter_amp_x();
-        float amp_y = params_.jitter_amp_y();
-        current_jitter_x_ = static_cast<int>((static_cast<float>(rand()) / RAND_MAX * 2.0f - 1.0f) * amp_x);
-        current_jitter_y_ = static_cast<int>((static_cast<float>(rand()) / RAND_MAX * 2.0f - 1.0f) * amp_y);
-        last_jitter_time_ = frame_time;
-    }
-
-    if (current_jitter_x_ != 0 || current_jitter_y_ != 0) {
-        apply_position_jitter(src, dst, width_, height_,
-                             current_jitter_x_, current_jitter_y_, stream);
-        std::swap(src, dst);
-    }
-
-    // ========================================
-    // Effect 6: Vertical Jitter (occasional)
-    // ========================================
-    float vertical_prob = params_.intensity * 0.1f;
-    if (static_cast<float>(rand()) / RAND_MAX < vertical_prob) {
-        int jump = 1 + static_cast<int>(params_.intensity * 4);
-        int direction = (rand() % 2) * 2 - 1;
-        apply_vertical_jitter(src, dst, width_, height_, jump * direction, stream);
-        std::swap(src, dst);
-    }
-
-    // ========================================
-    // Effect 7: Scanlines
-    // ========================================
-    apply_scanlines(src, dst, width_, height_,
-                   params_.scanline_darkness(), stream);
-    std::swap(src, dst);
-
-    // ========================================
-    // Effect 8: Noise/Grain
-    // ========================================
-    if (!noise_disabled()) {
-        apply_noise_grain(src, dst, width_, height_,
-                         params_.noise_luma(),
-                         params_.noise_color(),
-                         params_.apply_color_noise(), stream);
-        std::swap(src, dst);
-    }
-
-    // ========================================
-    // Effect 9: Color Grading
-    // ========================================
-    apply_color_grading(src, dst, width_, height_,
-                       params_.black_lift(),
-                       params_.contrast_factor(),
-                       params_.desaturation(),
-                       grading::BLUE_TINT,
-                       grading::RED_TINT, stream);
-    std::swap(src, dst);
-
-    // ========================================
-    // Effect 10: Sharpness Reduction (using NPP blur)
-    // ========================================
-    // For simplicity, we skip this as NPP blur was applied in color_bleeding
-    // Could add another blur pass here with smaller kernel
-
-    // ========================================
-    // VHS Overlay Blend (optional)
-    // ========================================
-    if (d_vhs_overlay != nullptr && !overlay_disabled()) {
-        apply_vhs_overlay_blend(src, d_vhs_overlay, dst, width_, height_,
-                               VHS_OVERLAY_OPACITY, stream);
-        std::swap(src, dst);
-    }
-
-    // Copy result to output
-    CUDA_CHECK(cudaMemcpyAsync(d_output, src, frame_size,
-                                      cudaMemcpyDeviceToDevice, stream));
+    engine_->render(d_input, d_overlay_scratch_, controls, frame, stream);
+    apply_vhs_overlay_blend(d_overlay_scratch_, d_vhs_overlay, d_output, width_, height_,
+                            VHS_OVERLAY_OPACITY, stream);
+    CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace effects
