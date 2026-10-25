@@ -10,7 +10,7 @@ constexpr int VIDEO_WIDTH = 3840;
 constexpr int VIDEO_HEIGHT = 2160;
 constexpr int FPS = 24;
 constexpr float INTRO_DURATION = 7.0f;
-constexpr float TRANSITION_DURATION = 1.0f;
+constexpr float TRANSITION_DURATION = 2.0f;  // seconds the main part rolls in over the held intro frame
 
 // NVENC settings
 constexpr int VIDEO_CQ = 20;
@@ -30,13 +30,6 @@ struct VHSParams {
 
 // VHS overlay blend
 constexpr float VHS_OVERLAY_OPACITY = 0.6f;
-constexpr float VHS_TRANSITION_TAPE_NOISE = 1.0f;      // 100%
-constexpr float VHS_TRANSITION_TAPE_DISTORTION = 1.0f; // 100%
-constexpr float VHS_TRANSITION_RANDOM_NOISE = 0.25f;   // 25%
-constexpr float VHS_TRANSITION_WRINKLE_SIZE = 0.05f;   // 5%
-constexpr float VHS_TRANSITION_FRAME_JITTER = 0.02f;   // 2%
-constexpr float VHS_TRANSITION_CHROMA_OFFSET = 6.0f;   // pixels
-constexpr float VHS_TRANSITION_CHROMA_BLUR = 0.35f;    // blend factor
 
 // Render configuration
 struct RenderConfig {
