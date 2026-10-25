@@ -7,10 +7,13 @@
  * the two colour planes apart (separable Gaussians as three box passes, O(1) per pixel), delays the
  * planes, sharpens luma, mixes the colour back with the clean colour, and grades the result.
  *
+ * The damage stage (arsenal_vhs_damage.hpp) adds the tape's noise, dust and flecks, pop lines, Frame
+ * Jitter, the Wrinkle band, the tape frame and Post Noise.
+ *
  * Lengths are pixels of the 2560-wide frame the look was calibrated on, times the frame's
  * width / 2560 (1.5 at 3840x2160). Controls and defaults are those of the calibrated look; the
- * controls that are neutral in that look (Chroma Offset Y, Chroma Weave X / Y, Speed X / Y) are not
- * ported and read as 0.
+ * controls that are neutral in that look (Chroma Offset Y, Chroma Weave X / Y, Speed X / Y, Adjust
+ * Noise Scale, Interlace Error, Image Offset, Tape Style) are not ported and read as neutral.
  */
 
 #pragma once
@@ -51,7 +54,19 @@ struct Controls {
     float red_blur = 25.0f;
     float green_blur = 55.0f;
     float blue_blur = 45.0f;
+    // Tape Damage: Enable Tape Damage switches the tape noise (Type 5, the look), the dust specks and
+    // flecks, Pop Line Frequency and Frame Jitter. Tape Noise Type 5 is the only type ported.
+    bool tape_damage = true;
+    float pop_line_freq = 25.0f;
+    float frame_jitter = 2.0f;
+    // Tape Wrinkle
+    bool wrinkle = true;
+    float wrinkle_speed = 5.0f;
+    float wrinkle_chance = 40.0f;
+    float wrinkle_radius = 5.0f;
     // Output
+    bool tape_frame = true;  // Frame Style 0 draws the tape frame, Style 1 draws nothing
+    float post_noise = 3.0f;
     float seed = 9300.0f;  // Random Seed
 };
 

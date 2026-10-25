@@ -34,6 +34,7 @@ set(NPP_LIBS
 # Source files
 set(CUDA_SOURCES
     src/effects/arsenal_vhs.cu
+    src/effects/arsenal_vhs_damage.cu
     src/effects/vhs_overlay_blend.cu
     src/effects/cover_overlay.cu
     src/effects/vhs_effect_chain.cu

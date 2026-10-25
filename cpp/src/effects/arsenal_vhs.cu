@@ -29,10 +29,18 @@
  *
  * Enable Color Controls switches Black Level, Saturation, the two blurs and Sharpen; Color Offset and
  * Channel Controls always act.
+ *
+ * # Damage
+ *
+ * The damage stage (arsenal_vhs_damage.cu) plans the frame on the host and draws the noise fields on
+ * the device. Here it moves every row by Frame Jitter (all three planes together, with the delays),
+ * redraws the Wrinkle band after that, and the final kernel adds its signal before the grade and its
+ * output stage (tape frame, Post Noise) after it.
  */
 
 #include "arsenal_vhs.hpp"
 #include "arsenal_vhs_common.cuh"
+#include "arsenal_vhs_damage.hpp"
 #include "utils/cuda_utils.hpp"
 
 #include <algorithm>
@@ -66,9 +74,10 @@ constexpr float kMinSigma = 0.05f;
 
 // ---- launch geometry ----
 constexpr int kBoxThreads = 128;
-constexpr int kBoxSegment = 128;  // outputs one thread produces before it restarts its running sum
-constexpr int kTile = 32;
-constexpr int kTileRows = 8;
+constexpr int kBoxSegment = 256;  // outputs one thread produces before it restarts its running sum
+constexpr int kTile = 64;
+constexpr int kTileThreads = 32;  // threads along a tile row
+constexpr int kTileRows = 8;      // thread rows of a block
 constexpr int kMaxDimension = 16384;
 
 /** One axis of a Gaussian: three box passes of half-width r and end weight alpha. */
@@ -245,35 +254,48 @@ __global__ void __launch_bounds__(kBoxThreads) box_pass_kernel(BoxBatch batch, i
     }
 }
 
-/** dst (cols lines of `rows`) = transpose of src (rows lines of `cols`), for up to three planes. */
+/**
+ * dst (cols lines of `rows`) = transpose of src (rows lines of `cols`), for up to three planes. A block
+ * of kTileThreads x kTileRows threads moves a kTile x kTile tile through shared memory; each thread
+ * handles several pixels of a tile row, so reads and writes both stay coalesced.
+ */
 __global__ void transpose3_kernel(TransposeBatch batch, int cols, int rows) {
     __shared__ float tile[kTile][kTile + 1];
     const float* src = batch.src[blockIdx.z];
     float* dst = batch.dst[blockIdx.z];
     if (!src) return;
-    const int x = blockIdx.x * kTile + threadIdx.x;
+    const int x0 = blockIdx.x * kTile;
     const int y0 = blockIdx.y * kTile;
     for (int j = threadIdx.y; j < kTile; j += kTileRows) {
         const int y = y0 + j;
-        if (x < cols && y < rows) tile[j][threadIdx.x] = src[static_cast<size_t>(y) * cols + x];
+        for (int i = threadIdx.x; i < kTile; i += kTileThreads) {
+            const int x = x0 + i;
+            if (x < cols && y < rows) tile[j][i] = src[static_cast<size_t>(y) * cols + x];
+        }
     }
     __syncthreads();
-    const int ox = y0 + threadIdx.x;
-    const int oy0 = blockIdx.x * kTile;
     for (int j = threadIdx.y; j < kTile; j += kTileRows) {
-        const int oy = oy0 + j;
-        if (ox < rows && oy < cols) dst[static_cast<size_t>(oy) * rows + ox] = tile[threadIdx.x][j];
+        const int oy = x0 + j;
+        for (int i = threadIdx.x; i < kTile; i += kTileThreads) {
+            const int ox = y0 + i;
+            if (ox < rows && oy < cols) dst[static_cast<size_t>(oy) * rows + ox] = tile[i][j];
+        }
     }
 }
 
-/** dst = src with every row moved `dx` pixels to the right (linear interpolation, ends repeated). */
-__global__ void shift_rows_kernel(const float* __restrict__ src, float* __restrict__ dst, float dx, int w, int h) {
+/**
+ * dst = src with row y moved dx + rows[y].shift pixels to the right (linear interpolation, ends
+ * repeated); `rows` may be null.
+ */
+__global__ void shift_rows_kernel(const float* __restrict__ src, float* __restrict__ dst, const RowData* rows, float dx,
+                                  int w, int h) {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= w || y >= h) return;
     const float* row = src + static_cast<size_t>(y) * w;
     const float last = static_cast<float>(w - 1);
-    const float p = clampf(static_cast<float>(x) - dx, 0.0f, last);
+    const float total = rows ? dx + rows[y].shift : dx;
+    const float p = clampf(static_cast<float>(x) - total, 0.0f, last);
     const int i = static_cast<int>(p);
     const float t = p - static_cast<float>(i);
     const float a = row[i];
@@ -289,6 +311,7 @@ struct FinalParams {
     const float* cr;
     const float* soft;  // blurred luma for the unsharp mask, or null
     Look look;
+    DamageParams damage;
 };
 
 /** Mixes the planes back, grades, and writes the packed BGR8 frame. */
@@ -310,12 +333,20 @@ __global__ void final_kernel(FinalParams p) {
     const float cb = (own_cb + (p.cb[i] - own_cb) * look.mix) * look.saturation;
     const float cr = (own_cr + (p.cr[i] - own_cr) * look.mix) * look.saturation;
 
+    // the damage joins the signal, then the output stage follows the grade
+    const DamageParams& damage = p.damage;
+    NoiseTaps taps{};
+    if (damage.signal || damage.output) taps = noise_taps(damage, x);
+    float ycc[3] = {luma, cb, cr};
+    if (damage.signal) damage_signal(damage, x, y, taps, ycc);
+
     float rgb[3];
-    ycc_to_rgb(luma, cb, cr, rgb[0], rgb[1], rgb[2]);
+    ycc_to_rgb(ycc[0], ycc[1], ycc[2], rgb[0], rgb[1], rgb[2]);
     for (int k = 0; k < 3; ++k) {
         float v = clampf(rgb[k], 0.0f, 1.0f);
         rgb[k] = clampf(v * look.grade_gain[k] + look.grade_lift[k], 0.0f, 1.0f);
     }
+    if (damage.output) damage_finish(damage, x, y, taps, rgb);
     p.out[i * 3 + 0] = static_cast<unsigned char>(rgb[2] * 255.0f + 0.5f);
     p.out[i * 3 + 1] = static_cast<unsigned char>(rgb[1] * 255.0f + 0.5f);
     p.out[i * 3 + 2] = static_cast<unsigned char>(rgb[0] * 255.0f + 0.5f);
@@ -335,6 +366,7 @@ struct Engine::Impl {
     float* plane[3] = {nullptr, nullptr, nullptr};   // Y', Cb, Cr
     float* spare[3] = {nullptr, nullptr, nullptr};   // transposes and shifts
     float* soft = nullptr;                           // blurred luma for the unsharp mask
+    std::unique_ptr<DamageStage> damage;
     bool ready = false;
 };
 
@@ -375,6 +407,8 @@ void Engine::init() {
             CUDA_CHECK(cudaMalloc(&impl_->spare[k], bytes));
         }
         CUDA_CHECK(cudaMalloc(&impl_->soft, bytes));
+        impl_->damage.reset(new DamageStage(width_, height_));
+        impl_->damage->init();
     } catch (...) {
         cleanup();
         throw;
@@ -393,6 +427,7 @@ void Engine::cleanup() noexcept {
     }
     if (impl_->soft) cudaFree(impl_->soft);
     impl_->soft = nullptr;
+    impl_->damage.reset();
     impl_->ready = false;
 }
 
@@ -442,7 +477,7 @@ void transpose_planes(Ping p[3], const BoxShape shape[3], int cols, int rows, cu
     }
     if (!any) return;
     const dim3 grid((cols + kTile - 1) / kTile, (rows + kTile - 1) / kTile, 3);
-    transpose3_kernel<<<grid, dim3(kTile, kTileRows), 0, stream>>>(batch, cols, rows);
+    transpose3_kernel<<<grid, dim3(kTileThreads, kTileRows), 0, stream>>>(batch, cols, rows);
     check_launch();
     for (int k = 0; k < 3; ++k) {
         if (p[k].cur && shape[k].active) std::swap(p[k].cur, p[k].oth);
@@ -465,7 +500,6 @@ void blur_planes(Ping p[3], const BoxShape sx[3], const BoxShape sy[3], int w, i
 
 void Engine::render(const std::uint8_t* d_in, std::uint8_t* d_out, const Controls& controls, const FrameInfo& frame,
                     cudaStream_t stream) {
-    (void)frame;  // the colour stage has nothing that varies in time
     if (width_ <= 0 || height_ <= 0 || !d_in || !d_out) {
         return;
     }
@@ -477,6 +511,9 @@ void Engine::render(const std::uint8_t* d_in, std::uint8_t* d_out, const Control
     const Look look = make_look(controls, w, h);
     const dim3 block(32, 8);
     const dim3 grid((w + block.x - 1) / block.x, (h + block.y - 1) / block.y);
+
+    // 0. what the damage does to this frame: planned on the host, noise drawn on the device
+    const DamageParams damage = impl_->damage->prepare(controls, frame, stream);
 
     // 1. planes of the picture
     bgr_to_planes_kernel<<<grid, block, 0, stream>>>(d_in, impl_->plane[0], impl_->plane[1], impl_->plane[2], w, h);
@@ -492,14 +529,18 @@ void Engine::render(const std::uint8_t* d_in, std::uint8_t* d_out, const Control
         impl_->spare[k] = planes[k].oth;
     }
 
-    // 3. delays: a channel offset moves its plane, Chroma Offset moves both colour planes
+    // 3. delays: a channel offset moves its plane, Chroma Offset moves both colour planes, and the
+    // damage's Frame Jitter moves the rows of all three
     const float delays[3] = {look.y_dx, look.cb_dx, look.cr_dx};
     for (int k = 0; k < 3; ++k) {
-        if (std::fabs(delays[k]) < 1e-4f) continue;
-        shift_rows_kernel<<<grid, block, 0, stream>>>(impl_->plane[k], impl_->spare[k], delays[k], w, h);
+        if (!damage.rows && std::fabs(delays[k]) < 1e-4f) continue;
+        shift_rows_kernel<<<grid, block, 0, stream>>>(impl_->plane[k], impl_->spare[k], damage.rows, delays[k], w, h);
         check_launch();
         std::swap(impl_->plane[k], impl_->spare[k]);
     }
+
+    // 3b. the Wrinkle band redraws the rows it covers, from held rows and sideways chunks
+    impl_->damage->warp_band(impl_->plane, impl_->spare, w, stream);
 
     // 4. the detail the sharpening adds back is what the blur took out
     const float* soft = nullptr;
@@ -523,6 +564,7 @@ void Engine::render(const std::uint8_t* d_in, std::uint8_t* d_out, const Control
     params.cr = impl_->plane[2];
     params.soft = soft;
     params.look = look;
+    params.damage = damage;
     final_kernel<<<grid, block, 0, stream>>>(params);
     check_launch();
 }
