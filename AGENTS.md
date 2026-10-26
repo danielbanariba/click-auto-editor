@@ -129,9 +129,9 @@ Variables de entorno en `.env`:
 - Ajusta sleeps con cautela; tiempos cortos rompen automatización
 
 ## Commits
-- Mensajes cortos en **español**, descriptivos
-- Ejemplos: `Barra de progreso`, `Arreglo render NVENC`
-- Sin prefijos Conventional Commits
+- Mensajes en **español**, con Gitmoji + Conventional Commits según `templates/commit-template.git.txt`
+- Ejemplos: `:sparkles: feat(render): agregar barra de progreso`, `:bug: fix(render): corregir render NVENC`
+- Cuerpo de los PR según `.github/pull_request_template.md`
 - No empujes credenciales ni binarios pesados
 
 ## Checklist Pre-Commit

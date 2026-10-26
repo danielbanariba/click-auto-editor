@@ -121,7 +121,8 @@ Central config for all scripts. Key settings:
 - **Subprocesses**: `subprocess.run([...], check=True)`, avoid `shell=True`
 - **Files**: always specify `encoding="utf-8"`
 - **Errors**: catch specific exceptions, never bare `except Exception:`
-- **Commits**: short Spanish messages, no Conventional Commits prefix
+- **Commits**: Spanish, Gitmoji + Conventional Commits, following `templates/commit-template.git.txt`
+- **Pull requests**: body follows `.github/pull_request_template.md`
 
 ## Persistent State Files
 
