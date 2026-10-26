@@ -9,7 +9,7 @@
  * Options:
  *   --input, -i     Input video file or folder
  *   --output, -o    Output video file or folder
- *   --intensity     VHS effect intensity (0.0-1.0, default: 0.5)
+ *   --intensity     Accepted for compatibility; the Arsenal VHS look has fixed settings
  *   --vhs-overlay   Path to VHS noise overlay video
  *   --cq            Constant quality (0-51, default: 20)
  *   --preset        NVENC preset (p1-p7, default: p1)
@@ -39,7 +39,7 @@ void print_usage(const char* prog_name) {
     std::cout << "  --input, -i     Input video file or folder\n";
     std::cout << "  --output, -o    Output video file or folder\n\n";
     std::cout << "Options:\n";
-    std::cout << "  --intensity     VHS effect intensity (0.0-1.0, default: 0.5)\n";
+    std::cout << "  --intensity     Accepted for compatibility; the Arsenal VHS look has fixed settings\n";
     std::cout << "  --vhs-overlay   Path to VHS noise overlay video\n";
     std::cout << "  --intro         Intro video path (cover mode)\n";
     std::cout << "  --cover         Cover image path (enables cover mode)\n";
@@ -186,7 +186,7 @@ int main(int argc, char* argv[]) {
     vhs::VHSParams params;
     params.intensity = intensity;
 
-    std::cout << "[Config] Intensity: " << intensity << "\n";
+    std::cout << "[Config] Intensity: " << intensity << " (ignored: the Arsenal VHS look has fixed settings)\n";
     std::cout << "[Config] CQ: " << cq << "\n";
     std::cout << "[Config] Preset: " << preset << "\n";
     std::cout << "[Config] GPU: " << (use_gpu ? "enabled" : "disabled") << "\n\n";

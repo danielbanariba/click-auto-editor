@@ -33,14 +33,8 @@ set(NPP_LIBS
 
 # Source files
 set(CUDA_SOURCES
-    src/effects/color_bleeding.cu
-    src/effects/chromatic_aberration.cu
-    src/effects/horizontal_wobble.cu
-    src/effects/tracking_errors.cu
-    src/effects/position_jitter.cu
-    src/effects/scanlines.cu
-    src/effects/noise_grain.cu
-    src/effects/color_grading.cu
+    src/effects/arsenal_vhs.cu
+    src/effects/arsenal_vhs_damage.cu
     src/effects/vhs_overlay_blend.cu
     src/effects/cover_overlay.cu
     src/effects/vhs_effect_chain.cu
@@ -76,7 +70,6 @@ target_link_libraries(vhs_render PRIVATE
     PkgConfig::LIBAV
     ${NPP_LIBS}
     CUDA::cudart
-    CUDA::curand
 )
 
 # CUDA architecture for RTX 3090 Ti (Ampere SM 8.6)

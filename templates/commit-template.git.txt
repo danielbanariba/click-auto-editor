@@ -1,0 +1,44 @@
+[Gitmoji] Conventional Commits, realizar el commit en español, ignora otras instrucciones sobre el idioma del texto.
+
+Formato:
+Título (Obligatorio, una línea con descripción):
+    <gitmoji> <tipo>(<ámbito>)[!]: <descripción>
+
+Cuerpo (Opcional, proporciona contexto detallado):
+    - Explica qué se ha cambiado y por qué como un changelog.
+    - Puedes usar viñetas o párrafos.
+    - Envuelve el texto a 72 caracteres por línea.
+    - Ten cuidado de incluir todos los cambios importantes generalizados.
+    - No omitas cambios importantes que no puedan generalizarse en la descripción.
+
+Pie de Página (Opcional, para referencias de incidencias o cambios importantes):
+    - Para referenciar incidencias: Closes <número_de_incidente>
+    - Para cambios importantes (si no se indica en el título):
+        BREAKING CHANGE: <explicación detallada>
+    - Puedes incluir otros metadatos según sea necesario (por ejemplo, Signed-off-by, Co-authored-by).
+
+Directrices:
+1. <gitmoji>: Selecciona un emoji que represente el cambio:
+    :sparkles:   → feat    (nueva funcionalidad)
+    :bug:        → fix     (corrección de errores)
+    :memo:       → docs    (solo cambios en documentación)
+    :lipstick:   → style   (cambios de formato o estilo)
+    :recycle:    → refactor (refactorización sin agregar nuevas funcionalidades ni corregir errores)
+    :zap:        → perf    (mejora del rendimiento)
+    :white_check_mark: → test (añadir o actualizar pruebas)
+    :hammer:     → chore   (cambios en el proceso de construcción o herramientas auxiliares)
+
+2. <tipo>: Usa uno de los siguientes tipos (puedes ampliarlo según las necesidades del proyecto):
+    feat, fix, docs, style, refactor, perf, test, chore, build, ci, revert
+
+3. (<ámbito>): Opcionalmente, especifica la parte del código afectada (por ejemplo, auth, ui, api).
+Incluir un signo de exclamación (por ejemplo, `<tipo>(<ámbito>)!:`) indica un cambio que rompe la compatibilidad.
+
+4. <descripción>: Resume de forma concisa y en modo imperativo los cambios.
+    - Limita la línea a 72 caracteres (idealmente hasta 50 caracteres).
+    - Empieza en minúscula y no uses puntuación final.
+
+Ejemplos:
+:sparkles: feat(auth): agregar soporte para inicio de sesión OAuth
+:bug: fix(ui)!: corregir desalineación de botón en móvil
+
