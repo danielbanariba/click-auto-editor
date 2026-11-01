@@ -1,7 +1,9 @@
 import json
+import multiprocessing
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -223,6 +225,107 @@ class TestSubir(unittest.TestCase):
         self.assertEqual(resultado["motivo"], "carpeta_fuera_de_raiz")
         self.assertEqual(self.subidas, [])
         self.assertTrue(afuera.exists())
+
+
+class Llamada:
+    def __init__(self, resultado):
+        self.resultado = resultado
+
+    def execute(self):
+        return self.resultado
+
+
+class VideosFalsos:
+    def __init__(self, estados, demora_actualizacion):
+        self.estados = list(estados)
+        self.demora_actualizacion = demora_actualizacion
+        self.actualizaciones = []
+
+    def list(self, part, id):
+        estado = self.estados.pop(0) if len(self.estados) > 1 else self.estados[0]
+        status = {
+            "privacyStatus": "private",
+            "uploadStatus": "processed" if estado == "succeeded" else "uploaded",
+            "embeddable": True,
+        }
+        return Llamada({"items": [{"status": status, "processingDetails": {"processingStatus": estado}}]})
+
+    def update(self, part, body):
+        time.sleep(self.demora_actualizacion)
+        self.actualizaciones.append(body)
+        return Llamada(body)
+
+
+class YouTubeFalso:
+    def __init__(self, estados, demora_actualizacion=0.0):
+        self.videos_falsos = VideosFalsos(estados, demora_actualizacion)
+
+    def videos(self):
+        return self.videos_falsos
+
+
+def uploader_para_programar(youtube):
+    return SimpleNamespace(
+        cargar_env=lambda: None,
+        probar_credenciales_disponibles=lambda prefix: (youtube, [], [], []),
+        fetch_scheduled_publish_times=lambda cliente, max_items: (set(), {}),
+        is_quota_error=lambda exc: False,
+        is_invalid_grant_error=lambda exc: False,
+        authenticate_next=lambda prefix: None,
+    )
+
+
+class TestProgramar(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.parches = [
+            mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "pendientes.json"),
+            mock.patch.object(pa, "PROGRAMADOS_JSONL", self.tmp / "programados.jsonl"),
+            mock.patch.object(pa, "DIR_LOGS", self.tmp / "logs"),
+        ]
+        for parche in self.parches:
+            parche.start()
+
+    def tearDown(self):
+        for parche in self.parches:
+            parche.stop()
+        shutil.rmtree(self.tmp)
+
+    def test_margen_de_una_hora_cuenta_desde_que_termina_el_procesado(self):
+        subido = datetime.now().astimezone() - timedelta(hours=3)
+        pa.registrar_pendiente("V1", "Banda - Album", "Banda - Album", subido)
+        youtube = YouTubeFalso(["processing", "succeeded"])
+        esperas = []
+        with mock.patch.object(pa.time, "sleep", esperas.append):
+            resultado = pa.programar(
+                "V1",
+                esperar=True,
+                revisar=lambda video_id: {"estado": "sin_reclamo", "reclamantes": []},
+                uploader=uploader_para_programar(youtube),
+            )
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertGreaterEqual(max(esperas), 59 * 60)
+        status = youtube.videos_falsos.actualizaciones[0]["status"]
+        self.assertEqual(status["privacyStatus"], "private")
+        self.assertEqual(status["publishAt"], resultado["publica_en"])
+        self.assertEqual(pa.leer_pendientes(), [])
+
+    def test_dos_programar_a_la_vez_no_eligen_la_misma_hora(self):
+        contexto = multiprocessing.get_context("fork")
+        resultados = contexto.Queue()
+
+        def correr(video_id):
+            # La demora abre la ventana entre elegir la hora y registrarla.
+            uploader = uploader_para_programar(YouTubeFalso(["succeeded"], demora_actualizacion=0.5))
+            resultados.put(pa.programar(video_id, reclamo=False, uploader=uploader)["publica_en"])
+
+        procesos = [contexto.Process(target=correr, args=(v,)) for v in ("V1", "V2")]
+        for proceso in procesos:
+            proceso.start()
+        for proceso in procesos:
+            proceso.join(timeout=30)
+        horas = {resultados.get(timeout=5), resultados.get(timeout=5)}
+        self.assertEqual(len(horas), 2, horas)
 
 
 if __name__ == "__main__":

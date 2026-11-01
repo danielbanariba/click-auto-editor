@@ -12,6 +12,8 @@ decida el paso siguiente; el resto de la salida va a data/agente/logs/.
 """
 import argparse
 import contextlib
+import fcntl
+import functools
 import importlib.util
 import json
 import os
@@ -80,6 +82,23 @@ def cargar_script(nombre_archivo, alias):
     return modulo
 
 
+@functools.lru_cache(maxsize=None)
+def uploader_real():
+    return cargar_script("3. subir_video_API.py", "subir_video_api")
+
+
+@contextlib.contextmanager
+def bloqueo(nombre):
+    """Serializa entre procesos: varios `programar` pueden correr a la vez."""
+    PENDIENTES_JSON.parent.mkdir(parents=True, exist_ok=True)
+    with open(PENDIENTES_JSON.parent / f"{nombre}.lock", "w", encoding="utf-8") as archivo:
+        fcntl.flock(archivo, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(archivo, fcntl.LOCK_UN)
+
+
 def responder(datos):
     print(json.dumps(datos, ensure_ascii=False))
     return 0 if datos.get("ok") else 1
@@ -132,23 +151,38 @@ def leer_pendientes():
 
 def guardar_pendientes(pendientes):
     PENDIENTES_JSON.parent.mkdir(parents=True, exist_ok=True)
-    temporal = PENDIENTES_JSON.with_suffix(".tmp")
+    temporal = PENDIENTES_JSON.with_name(f"{PENDIENTES_JSON.name}.{os.getpid()}.tmp")
     with open(temporal, "w", encoding="utf-8") as f:
         json.dump(pendientes, f, ensure_ascii=False, indent=2)
     temporal.replace(PENDIENTES_JSON)
 
 
 def registrar_pendiente(video_id, titulo, album, subido_en):
-    pendientes = [p for p in leer_pendientes() if p["video_id"] != video_id]
-    pendientes.append(
-        {
-            "video_id": video_id,
-            "titulo": titulo,
-            "album": album,
-            "subido_en": subido_en.isoformat(),
-        }
-    )
-    guardar_pendientes(pendientes)
+    with bloqueo("estado"):
+        pendientes = [p for p in leer_pendientes() if p["video_id"] != video_id]
+        pendientes.append(
+            {
+                "video_id": video_id,
+                "titulo": titulo,
+                "album": album,
+                "subido_en": subido_en.isoformat(),
+            }
+        )
+        guardar_pendientes(pendientes)
+
+
+def momento_procesado(video_id, ahora):
+    """Primera vez que se vio el video procesado: el margen corre desde ahí."""
+    with bloqueo("estado"):
+        pendientes = leer_pendientes()
+        pendiente = next((p for p in pendientes if p["video_id"] == video_id), None)
+        if pendiente is None:
+            pendiente = {"video_id": video_id, "titulo": video_id, "album": None, "subido_en": None}
+            pendientes.append(pendiente)
+        if not pendiente.get("procesado_en"):
+            pendiente["procesado_en"] = ahora.isoformat()
+            guardar_pendientes(pendientes)
+        return datetime.fromisoformat(pendiente["procesado_en"])
 
 
 def buscar_pendiente(video_id):
@@ -169,7 +203,8 @@ def registrar_programado(video_id, titulo, publica_en, con_reclamo):
             "programado_en": datetime.now().astimezone().isoformat(),
         }
         f.write(json.dumps(registro, ensure_ascii=False) + "\n")
-    guardar_pendientes([p for p in leer_pendientes() if p["video_id"] != video_id])
+    with bloqueo("estado"):
+        guardar_pendientes([p for p in leer_pendientes() if p["video_id"] != video_id])
 
 
 def fechas_programadas_localmente():
@@ -243,8 +278,19 @@ def clasificar_reclamo(botones_detalle, texto_pagina, en_pagina_copyright):
 # ---------------------------------------------------------------------------
 
 
+def cola_de_log(log, lineas=20):
+    with open(log, "r", encoding="utf-8", errors="replace") as f:
+        texto = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", f.read())
+    # Las barras de progreso reescriben la línea con \r: queda la última versión.
+    limpias = [linea.split("\r")[-1].rstrip() for linea in texto.splitlines()]
+    return "\n".join([linea for linea in limpias if linea][-lineas:])
+
+
 def renderizar(carpeta=None):
-    libre_gb = shutil.disk_usage(BASE_DIR).free / 1024**3
+    try:
+        libre_gb = shutil.disk_usage(BASE_DIR).free / 1024**3
+    except OSError as exc:
+        return {"ok": False, "motivo": "disco_no_disponible", "detalle": str(exc)}
     if libre_gb < MIN_FREE_SPACE_GB:
         return {"ok": False, "motivo": "sin_espacio", "libre_gb": round(libre_gb, 1)}
 
@@ -272,21 +318,19 @@ def renderizar(carpeta=None):
     restantes = len(origen_despues)
     for nombre in nuevas:
         destino = DIR_RENDERIZANDO / nombre
-        videos = sorted(destino.glob("*.mp4"))
-        if videos:
+        video = uploader_real().encontrar_video(destino)
+        if video:
             return {
                 "ok": True,
                 "album": nombre,
                 "carpeta": str(destino),
-                "video": str(videos[0]),
+                "video": str(video),
                 "restantes": restantes,
                 "log": str(log),
             }
 
     album = carpeta or next(iter(set(origen_antes) - set(origen_despues)), None)
     con_error = [c for c in listar_carpetas(DIR_ERROR404) if c not in error_antes]
-    with open(log, "r", encoding="utf-8", errors="replace") as f:
-        cola = f.readlines()[-20:]
     return {
         "ok": False,
         "motivo": "render_fallido",
@@ -294,7 +338,7 @@ def renderizar(carpeta=None):
         "movido_a_error404": bool(con_error),
         "restantes": restantes,
         "log": str(log),
-        "log_final": "".join(cola),
+        "log_final": cola_de_log(log),
     }
 
 
@@ -450,10 +494,10 @@ def generar_captura(video, duracion, destino):
 
 def verificar(carpeta, ancho=VIDEO_WIDTH, alto=VIDEO_HEIGHT, intro=INTRO_DURATION):
     carpeta = Path(carpeta)
-    videos = sorted(carpeta.glob("*.mp4"))
-    if not videos:
+    # El mismo archivo que después elige `subir`.
+    video = uploader_real().encontrar_video(carpeta) if carpeta.is_dir() else None
+    if not video:
         return {"ok": False, "motivo": "sin_video", "carpeta": str(carpeta)}
-    video = videos[0]
     sondeo = sondear(video)
     audio = medir_audio(video) if sondeo else {}
     checks = evaluar_video(sondeo, audio, duracion_esperada(carpeta, intro), ancho, alto)
@@ -518,7 +562,7 @@ def subir(carpeta, uploader=None, sin_deathgrind=False, raices=RAICES_BORRABLES)
     if raiz is None:
         return {"ok": False, "motivo": "carpeta_fuera_de_raiz", "carpeta": str(carpeta)}
 
-    uploader = uploader or cargar_script("3. subir_video_API.py", "subir_video_api")
+    uploader = uploader or uploader_real()
     log = ruta_log("subir")
     with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
         uploader.cargar_env()
@@ -635,14 +679,18 @@ def revisar_reclamo_en_studio(video_id):
     captura.parent.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as playwright:
-        contexto = apelacion.launch_context(
-            playwright,
-            user_data_dir,
-            headless,
-            channel,
-            apelacion.profile_name_from_args(args),
-            ejecutable,
-        )
+        try:
+            contexto = apelacion.launch_context(
+                playwright,
+                user_data_dir,
+                headless,
+                channel,
+                apelacion.profile_name_from_args(args),
+                ejecutable,
+            )
+        except PlaywrightError as exc:
+            print(f"No se pudo abrir el navegador: {exc}")
+            return {"estado": "desconocido", "motivo": "error_navegador"}
         try:
             pagina = contexto.pages[0] if contexto.pages else contexto.new_page()
             reclamantes = apelacion.extract_claimants_from_video(pagina, video_id)
@@ -680,10 +728,9 @@ def armar_resumen_programado(titulo, publica_en, con_reclamo, reclamantes):
     return f"✓ {titulo}\nSin reclamos: programado para {fecha}."
 
 
-def programar(video_id, esperar=False, reclamo=None, revisar=revisar_reclamo_en_studio):
-    uploader = cargar_script("3. subir_video_API.py", "subir_video_api")
-    pendiente = buscar_pendiente(video_id) or {}
-    titulo = pendiente.get("titulo", video_id)
+def programar(video_id, esperar=False, reclamo=None, revisar=revisar_reclamo_en_studio, uploader=None):
+    uploader = uploader or uploader_real()
+    titulo = (buscar_pendiente(video_id) or {}).get("titulo", video_id)
     log = ruta_log("programar")
     with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
         uploader.cargar_env()
@@ -705,10 +752,10 @@ def programar(video_id, esperar=False, reclamo=None, revisar=revisar_reclamo_en_
             if status.get("privacyStatus") != "private":
                 return {"ok": False, "motivo": "no_es_privado", "video_id": video_id}
 
-            if reclamo is None and pendiente.get("subido_en"):
-                revisar_desde = datetime.fromisoformat(pendiente["subido_en"]) + timedelta(
-                    minutes=MARGEN_RECLAMO_MIN
-                )
+            if reclamo is None:
+                revisar_desde = momento_procesado(
+                    video_id, datetime.now().astimezone()
+                ) + timedelta(minutes=MARGEN_RECLAMO_MIN)
                 faltan = (revisar_desde - datetime.now().astimezone()).total_seconds()
                 if faltan > 0:
                     if not esperar:
@@ -720,39 +767,43 @@ def programar(video_id, esperar=False, reclamo=None, revisar=revisar_reclamo_en_
                         }
                     time.sleep(faltan)
 
-            reclamantes = []
-            if reclamo is None:
-                revision = revisar(video_id)
-                if revision["estado"] == "desconocido":
-                    return {
-                        "ok": False,
-                        "motivo": "reclamo_desconocido",
-                        "video_id": video_id,
-                        "titulo": titulo,
-                        "captura_studio": revision.get("captura_studio"),
-                        "log": str(log),
-                    }
-                con_reclamo = revision["estado"] == "con_reclamo"
-                reclamantes = revision.get("reclamantes", [])
-            else:
-                con_reclamo = reclamo
+            # De a un `programar` por vez: la revisión en Studio comparte el perfil
+            # del navegador, y dos procesos a la vez elegirían la misma hora libre.
+            with bloqueo("programar"):
+                reclamantes = []
+                if reclamo is None:
+                    revision = revisar(video_id)
+                    if revision["estado"] == "desconocido":
+                        return {
+                            "ok": False,
+                            "motivo": "reclamo_desconocido",
+                            "detalle": revision.get("motivo"),
+                            "video_id": video_id,
+                            "titulo": titulo,
+                            "captura_studio": revision.get("captura_studio"),
+                            "log": str(log),
+                        }
+                    con_reclamo = revision["estado"] == "con_reclamo"
+                    reclamantes = revision.get("reclamantes", [])
+                else:
+                    con_reclamo = reclamo
 
-            publica_en = elegir_fecha(
-                datetime.now().astimezone(), con_reclamo, horas_tomadas(uploader, yt)
-            )
-            cuerpo = {"id": video_id, "status": armar_status_programado(status, publica_en)}
-            ejecutar_api(
-                uploader,
-                yt,
-                lambda c: c.videos().update(part="status", body=cuerpo).execute(),
-            )
+                publica_en = elegir_fecha(
+                    datetime.now().astimezone(), con_reclamo, horas_tomadas(uploader, yt)
+                )
+                cuerpo = {"id": video_id, "status": armar_status_programado(status, publica_en)}
+                ejecutar_api(
+                    uploader,
+                    yt,
+                    lambda c: c.videos().update(part="status", body=cuerpo).execute(),
+                )
+                registrar_programado(video_id, titulo, publica_en, con_reclamo)
         except SinCredenciales:
             return {"ok": False, "motivo": "sin_credenciales", "log": str(log)}
         except HttpError as exc:
             print(f"Error YouTube API: {exc}")
             return {"ok": False, "motivo": "error_api", "detalle": str(exc), "log": str(log)}
 
-    registrar_programado(video_id, titulo, publica_en, con_reclamo)
     return {
         "ok": True,
         "video_id": video_id,
