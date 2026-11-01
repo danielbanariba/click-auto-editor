@@ -38,6 +38,25 @@ Scripts are numbered but **not all are sequential**. The active pipeline is:
 
 The old Windows/Adobe pipeline (steps 0-8) lives in `old/` as reference only.
 
+### Agent-driven pipeline (Hermes + Telegram)
+
+`pipeline_agente.py` runs the pipeline one album at a time for the Hermes
+skill `hermes/skills/publicar-album/SKILL.md` (loaded through
+`skills.external_dirs` in `~/.hermes/config.yaml`). Every subcommand prints
+one JSON line; logs, screenshots and state go to `data/agente/` (gitignored).
+
+```bash
+env/bin/python pipeline_agente.py renderizar             # next album → Renderizando/
+env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/4K checks + screenshot
+env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, then deletes the album folder
+env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → next free hour or +2 years
+env/bin/python pipeline_agente.py estado                 # uploaded videos still waiting to be scheduled
+```
+
+Scheduling: one video per hour (24 per day); claimed videos go two years ahead.
+Claim detection reads YouTube Studio (`/video/<id>/copyright`); an unclear page
+returns `reclamo_desconocido` and the agent asks the user instead of guessing.
+
 ### Common commands
 
 ```bash
