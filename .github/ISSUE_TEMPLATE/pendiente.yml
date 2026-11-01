@@ -1,0 +1,34 @@
+name: Pendiente técnico
+description: Un error, riesgo o mejora para resolver más adelante.
+title: "[Pendiente]: "
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: Qué pasa
+      description: El problema o riesgo, y cuándo ocurre.
+    validations:
+      required: true
+  - type: input
+    id: ubicacion
+    attributes:
+      label: Dónde
+      description: Archivo y línea, por ejemplo `pipeline_agente.py:596`.
+    validations:
+      required: true
+  - type: textarea
+    id: propuesta
+    attributes:
+      label: Qué se propone
+    validations:
+      required: false
+  - type: dropdown
+    id: origen
+    attributes:
+      label: Origen
+      options:
+        - Revisión de un PR
+        - Uso diario del pipeline
+        - Otro
+    validations:
+      required: true
