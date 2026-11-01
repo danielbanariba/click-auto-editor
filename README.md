@@ -14,8 +14,8 @@
 ## Estructura del repo
 - `config.py`: rutas y parametros del pipeline.
 - `content/`: intro y overlays (incluye `0000000000000000.mp4` y `vhs_noise.mp4`).
-- `5. ffmpeg_render.py`: render principal.
-- `9. subir_video_API.py`: subida y programacion por API.
+- `2. ffmpeg_render.py`: render principal.
+- `3. subir_video_API.py`: subida y programacion por API.
 - `10. inpunar_video.py`: impugnaciones con Playwright.
 - `11. apelacion.py`: apelaciones con Playwright.
 - `12. mapear_playlists.py`: playlists por banda/genero.
@@ -36,7 +36,7 @@
    - Si falta portada, el render intenta extraerla de los metadatos.
    - Scripts de apoyo en `limpieza/` ayudan a normalizar nombres y remover basura.
 
-2. Renderizado (`5. ffmpeg_render.py`)
+2. Renderizado (`2. ffmpeg_render.py`)
    - Copia opcional a SSD (`USE_SSD_TEMP`) para evitar bottleneck de I/O.
    - Crea la sombra de la portada (`effects/sombra.py`) y calcula colores para overlays.
    - Genera tracklist overlay (opcional) usando DeathGrind API o nombres de archivos.
@@ -46,7 +46,7 @@
      - Fallback: FFmpeg (NVENC si hay GPU, libx264 si no hay NVENC).
    - Resultado: `Banda - Album.mp4` y la carpeta se mueve a `DIR_UPLOAD`.
 
-3. Subida a YouTube (`9. subir_video_API.py`)
+3. Subida a YouTube (`3. subir_video_API.py`)
    - Usa YouTube Data API (OAuth) y sube desde `DIR_UPLOAD`.
    - Arma titulo y descripcion (generos, year, tracklist, links).
    - Enriquecimiento opcional con DeathGrind API y `generos_activos.txt`.
@@ -74,13 +74,13 @@ cmake --build cpp/build
 
 ## Comandos rapidos
 ```sh
-python "5. ffmpeg_render.py"                  # render paralelo (default)
-python "5. ffmpeg_render.py" --test           # prueba con 1 video
-python "5. ffmpeg_render.py" --parallel       # paralelo explicito
+python "2. ffmpeg_render.py"                  # render paralelo (default)
+python "2. ffmpeg_render.py" --test           # prueba con 1 video
+python "2. ffmpeg_render.py" --parallel       # paralelo explicito
 
-python "9. subir_video_API.py" --limite 1
-python "9. subir_video_API.py" --todo --cantidad-lote 24 --gap-horas 1
-python "9. subir_video_API.py" --modo-inmediato --limite 1
+python "3. subir_video_API.py" --limite 1
+python "3. subir_video_API.py" --todo --cantidad-lote 24 --gap-horas 1
+python "3. subir_video_API.py" --modo-inmediato --limite 1
 
 python "13. filtrar_portadas.py" --politica cadaver-real --backend ollama --limite 20 --dry-run
 python "13. filtrar_portadas.py" --politica nsfw --auto-descargar --umbral 0.35

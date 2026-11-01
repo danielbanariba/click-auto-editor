@@ -43,7 +43,7 @@ The old Windows/Adobe pipeline (steps 0-8) lives in `old/` as reference only.
 ```bash
 python "2. ffmpeg_render.py"                     # render all (parallel by default)
 python "2. ffmpeg_render.py" --test              # render 1 folder as smoke test
-python "2. ffmpeg_render.py" --folder "Band - Album"  # render specific folder
+python "2. ffmpeg_render.py" --test "/path/Band - Album"  # render one specific folder (moves it like a real run)
 
 python "3. subir_video_API.py" --limite 1        # upload 1 video
 python "3. subir_video_API.py" --todo --cantidad-lote 24 --gap-horas 1
@@ -72,7 +72,7 @@ For each album folder in `DIR_AUDIO_SCRIPTS`:
 4. Fetches track titles from DeathGrind API or falls back to filenames
 5. Runs profanity censorship (`limpieza/censura.py`)
 6. Renders via C++/CUDA binary (`cpp/build/vhs_render`) if `USE_CPP_VHS=True`, else FFmpeg
-7. Muxes audio and moves output to `DIR_UPLOAD`
+7. Muxes audio and moves the finished album folder to `DIR_RENDERIZANDO` (`Renderizando/`); `3. subir_video_API.py` reads `DIR_UPLOAD`
 
 ### Upload pipeline (`3. subir_video_API.py`, ~109 KB)
 
@@ -86,7 +86,7 @@ For each album folder in `DIR_AUDIO_SCRIPTS`:
 
 Multiple OAuth credential pairs in `credentials/`:
 - `client_secrets_{prefix}_{n}.json` / `token_{prefix}_{n}.json`
-- Prefixes: `upload` (2 sets), `playlists` (8 sets)
+- Prefixes: `upload` and `playlists`, several sets each
 - Auto-rotates on quota exhaustion via `authenticate_next(prefix)`
 
 ### Configuration (`config.py`)
@@ -128,7 +128,7 @@ Central config for all scripts. Key settings:
 
 - `mapear_playlists_checkpoint.txt`: tracks which videos have been mapped to playlists
 - `data/playlist_links_cache.json`: cached playlist IDs per band/genre
-- `bandas-subidas-al-canal.txt`: tracks uploaded video titles to prevent duplicates
+- `Ya subidos/` (under `BASE_DIR`): album folders moved there after a successful upload
 - `generos_activos.txt`: tab-separated list of active music genres with IDs
 
 ## Credentials and Secrets (never commit)
