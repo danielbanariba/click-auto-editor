@@ -66,15 +66,7 @@ P_SELECCIONAR = re.compile(
 )
 P_NOMBRE = re.compile(r"(nombre.*apellido|nombre completo|full name)", re.IGNORECASE)
 P_DIRECCION = re.compile(r"(direcci[oó]n postal|direcci[oó]n|postal address|address)", re.IGNORECASE)
-P_CORREO = re.compile(
-    r"(correo electr[oó]nic[oa]|direcci[oó]n de correo|email|e-mail|@|email address)",
-    re.IGNORECASE,
-)
 P_CIUDAD = re.compile(r"(ciudad|city|localidad)", re.IGNORECASE)
-P_PAIS = re.compile(
-    r"(pa[ií]s/?regi[oó]n|pa[ií]s\s*o\s*regi[oó]n|country/?region|pa[ií]s|country|territorio|naci[oó]n)",
-    re.IGNORECASE,
-)
 P_DEPARTAMENTO = re.compile(r"(departamento|estado|provincia|state|region)", re.IGNORECASE)
 P_CODIGO_POSTAL = re.compile(r"(c[oó]digo postal|postal code|zip)", re.IGNORECASE)
 P_MENSAJE = re.compile(r"(mensaje|motivo|explica|describe|statement|reason)", re.IGNORECASE)
@@ -930,32 +922,6 @@ def _click_next_apelable_take_action(page):
     return _scan_apelable_take_actions(page, do_click=True)
 
 
-def _count_take_action_buttons(page):
-    """Cuenta cuántos botones 'Tomar medidas' habilitados hay en la pagina /copyright.
-    Scrollea primero para asegurar lazy render completo."""
-    _scroll_copyright_page_to_bottom(page)
-    try:
-        return int(page.evaluate(
-            """
-            () => {
-              const all = Array.from(document.querySelectorAll(
-                'button, ytcp-button-shape, [role="button"], tp-yt-paper-button'
-              ));
-              return all.filter(el => {
-                const t = (el.innerText || el.textContent || '').trim().toLowerCase();
-                if (t !== 'tomar medidas' && t !== 'take action') return false;
-                const r = el.getBoundingClientRect();
-                if (r.width <= 0 || r.height <= 0) return false;
-                if (el.disabled === true) return false;
-                return true;
-              }).length;
-            }
-            """
-        ))
-    except Exception:
-        return 0
-
-
 def _force_trusted_checkboxes(page, max_passes=3, ignore_aria=True):
     """Marca checkboxes del dialog activo con page.mouse.click(x,y) en coordenadas reales.
     Es el unico approach trusted server-side para tp-yt-paper-checkbox / ytcp-checkbox.
@@ -1704,9 +1670,6 @@ P_NEXT_SECTION = re.compile(
     re.IGNORECASE,
 )
 P_VER_DETALLES_BTN = re.compile(r"^(ver detalles|see details)$", re.IGNORECASE)
-P_CERRAR_BTN = re.compile(r"(cerrar|close|descartar|dismiss)", re.IGNORECASE)
-
-
 def _parse_reclamantes_block(dialog_text):
     """Dado el inner_text del modal 'Detalles del contenido', extrae las lineas
     de la seccion 'Reclamantes' (incluye 'en nombre de X').

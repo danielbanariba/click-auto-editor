@@ -70,7 +70,6 @@ P_SELECCIONAR = re.compile(
     r"(seleccionar.*canci[oó]n|select.*song|ver detalles|see details|detalles de la reclamaci[oó]n|reclamaci[oó]n de derechos de autor|copyright claim)",
     re.IGNORECASE,
 )
-P_VER_DETALLES = re.compile(r"(ver detalles|see details|details)", re.IGNORECASE)
 P_LICENCIA = re.compile(r"(licencia|license|permiso|permission)", re.IGNORECASE)
 P_ACEPTAR_TERMINOS = re.compile(r"(acepto.*terminos|accept.*terms|agree.*terms|aceptar.*terminos)", re.IGNORECASE)
 P_INFO_LICENCIA = re.compile(
@@ -830,21 +829,6 @@ def get_claims_modal_root(page):
         return None
 
 
-def is_claims_list_active(page):
-    try:
-        root = get_active_root(page)
-        text = root.inner_text().strip().lower()
-    except Exception:
-        return False
-    if not text:
-        return False
-    if not P_CLAIMS_LIST_DIALOG.search(text):
-        return False
-    if "tomar medidas" in text or "take action" in text:
-        return True
-    return False
-
-
 def is_dispute_form_active(page):
     try:
         root = get_active_root(page)
@@ -1537,19 +1521,6 @@ def click_take_action_fallback(page, max_rounds=8, delay_s=0.6):
             pass
         time.sleep(delay_s)
     return False
-
-
-def wait_take_action_count_drop(page, previous_count, timeout_s=16.0):
-    if previous_count <= 0:
-        return True, count_take_action_buttons(page)
-    start = time.time()
-    latest = previous_count
-    while time.time() - start < timeout_s:
-        latest = count_take_action_buttons(page)
-        if latest < previous_count:
-            return True, latest
-        time.sleep(0.5)
-    return False, latest
 
 
 def wait_for_take_action_buttons(page, timeout_s=12.0):
@@ -2697,46 +2668,6 @@ def check_all_visible_checkboxes(root, page=None):
             pass
 
     return checked
-
-
-def count_unchecked_dialog_checkboxes(page):
-    try:
-        return int(
-            page.evaluate(
-                """
-                () => {
-                  const dialog =
-                    document.querySelector('tp-yt-paper-dialog#dialog, ytcp-dialog, [role="dialog"]') || document;
-                  const nodes = Array.from(
-                    dialog.querySelectorAll('input[type="checkbox"], tp-yt-paper-checkbox, ytcp-checkbox, [role="checkbox"]')
-                  );
-                  const isVisible = (node) => {
-                    if (!node || !node.getBoundingClientRect) return false;
-                    const rect = node.getBoundingClientRect();
-                    if (rect.width <= 0 || rect.height <= 0) return false;
-                    const style = window.getComputedStyle(node);
-                    return style.display !== 'none' && style.visibility !== 'hidden';
-                  };
-                  const isChecked = (node) => {
-                    const aria = String(node.getAttribute && node.getAttribute('aria-checked') || '').toLowerCase();
-                    if (aria === 'true') return true;
-                    if (node.checked === true) return true;
-                    if (node.hasAttribute && node.hasAttribute('checked')) return true;
-                    const input = node.querySelector && node.querySelector('input[type="checkbox"]');
-                    return !!(input && input.checked);
-                  };
-                  let unchecked = 0;
-                  for (const node of nodes) {
-                    if (!isVisible(node)) continue;
-                    if (!isChecked(node)) unchecked += 1;
-                  }
-                  return unchecked;
-                }
-                """
-            )
-        )
-    except Exception:
-        return 0
 
 
 def ensure_all_dialog_checkboxes_checked(page):

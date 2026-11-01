@@ -218,27 +218,6 @@ def is_playlist_not_found(exc):
     return False
 
 
-def is_video_not_found(exc):
-    if not isinstance(exc, HttpError):
-        return False
-    if getattr(exc, "resp", None) and exc.resp.status == 404:
-        try:
-            data = json.loads(exc.content.decode("utf-8"))
-            for err in data.get("error", {}).get("errors", []):
-                if err.get("reason") == "videoNotFound":
-                    return True
-        except Exception:
-            pass
-    try:
-        data = json.loads(exc.content.decode("utf-8"))
-        for err in data.get("error", {}).get("errors", []):
-            if err.get("reason") == "videoNotFound":
-                return True
-    except Exception:
-        pass
-    return False
-
-
 def is_rate_limit_error(exc):
     if not isinstance(exc, HttpError):
         return False
