@@ -18,3 +18,7 @@ content/vhs_noise.mp4
 .runtime_browser_profiles
 
 data/impugnar_evidencia/
+# Artefactos de compilación y salidas de prueba
+cpp/build/
+test_output.jpg
+.codex
