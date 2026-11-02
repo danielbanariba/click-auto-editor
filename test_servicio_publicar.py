@@ -216,6 +216,34 @@ class TestAprobacion(BaseServicio):
             [["subir", "--carpeta", carpeta], ["subir", "--carpeta", carpeta]],
         )
 
+    def test_album_subido_sin_poder_borrar_la_carpeta_no_se_vuelve_a_ofrecer(self):
+        _, mensaje = self.pedir_aprobacion()
+
+        self.telegram.apretar(mensaje, "✅ Subir")
+        self.servicio.paso()
+        self.lanzador.terminar(
+            "subir", {"ok": True, "video_id": "VID1", "titulo": "T", "carpeta_borrada": False}
+        )
+        self.servicio.paso()
+        self.servicio.paso()
+
+        self.assertEqual(len(self.lanzador.lanzados("verificar")), 1)
+        self.assertEqual(len([m for m in self.telegram.mensajes if m["botones"]]), 1)
+
+    def test_subida_que_registro_el_video_y_murio_no_pregunta_otra_vez(self):
+        _, mensaje = self.pedir_aprobacion()
+
+        self.telegram.apretar(mensaje, "✅ Subir")
+        self.servicio.paso()
+        pa.guardar_pendientes([{"video_id": "VID1", "titulo": "T", "album": "Banda - Disco"}])
+        self.lanzador.terminar("subir", {"ok": False, "motivo": "sin_respuesta"})
+        self.servicio.paso()
+        self.servicio.paso()
+
+        self.assertEqual(len([m for m in self.telegram.mensajes if m["botones"]]), 1)
+        self.assertEqual(self.lanzador.lanzados("verificar"), [self.lanzador.lanzados("verificar")[0]])
+        self.assertIn(["programar", "--video-id", "VID1", "--esperar"], self.lanzador.lanzados())
+
     def test_rechazar_no_sube_no_vuelve_a_preguntar_y_sigue(self):
         _, mensaje = self.pedir_aprobacion()
         self.album_en_cola("Banda - Siguiente")
@@ -331,6 +359,21 @@ class TestConexiones(unittest.TestCase):
             with self.assertRaises(sp.ErrorTelegram) as contexto:
                 telegram.actualizaciones(0, 1)
         self.assertNotIn("SECRETO", str(contexto.exception))
+
+    def test_foto_rechazada_por_telegram_manda_la_pregunta_igual(self):
+        foto = Path(tempfile.mkdtemp()) / "captura.jpg"
+        foto.write_bytes(b"no es una imagen")
+        self.addCleanup(shutil.rmtree, foto.parent)
+        rechazo = mock.Mock(json=lambda: {"ok": False, "description": "PHOTO_INVALID_DIMENSIONS"})
+        enviado = mock.Mock(json=lambda: {"ok": True, "result": {"message_id": 7}})
+        telegram = sp.Telegram("123:SECRETO", "42")
+
+        with mock.patch.object(sp.requests, "post", side_effect=[rechazo, enviado]) as post:
+            message_id = telegram.mandar("¿Lo subo?", botones=[("✅ Subir", "subir:q1")], foto=foto)
+
+        self.assertEqual(message_id, 7)
+        self.assertTrue(post.call_args.args[0].endswith("/sendMessage"))
+        self.assertIn("subir:q1", post.call_args.kwargs["data"]["reply_markup"])
 
     def test_proceso_devuelve_el_json_final_del_paso(self):
         proceso = sp.Proceso(["estado"])

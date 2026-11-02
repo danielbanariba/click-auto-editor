@@ -110,17 +110,19 @@ class Telegram:
                 "inline_keyboard": [[{"text": t, "callback_data": d} for t, d in botones]]
             }
         if foto and Path(foto).is_file():
-            with open(foto, "rb") as archivo:
-                mensaje = self.llamar(
-                    "sendPhoto",
-                    limite_s=120,
-                    archivos={"photo": archivo},
-                    caption=texto[:LIMITE_LEYENDA],
-                    **datos,
-                )
-        else:
-            mensaje = self.llamar("sendMessage", text=texto[:LIMITE_TEXTO], **datos)
-        return mensaje["message_id"]
+            try:
+                with open(foto, "rb") as archivo:
+                    return self.llamar(
+                        "sendPhoto",
+                        limite_s=120,
+                        archivos={"photo": archivo},
+                        caption=texto[:LIMITE_LEYENDA],
+                        **datos,
+                    )["message_id"]
+            except ErrorTelegram as exc:
+                # Una foto que Telegram rechaza no puede frenar la pregunta: va sin foto.
+                log.warning("No se pudo mandar la foto, va solo el texto: %s", exc)
+        return self.llamar("sendMessage", text=texto[:LIMITE_TEXTO], **datos)["message_id"]
 
     def quitar_botones(self, message_id):
         self.llamar(
@@ -182,7 +184,8 @@ class Servicio:
         self.lanzar = lanzar
         self.ruta_estado = Path(estado_json)
         self.reloj = reloj
-        self.estado = {"offset": 0, "preguntas": {}, "rechazados": []}
+        # rechazados y subidos: álbumes que siguen en Renderizando/ pero no se vuelven a ofrecer.
+        self.estado = {"offset": 0, "preguntas": {}, "rechazados": [], "subidos": []}
         self.tareas = []
         self.reintentos = []
         self.album_pausado_hasta = 0.0
@@ -248,9 +251,8 @@ class Servicio:
         # moviendo el mp4 a Renderizando/: se espera a que termine.
         if pa.render_en_curso():
             return
-        listos = [
-            c for c in pa.albumes_por_aprobar() if Path(c).name not in self.estado["rechazados"]
-        ]
+        descartados = set(self.estado["rechazados"]) | set(self.estado["subidos"])
+        listos = [c for c in pa.albumes_por_aprobar() if Path(c).name not in descartados]
         if listos:
             self.lanzar_paso("verificar", "--carpeta", listos[0])
         elif pa.listar_carpetas(pa.DIR_AUDIO_SCRIPTS):
@@ -267,11 +269,12 @@ class Servicio:
         motivo = resultado.get("motivo")
         if resultado.get("ok"):
             self.avisos.clear()
-            # Un render nuevo con el nombre de uno rechazado antes se vuelve a preguntar.
+            # Un render nuevo con el nombre de uno descartado antes se vuelve a preguntar.
             nombre = Path(resultado["carpeta"]).name
-            if nombre in self.estado["rechazados"]:
-                self.estado["rechazados"].remove(nombre)
-                self.guardar()
+            for lista in ("rechazados", "subidos"):
+                if nombre in self.estado[lista]:
+                    self.estado[lista].remove(nombre)
+            self.guardar()
             self.lanzar_paso("verificar", "--carpeta", resultado["carpeta"])
         elif motivo in ("sin_albumes", "render_en_curso"):
             return
@@ -312,6 +315,9 @@ class Servicio:
         carpeta = valor(argumentos, "--carpeta")
         album = Path(carpeta).name
         if resultado.get("ok"):
+            # Si la carpeta no se pudo borrar, el mp4 sigue ahí: no se vuelve a ofrecer.
+            self.estado["subidos"].append(album)
+            self.guardar()
             texto = (
                 f"⏫ Subido como privado: {resultado['titulo']}\n"
                 "Espero que YouTube lo procese, reviso reclamos y te aviso la fecha."
@@ -322,6 +328,15 @@ class Servicio:
             self.lanzar_paso("programar", "--video-id", resultado["video_id"], "--esperar")
             return
         motivo = resultado.get("motivo")
+        # Pudo morir después de subir: si el video quedó registrado, no se pregunta otra vez.
+        subido = next((p for p in pa.leer_pendientes() if p.get("album") == album), None)
+        if subido:
+            self.estado["subidos"].append(album)
+            self.guardar()
+            self.avisar(f"⏫ {album} ya estaba subido ({subido['video_id']}); sigo con la fecha.")
+            if not any(valor(a, "--video-id") == subido["video_id"] for a, _ in self.tareas if a[0] == "programar"):
+                self.lanzar_paso("programar", "--video-id", subido["video_id"], "--esperar")
+            return
         explicacion = MOTIVOS_SUBIDA.get(motivo) or resultado.get("detalle") or motivo
         if not Path(carpeta).is_dir():
             self.avisar(f"❌ No pude subir {album}: {explicacion}. La carpeta ya no existe.")
