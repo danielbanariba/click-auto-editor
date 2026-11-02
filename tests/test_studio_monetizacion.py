@@ -24,7 +24,8 @@ DEMORA_GUARDADO_MS = 1500  # lo que tarda el "servidor" en guardar tras pulsar G
 PAGINA = """<!doctype html><html><body>
 <h1>Formas de obtener ingresos</h1>
 <button id="guardar" disabled>Guardar</button>
-<div id="estado">__ESTADO__</div>
+<div class="otra-seccion">__RUIDO__</div>
+<ytcp-video-monetization><div id="estado">__ESTADO__</div></ytcp-video-monetization>
 <button id="editar" aria-label="Editar el estado de monetización del vídeo">v</button>
 <div id="popup" hidden>
   <label><input type="radio" name="m" value="on"> Activada</label>
@@ -91,6 +92,7 @@ class StudioFalso:
         pagina=None,
         calificacion="Adecuado para anuncios",
         con_checkbox=True,
+        ruido="",
     ):
         self.estado = estado
         self.cuestionario = cuestionario
@@ -98,6 +100,7 @@ class StudioFalso:
         self.pagina = pagina
         self.calificacion = calificacion
         self.con_checkbox = con_checkbox
+        self.ruido = ruido  # texto suelto de otra sección de la página (no es el control)
         self.guardados = 0
         self.enviados = []  # lo que se mandó con "Enviar" (irreversible en Studio)
         self.cancelados = 0
@@ -129,6 +132,7 @@ class StudioFalso:
             PAGINA.replace("__ESTADO__", self.estado)
             .replace("__CUESTIONARIO__", json.dumps(self.cuestionario))
             .replace("__CHECKBOX__", checkbox)
+            .replace("__RUIDO__", self.ruido)
             .replace("__CALIFICACION__", self.calificacion)
             .replace("__DEMORA_GUARDADO_MS__", str(DEMORA_GUARDADO_MS))
         )
@@ -199,6 +203,18 @@ class TestActivarMonetizacion(unittest.TestCase):
         self.assertEqual(resultado["estado"], "fallo", resultado)
         self.assertEqual(resultado["motivo"], "cuestionario_ya_enviado")
         self.assertEqual(len(studio.enviados), 1)
+
+    def test_el_estado_se_lee_del_control_y_no_de_otra_linea_suelta_de_la_pagina(self):
+        # Otra sección con una línea "Activada" no puede hacer creer que los anuncios ya están.
+        studio = StudioFalso(ruido="Activada")
+        resultado = self.activar(studio)
+        self.assertEqual(resultado["estado"], "activada", resultado)
+        self.assertEqual(studio.guardados, 1)
+
+    def test_tras_recargar_una_linea_suelta_no_confirma_un_guardado_que_no_ocurrio(self):
+        studio = StudioFalso(guarda=False, ruido="Activada")
+        resultado = self.activar(studio)
+        self.assertEqual(resultado["motivo"], "no_se_guardo", resultado)
 
     def test_guardar_sin_que_studio_lo_guarde_se_reporta_como_fallo(self):
         # El botón se apaga igual: solo recargar muestra si quedó guardado.

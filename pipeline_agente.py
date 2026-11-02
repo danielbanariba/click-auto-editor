@@ -106,6 +106,11 @@ P_SIN_PROBLEMAS = re.compile(
     r"no claims found)",
     re.IGNORECASE,
 )
+# Texto de un reclamo encontrado. La página sin reclamos dice "No se ha encontrado contenido
+# protegido por derechos de autor en tu vídeo": por eso el "no" delante lo descarta.
+P_CON_RECLAMO = re.compile(
+    r"(?<!no )se ha encontrado contenido protegido por derechos de autor", re.IGNORECASE
+)
 ESPERA_RESULTADO_RECLAMOS_S = 20
 
 
@@ -374,7 +379,10 @@ def clasificar_reclamo(botones_detalle, texto_pagina, en_pagina_copyright):
         return "desconocido"
     if botones_detalle > 0:
         return "con_reclamo"
-    if P_SIN_PROBLEMAS.search(texto_pagina or ""):
+    # Sin reclamo solo si no hay nada que lo contradiga: publicar un video con reclamo
+    # pierde ingresos y no se deshace.
+    texto = texto_pagina or ""
+    if P_SIN_PROBLEMAS.search(texto) and not P_CON_RECLAMO.search(texto):
         return "sin_reclamo"
     return "desconocido"
 
@@ -907,6 +915,8 @@ class NavegadorNoDisponible(RuntimeError):
 
 
 def version_del_navegador(ejecutable):
+    if not ejecutable:  # Playwright usa su propio Chromium: no hay ejecutable que consultar
+        return VERSION_STUDIO_POR_DEFECTO
     try:
         salida = subprocess.run(
             [ejecutable, "--version"], capture_output=True, text=True, timeout=10, check=False
@@ -1022,13 +1032,26 @@ def pagina_de_studio():
     """Entrega una página del navegador con la sesión de Studio y lo cierra al salir.
 
     Lanza NavegadorNoDisponible (con el motivo) si no hay perfil o no abre el navegador.
+    Un error al cerrar no se propaga: el trabajo ya está hecho y descartaría su resultado.
     """
     from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
 
+    def cerrar(que, cerrar_algo):
+        try:
+            cerrar_algo()
+        except PlaywrightError as exc:
+            print(f"No se pudo cerrar {que}: {exc}")
+
     user_data_dir, ejecutable, perfil = preparar_perfil_studio()
     headless = os.environ.get("AGENTE_STUDIO_HEADLESS", "1") != "0"
-    with sync_playwright() as playwright:
+    driver = contextlib.ExitStack()
+    try:
+        playwright = driver.enter_context(sync_playwright())
+    except (PlaywrightError, OSError) as exc:
+        print(f"No arrancó el driver de Playwright: {exc}")
+        raise NavegadorNoDisponible("error_navegador") from exc
+    try:
         try:
             contexto = abrir_contexto_studio(playwright, user_data_dir, headless, ejecutable, perfil)
         except PlaywrightError as exc:
@@ -1037,7 +1060,9 @@ def pagina_de_studio():
         try:
             yield contexto.pages[0] if contexto.pages else contexto.new_page()
         finally:
-            contexto.close()
+            cerrar("el navegador", contexto.close)
+    finally:
+        cerrar("el driver de Playwright", driver.close)
 
 
 def revisar_reclamo_en_studio(video_id):
@@ -1084,6 +1109,27 @@ def activar_monetizacion_en_studio(video_id):
             return studio_monetizacion.activar_monetizacion(pagina, video_id, captura)
     except NavegadorNoDisponible as exc:
         return {"estado": "fallo", "motivo": exc.motivo}
+
+
+def errores_del_paso_de_studio():
+    """Errores que el paso de Studio puede lanzar sin que sea un fallo de programación."""
+    errores = [NavegadorNoDisponible, ImportError, OSError, subprocess.SubprocessError]
+    try:
+        from playwright.sync_api import Error as PlaywrightError
+    except ImportError:
+        return tuple(errores)
+    return tuple(errores + [PlaywrightError])
+
+
+def activar_sin_frenar(activar, video_id):
+    """La monetización nunca frena la publicación: un error del paso es un fallo más."""
+    try:
+        return activar(video_id)
+    except errores_del_paso_de_studio() as exc:
+        detalle = f"{type(exc).__name__}: {exc}"[:200]
+        print(f"Falló el paso de monetización: {detalle}")
+        motivo = exc.motivo if isinstance(exc, NavegadorNoDisponible) else "error_navegador"
+        return {"estado": "fallo", "motivo": motivo, "detalle": detalle}
 
 
 def publicados_recientes(uploader, cliente, desde):
@@ -1216,16 +1262,18 @@ def programar(
                 else:
                     con_reclamo = reclamo
 
+                # Con reclamo el video no genera ingresos: no se intenta activar nada.
+                if con_reclamo:
+                    monetizacion = {"estado": "omitida", "motivo": "con_reclamo"}
+                else:
+                    monetizacion = activar_sin_frenar(activar, video_id)
+                # La fecha se elige DESPUÉS del paso de Studio, que tarda minutos: una fecha
+                # calculada antes podría estar ya en el pasado al enviarla.
                 ahora = datetime.now().astimezone().replace(microsecond=0)
                 publica_en = elegir_fecha(
                     ahora, con_reclamo, momentos_tomados(uploader, yt, ahora, con_reclamo)
                 )
                 publicado_ahora = publica_en == ahora and not con_reclamo
-                # Con reclamo el video no genera ingresos: no se intenta activar nada.
-                if con_reclamo:
-                    monetizacion = {"estado": "omitida", "motivo": "con_reclamo"}
-                else:
-                    monetizacion = activar(video_id)
                 if publicado_ahora:
                     nuevo_status = armar_status_publicado(status)
                 else:

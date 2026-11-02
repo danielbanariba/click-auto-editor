@@ -48,6 +48,12 @@ P_CALIFICACION = re.compile(
 P_ADECUADO_PARA_ANUNCIOS = re.compile(r"^\s*adecuado para anuncios\s*$", re.IGNORECASE)
 
 JS_TEXTO = "() => (document.body && document.body.innerText) || ''"
+# El estado se lee del control de monetización, no de cualquier línea de la página: otra
+# sección con un "Activada" suelto daría un falso "ya activa".
+JS_TEXTO_DEL_CONTROL = """() => {
+  const control = document.querySelector('ytcp-video-monetization');
+  return (control && control.innerText) || '';
+}"""
 
 
 def _fallo(motivo, captura, detalle=None):
@@ -69,8 +75,12 @@ def _esperar(condicion, timeout_s, intervalo_s=0.5):
         time.sleep(intervalo_s)
 
 
+def _texto_del_control(pagina):
+    return pagina.evaluate(JS_TEXTO_DEL_CONTROL)
+
+
 def _estado_en_pantalla(pagina):
-    texto = pagina.evaluate(JS_TEXTO)
+    texto = _texto_del_control(pagina)
     if P_ESTADO_ACTIVADA.search(texto):
         return "activada"
     if P_ESTADO_DESACTIVADA.search(texto):
@@ -97,8 +107,8 @@ def _esperar_a_que_studio_guarde(pagina):
     "Comprobando". Recargar antes de eso lo cancela y el video queda como estaba.
     """
     _esperar(lambda: not _boton_habilitado(pagina, P_GUARDAR), ESPERA_PASO_S)
-    if _esperar(lambda: P_COMPROBANDO.search(pagina.evaluate(JS_TEXTO)), ESPERA_PASO_S):
-        _esperar(lambda: not P_COMPROBANDO.search(pagina.evaluate(JS_TEXTO)), ESPERA_GUARDADO_S)
+    if _esperar(lambda: P_COMPROBANDO.search(_texto_del_control(pagina)), ESPERA_PASO_S):
+        _esperar(lambda: not P_COMPROBANDO.search(_texto_del_control(pagina)), ESPERA_GUARDADO_S)
 
 
 def _cuestionario_abierto(pagina):

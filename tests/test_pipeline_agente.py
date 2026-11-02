@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import httplib2
+import playwright.sync_api as playwright_api
 from google.auth.exceptions import RefreshError, TransportError
 from google.oauth2.credentials import Credentials
 from google_auth_httplib2 import AuthorizedHttp
@@ -129,7 +130,10 @@ class TestClasificarReclamo(unittest.TestCase):
 # Texto real de Studio (cuenta en español de España) con la sesión ya iniciada.
 PAGINA_SIN_RECLAMOS = (
     "Resumen de reclamaciones\n¿Qué ha ocurrido?\n"
-    "No se han encontrado reclamaciones en este vídeo\nNo afecta a la cobertura del vídeo"
+    "No se han encontrado reclamaciones en este vídeo\nNo afecta a la cobertura del vídeo\n"
+    "No afecta a los ingresos\nEste vídeo genera ingresos según tu configuración\n"
+    "Reclamación\nTipo\n"
+    "No se ha encontrado contenido protegido por derechos de autor en tu vídeo."
 )
 
 
@@ -142,6 +146,14 @@ class TestReclamoEnStudioActual(unittest.TestCase):
             self.assertTrue(pa.es_pagina_de_reclamos(url, "V1"), url)
         self.assertFalse(pa.es_pagina_de_reclamos("https://studio.youtube.com/video/V2/claims", "V1"))
         self.assertFalse(pa.es_pagina_de_reclamos("https://accounts.google.com/v3/signin", "V1"))
+
+
+class TestReclamoQueSeContradice(unittest.TestCase):
+    def test_texto_de_sin_reclamos_junto_a_texto_de_reclamo_no_cuenta_como_sin_reclamo(self):
+        # Un video con reclamo que se publica pierde ingresos y no se puede deshacer:
+        # ante textos que se contradicen se pregunta al usuario.
+        contradictoria = PAGINA_SIN_RECLAMOS + "\nSe ha encontrado contenido protegido por derechos de autor"
+        self.assertEqual(pa.clasificar_reclamo(0, contradictoria, True), "desconocido")
 
 
 def ffmpeg(*args):
@@ -577,6 +589,60 @@ class TestSesionDeStudio(unittest.TestCase):
         correr.assert_not_called()
 
 
+class ContextoFalso:
+    def __init__(self, cierra_mal=False):
+        self.cierra_mal = cierra_mal
+        self.pages = [SimpleNamespace(screenshot=lambda path: None)]
+
+    def close(self):
+        if self.cierra_mal:
+            raise playwright_api.Error("Target closed")
+
+
+class PlaywrightQueArranca:
+    def __enter__(self):
+        return SimpleNamespace()
+
+    def __exit__(self, *args):
+        return False
+
+
+class PlaywrightQueNoArranca:
+    def __enter__(self):
+        raise playwright_api.Error("el driver no arranca")
+
+    def __exit__(self, *args):
+        return False
+
+
+class TestActivarMonetizacionNuncaLanza(unittest.TestCase):
+    """`activar_monetizacion_en_studio` promete devolver siempre un diccionario."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def activar(self, playwright, contexto=None, paso=None):
+        paso = paso or (lambda pagina, video_id, captura: {"estado": "activada", "captura": None})
+        with mock.patch.object(pa, "DIR_CAPTURAS", self.tmp), \
+                mock.patch.object(pa, "preparar_perfil_studio", return_value=("/perfil", None, "Default")), \
+                mock.patch.object(playwright_api, "sync_playwright", return_value=playwright), \
+                mock.patch.object(pa, "abrir_contexto_studio", return_value=contexto or ContextoFalso()), \
+                mock.patch("studio_monetizacion.activar_monetizacion", paso):
+            return pa.activar_monetizacion_en_studio("V1")
+
+    def test_un_error_al_cerrar_el_navegador_no_descarta_el_resultado(self):
+        resultado = self.activar(PlaywrightQueArranca(), ContextoFalso(cierra_mal=True))
+        self.assertEqual(resultado["estado"], "activada")
+
+    def test_si_el_driver_de_playwright_no_arranca_devuelve_fallo(self):
+        resultado = self.activar(PlaywrightQueNoArranca())
+        self.assertEqual((resultado["estado"], resultado["motivo"]), ("fallo", "error_navegador"))
+
+    def test_sin_ejecutable_del_navegador_se_usa_la_version_por_defecto(self):
+        self.assertEqual(pa.version_del_navegador(None), pa.VERSION_STUDIO_POR_DEFECTO)
+
+
 class Llamada:
     def __init__(self, resultado):
         self.resultado = resultado
@@ -747,6 +813,51 @@ class TestProgramar(unittest.TestCase):
         self.assertEqual(resultado["monetizacion"], fallo)
         self.assertEqual(len(youtube.videos_falsos.actualizaciones), 1)
 
+
+    def test_un_fallo_inesperado_del_paso_de_studio_no_frena_la_publicacion(self):
+        errores = [
+            playwright_api.Error("Target closed"),
+            playwright_api.TimeoutError("Timeout 30000ms"),
+            OSError("sin espacio"),
+            ImportError("playwright"),
+            subprocess.SubprocessError("brave"),
+            pa.NavegadorNoDisponible("sin_perfil_de_navegador"),
+        ]
+        for error in errores:
+            with self.subTest(error=type(error).__name__):
+                youtube = YouTubeFalso(["succeeded"])
+
+                def activar(video_id, error=error):
+                    raise error
+
+                resultado = self.programar_con(youtube, False, activar)
+                self.assertTrue(resultado["ok"], resultado)
+                self.assertEqual(resultado["monetizacion"]["estado"], "fallo")
+                self.assertEqual(len(youtube.videos_falsos.actualizaciones), 1)
+
+    def test_la_fecha_se_elige_despues_del_paso_de_studio_que_tarda_minutos(self):
+        # El paso de Studio tarda: una fecha calculada antes puede quedar en el pasado al enviarla.
+        class RelojFalso(datetime):
+            adelanto = timedelta(0)
+
+            @classmethod
+            def now(cls, tz=None):
+                return super().now(tz) + cls.adelanto
+
+        def activar_lento(video_id):
+            RelojFalso.adelanto += timedelta(minutes=3)
+            return {"estado": "activada", "captura": None}
+
+        publicado = datetime.now().astimezone() - timedelta(minutes=59)
+        youtube = YouTubeFalso(["succeeded"], subidas=[("P1", "public", publicado)])
+        with mock.patch.object(pa, "datetime", RelojFalso):
+            resultado = self.programar_con(youtube, False, activar_lento)
+            ahora_al_enviar = RelojFalso.now().astimezone()
+        self.assertTrue(resultado["ok"], resultado)
+        status = youtube.videos_falsos.actualizaciones[0]["status"]
+        # Con el reloj al día, el publicado de hace 59 min ya cumplió su hora: se publica en el acto.
+        self.assertEqual(status["privacyStatus"], "public", status)
+        self.assertLessEqual(datetime.fromisoformat(resultado["publica_en"]), ahora_al_enviar)
 
     def programar_sin_reclamo(self, youtube, programados=()):
         resultado = pa.programar(
