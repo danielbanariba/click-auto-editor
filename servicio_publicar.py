@@ -267,7 +267,7 @@ class Servicio:
         listos = [c for c in pa.albumes_por_aprobar() if Path(c).name not in descartados]
         if listos:
             self.lanzar_paso("verificar", "--carpeta", listos[0])
-        elif pa.listar_carpetas(pa.DIR_AUDIO_SCRIPTS):
+        elif pa.siguiente_album() is not None:
             self.avisos.discard("sin_albumes")
             self.lanzar_paso("renderizar")
         else:

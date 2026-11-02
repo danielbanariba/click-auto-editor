@@ -95,7 +95,7 @@ class BaseServicio(unittest.TestCase):
         self.cola.mkdir()
         self.renderizando.mkdir()
         parches = [
-            mock.patch.object(pa, "DIR_AUDIO_SCRIPTS", self.cola),
+            mock.patch.object(pa, "DIRS_ORIGEN_RENDER", (self.cola,)),
             mock.patch.object(pa, "DIR_RENDERIZANDO", self.renderizando),
             mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "pendientes.json"),
             mock.patch.object(pa, "render_en_curso", return_value=False),
@@ -373,6 +373,13 @@ class TestReinicio(BaseServicio):
 
 
 class TestAvisos(BaseServicio):
+    def test_con_la_cola_vacia_renderiza_desde_album_o_ep(self):
+        album = self.tmp / "Album"
+        (album / "Banda - Disco (2020)").mkdir(parents=True)
+        with mock.patch.object(pa, "DIRS_ORIGEN_RENDER", (self.cola, album)):
+            self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [["renderizar"]])
+
     def test_sin_albumes_avisa_una_sola_vez(self):
         for _ in range(3):
             self.servicio.paso()

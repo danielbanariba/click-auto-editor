@@ -33,10 +33,10 @@ from googleapiclient.errors import HttpError
 
 from config import (
     AUDIO_FORMATS,
-    DIR_AUDIO_SCRIPTS,
     DIR_ERROR404,
     DIR_RENDERIZANDO,
     DIR_UPLOAD,
+    DIRS_ORIGEN_RENDER,
     INTRO_DURATION,
     MIN_FREE_SPACE_GB,
     PROJECT_ROOT,
@@ -114,9 +114,31 @@ def ruta_log(prefijo):
 
 
 def listar_carpetas(directorio):
-    if not directorio.exists():
+    if not directorio.is_dir():
         return []
-    return sorted(p.name for p in directorio.iterdir() if p.is_dir())
+    # os.scandir no hace un stat por carpeta: en el disco NTFS, iterdir() con
+    # is_dir() tardaba minutos con los miles de álbumes de Album/ y EP/.
+    with os.scandir(directorio) as entradas:
+        return sorted(entrada.name for entrada in entradas if entrada.is_dir())
+
+
+def ordenar_por_anio(nombres):
+    """Los más nuevos primero, según el año entre paréntesis; sin año, al final."""
+
+    def clave(nombre):
+        anio = re.search(r"\(((?:19|20)\d{2})\)", nombre)
+        return (0, -int(anio.group(1)), nombre.lower()) if anio else (1, 0, nombre.lower())
+
+    return sorted(nombres, key=clave)
+
+
+def siguiente_album():
+    """El próximo álbum para renderizar, recorriendo DIRS_ORIGEN_RENDER en orden."""
+    for origen in DIRS_ORIGEN_RENDER:
+        nombres = listar_carpetas(origen)
+        if nombres:
+            return origen / ordenar_por_anio(nombres)[0]
+    return None
 
 
 def slug(texto):
@@ -345,17 +367,21 @@ def renderizar(carpeta=None):
     if libre_gb < MIN_FREE_SPACE_GB:
         return {"ok": False, "motivo": "sin_espacio", "libre_gb": round(libre_gb, 1)}
 
-    origen_antes = listar_carpetas(DIR_AUDIO_SCRIPTS)
-    if not origen_antes:
-        return {"ok": False, "motivo": "sin_albumes"}
-    if carpeta and carpeta not in origen_antes:
-        return {"ok": False, "motivo": "album_no_encontrado", "album": carpeta}
+    if carpeta:
+        # Solo un álbum listado: "..", por ejemplo, haría mover la carpeta madre entera.
+        candidatas = [o / carpeta for o in DIRS_ORIGEN_RENDER if carpeta in listar_carpetas(o)]
+        if not candidatas:
+            return {"ok": False, "motivo": "album_no_encontrado", "album": carpeta}
+        origen = candidatas[0]
+    else:
+        origen = siguiente_album()
+        if origen is None:
+            return {"ok": False, "motivo": "sin_albumes"}
 
     renderizando_antes = set(listar_carpetas(DIR_RENDERIZANDO))
     error_antes = set(listar_carpetas(DIR_ERROR404))
-    comando = [sys.executable, "2. ffmpeg_render.py", "--test"]
-    if carpeta:
-        comando.append(str(DIR_AUDIO_SCRIPTS / carpeta))
+    # Siempre con la ruta: sin ella, el render solo mira 01_limpieza_de_impurezas.
+    comando = [sys.executable, "2. ffmpeg_render.py", "--test", str(origen)]
 
     log = ruta_log("render")
     with open(log, "w", encoding="utf-8") as salida:
@@ -364,9 +390,8 @@ def renderizar(carpeta=None):
             comando, cwd=PROJECT_ROOT, stdout=salida, stderr=subprocess.STDOUT, check=False
         )
 
-    origen_despues = listar_carpetas(DIR_AUDIO_SCRIPTS)
     nuevas = [c for c in listar_carpetas(DIR_RENDERIZANDO) if c not in renderizando_antes]
-    restantes = len(origen_despues)
+    restantes = sum(len(listar_carpetas(o)) for o in DIRS_ORIGEN_RENDER)
     for nombre in nuevas:
         destino = DIR_RENDERIZANDO / nombre
         video = uploader_real().encontrar_video(destino)
@@ -380,7 +405,7 @@ def renderizar(carpeta=None):
                 "log": str(log),
             }
 
-    album = carpeta or next(iter(set(origen_antes) - set(origen_despues)), None)
+    album = origen.name
     con_error = [c for c in listar_carpetas(DIR_ERROR404) if c not in error_antes]
     return {
         "ok": False,
@@ -977,7 +1002,7 @@ def parse_args(argv=None):
     sub = parser.add_subparsers(dest="comando", required=True)
 
     p = sub.add_parser("renderizar", help="Renderiza el próximo álbum (o uno puntual).")
-    p.add_argument("--carpeta", help="Nombre de la carpeta en 01_limpieza_de_impurezas.")
+    p.add_argument("--carpeta", help="Nombre de la carpeta en 01_limpieza_de_impurezas, Album/ o EP/.")
 
     p = sub.add_parser("verificar", help="Tests del video renderizado y captura.")
     p.add_argument("--carpeta", required=True, help="Carpeta devuelta por renderizar.")
