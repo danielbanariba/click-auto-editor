@@ -31,3 +31,7 @@ mapear_playlists_checkpoint.txt*
 mapear_playlists_state.json*
 mapear_playlists.lock
 data/playlist_links_cache.json
+
+# Configuración local del editor y del registro de skills
+.atl/
+.vscode/

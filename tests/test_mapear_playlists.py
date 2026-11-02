@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 
-MODULE_PATH = Path(__file__).resolve().parent / "12. mapear_playlists.py"
+MODULE_PATH = Path(__file__).resolve().parent.parent / "12. mapear_playlists.py"
 SPEC = importlib.util.spec_from_file_location("mapear_playlists", MODULE_PATH)
 mapear = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(mapear)

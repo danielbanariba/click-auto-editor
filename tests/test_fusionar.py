@@ -2,7 +2,7 @@ import importlib.util
 import unittest
 from pathlib import Path
 
-MODULE_PATH = Path(__file__).resolve().parent / "16. fusionar_playlists_duplicadas.py"
+MODULE_PATH = Path(__file__).resolve().parent.parent / "16. fusionar_playlists_duplicadas.py"
 SPEC = importlib.util.spec_from_file_location("fusionar", MODULE_PATH)
 fusionar = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(fusionar)

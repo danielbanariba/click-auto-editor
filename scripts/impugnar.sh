@@ -13,16 +13,16 @@
 #   - Monitor de memoria: pausa automáticamente si la RAM libre baja de 2GB.
 #
 # Uso:
-#   ./impugnar.sh                    # arma + auto-envía TODO en bucle
-#   ./impugnar.sh --max-tabs 5       # batches más chicos (menos RAM)
-#   ./impugnar.sh --probar-envio 1   # solo enviar 1 tab (debug)
-#   ./impugnar.sh --max 1            # solo procesar 1 video
+#   ./scripts/impugnar.sh                    # arma + auto-envía TODO en bucle
+#   ./scripts/impugnar.sh --max-tabs 5       # batches más chicos (menos RAM)
+#   ./scripts/impugnar.sh --probar-envio 1   # solo enviar 1 tab (debug)
+#   ./scripts/impugnar.sh --max 1            # solo procesar 1 video
 #
 # Cualquier flag extra que pases se inyecta al comando.
 
 set -euo pipefail
 
-cd "$(dirname "$(readlink -f "$0")")"
+cd "$(dirname "$(readlink -f "$0")")/.."
 
 PYTHON="./env/bin/python"
 SCRIPT="10. inpunar_video.py"
