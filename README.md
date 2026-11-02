@@ -27,7 +27,6 @@
 - `vhs_effect/`: libreria VHS en Python (tests/examples).
 - `analisis_canal/`: pipeline de analisis (ver `analisis_canal/README.md`).
 - `selectores/`: JSON de selectores/acciones para Playwright.
-- `Comentarios/`: templates de texto legacy.
 
 ## Flujo completo (de carpeta a YouTube)
 1. Preparacion de carpetas
@@ -134,6 +133,3 @@ python "12. mapear_playlists.py" --limite 200
 - YouTube: `client_secrets.json` (o `YOUTUBE_CLIENT_SECRETS`) + `token.json`.
 - DeathGrind: crear `.env` con `DEATHGRIND_EMAIL` y `DEATHGRIND_PASSWORD` para metadatos.
 - Paths/IO: ajustar `BASE_DIR`, `USE_FAST_BASE`, `FAST_BASE_DIR` en `config.py`.
-
-## Legacy
-Los pasos antiguos 0-4 y la subida por coordenadas viven en `old/` como referencia.

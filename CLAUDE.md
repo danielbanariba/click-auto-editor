@@ -36,8 +36,6 @@ Scripts are numbered but **not all are sequential**. The active pipeline is:
 13. filtrar_portadas.py     → NSFW cover art filter (ONNX model)
 ```
 
-The old Windows/Adobe pipeline (steps 0-8) lives in `old/` as reference only.
-
 ### Common commands
 
 ```bash
