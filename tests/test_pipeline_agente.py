@@ -95,6 +95,53 @@ def crear_album(carpeta, pista_s, video_s, audio="tono", tamanio="320x180"):
     return carpeta
 
 
+PNG_1X1 = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+    "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
+
+
+class TestEsperarMiniaturas(unittest.TestCase):
+    """Con Chromium real: YouTube pone la URL de cada miniatura después de mostrar los resultados."""
+
+    def capturar_con(self, html, timeout_ms):
+        try:
+            from playwright.sync_api import Error as PlaywrightError
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("sin Playwright")
+        with sync_playwright() as playwright:
+            try:
+                navegador = playwright.chromium.launch(headless=True)
+            except PlaywrightError as exc:
+                self.skipTest(f"sin Chromium: {exc}")
+            try:
+                pagina = navegador.new_page()
+                pagina.set_content(html)
+                listo = pa.esperar_miniaturas(pagina, timeout_ms=timeout_ms)
+                cargada = pagina.evaluate(
+                    "() => { const i = document.getElementById('m');"
+                    " return i.complete && i.naturalWidth > 0; }"
+                )
+            finally:
+                navegador.close()
+        return listo, cargada
+
+    def test_espera_a_que_cargue_una_miniatura_que_llega_tarde(self):
+        html = (
+            '<img id="m" style="width:240px;height:135px">'
+            f"<script>setTimeout(() => {{ document.getElementById('m').src = '{PNG_1X1}'; }}, 800);</script>"
+        )
+        listo, cargada = self.capturar_con(html, timeout_ms=5000)
+        self.assertTrue(listo)
+        self.assertTrue(cargada)
+
+    def test_si_una_miniatura_nunca_carga_sigue_sin_fallar(self):
+        listo, cargada = self.capturar_con('<img id="m" style="width:240px;height:135px">', timeout_ms=500)
+        self.assertFalse(listo)
+        self.assertFalse(cargada)
+
+
 @unittest.skipUnless(HAY_FFMPEG, "requiere ffmpeg y ffprobe")
 class TestVerificar(unittest.TestCase):
     def setUp(self):
