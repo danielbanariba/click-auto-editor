@@ -75,12 +75,35 @@ PROCESO_RENDER = "ffmpeg_render.py"
 ESPERA_RENDER_MAX_S = 6 * 3600
 ESCANEO_PROGRAMADOS = int(os.environ.get("AGENTE_ESCANEO_PROGRAMADOS", "500"))
 CAMPOS_STATUS_CONSERVADOS = ("embeddable", "license", "publicStatsViewable")
+# Playwright agrega estos dos flags a Chromium en Linux: con ellos Brave no usa el
+# llavero del sistema y no puede descifrar las cookies del perfil copiado, así que
+# Studio pide iniciar sesión.
+ARGS_QUE_ROMPEN_EL_LLAVERO = ("--password-store=basic", "--use-mock-keychain")
+VENTANA_STUDIO = {"width": 1400, "height": 1000}
+# En headless el navegador se anuncia como HeadlessChrome y Studio responde que no es
+# compatible: se anuncia como el Chrome normal de la misma versión.
+USER_AGENT_STUDIO = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/{version}.0.0.0 Safari/537.36"
+)
+VERSION_STUDIO_POR_DEFECTO = 141
+# Con ellas Brave elige el llavero del escritorio (KWallet) para descifrar las cookies.
+VARIABLES_DE_ESCRITORIO = (
+    "XDG_CURRENT_DESKTOP",
+    "DESKTOP_SESSION",
+    "KDE_FULL_SESSION",
+    "KDE_SESSION_VERSION",
+    "DBUS_SESSION_BUS_ADDRESS",
+)
 
 P_SIN_PROBLEMAS = re.compile(
     r"(no se encontraron problemas|no se encontr[oó] ning[uú]n problema|"
-    r"no hay problemas de derechos de autor|no copyright issues|no issues found)",
+    r"no se han encontrado reclamaciones|"
+    r"no hay problemas de derechos de autor|no copyright issues|no issues found|"
+    r"no claims found)",
     re.IGNORECASE,
 )
+ESPERA_RESULTADO_RECLAMOS_S = 20
 
 
 class SinCredenciales(RuntimeError):
@@ -853,15 +876,85 @@ def consultar_video(uploader, yt, video_id):
     return "procesando", status
 
 
-def revisar_reclamo_en_studio(video_id):
-    from playwright.sync_api import Error as PlaywrightError
-    from playwright.sync_api import sync_playwright
+class PerfilNoDisponible(RuntimeError):
+    """No hay perfil del navegador con la sesión de Studio; `motivo` va a la respuesta."""
 
+    def __init__(self, motivo):
+        super().__init__(motivo)
+        self.motivo = motivo
+
+
+def version_del_navegador(ejecutable):
+    try:
+        salida = subprocess.run(
+            [ejecutable, "--version"], capture_output=True, text=True, timeout=10, check=False
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return VERSION_STUDIO_POR_DEFECTO
+    coincidencia = re.search(r"(\d+)\.\d+\.\d+\.\d+", salida)
+    return int(coincidencia.group(1)) if coincidencia else VERSION_STUDIO_POR_DEFECTO
+
+
+def entorno_del_navegador():
+    """Entorno del navegador: si el servicio arrancó antes que el escritorio (linger al
+    prender el equipo) le faltan las variables del escritorio; se toman del gestor de
+    usuario de systemd, que Plasma completa al iniciar sesión."""
+    entorno = dict(os.environ)
+    if entorno.get("XDG_CURRENT_DESKTOP"):
+        return entorno
+    try:
+        salida = subprocess.run(
+            ["systemctl", "--user", "show-environment"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return entorno
+    for linea in salida.splitlines():
+        nombre, _, valor = linea.partition("=")
+        if nombre in VARIABLES_DE_ESCRITORIO and not entorno.get(nombre):
+            entorno[nombre] = valor
+    return entorno
+
+
+def abrir_contexto_studio(playwright, user_data_dir, headless, ejecutable, perfil):
+    """Lanza el navegador con el perfil copiado y la sesión de Google que trae."""
+    kwargs = dict(
+        user_data_dir=str(user_data_dir),
+        headless=headless,
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            f"--profile-directory={perfil}",
+        ],
+        ignore_default_args=list(ARGS_QUE_ROMPEN_EL_LLAVERO),
+        viewport=dict(VENTANA_STUDIO),
+        user_agent=USER_AGENT_STUDIO.format(version=version_del_navegador(ejecutable)),
+        env=entorno_del_navegador(),
+    )
+    if ejecutable:
+        kwargs["executable_path"] = ejecutable
+    return playwright.chromium.launch_persistent_context(**kwargs)
+
+
+@functools.lru_cache(maxsize=None)
+def apelacion_agente():
     apelacion = cargar_script("11. apelacion.py", "apelacion")
     # Copia propia del perfil para no pisar la de 11. apelacion.py si corre a la vez.
     apelacion.DEFAULT_RUNTIME_PROFILE_DIR = (
         PROJECT_ROOT / ".runtime_browser_profiles" / "agente"
     )
+    return apelacion
+
+
+@functools.lru_cache(maxsize=None)
+def preparar_perfil_studio():
+    """Copia el perfil del navegador con sesión (una vez por proceso).
+
+    Devuelve (carpeta del perfil copiado, ejecutable, nombre del perfil).
+    """
+    apelacion = apelacion_agente()
     args = SimpleNamespace(
         user_data_dir=None,
         usar_perfil_chrome=False,
@@ -873,33 +966,66 @@ def revisar_reclamo_en_studio(video_id):
         user_data_dir, _, fuente = apelacion.resolve_user_data_dir(args)
     except OSError as exc:
         print(f"No se pudo preparar el perfil del navegador: {exc}")
-        return {"estado": "desconocido", "motivo": "perfil_de_navegador"}
+        raise PerfilNoDisponible("perfil_de_navegador") from exc
     if user_data_dir is None:
-        return {"estado": "desconocido", "motivo": "sin_perfil_de_navegador"}
-    channel, ejecutable = apelacion.resolve_launch_config(args, fuente)
+        raise PerfilNoDisponible("sin_perfil_de_navegador")
+    _, ejecutable = apelacion.resolve_launch_config(args, fuente)
+    return user_data_dir, ejecutable, apelacion.profile_name_from_args(args)
+
+
+def esta_en_login_de_google(pagina):
+    return "accounts.google.com" in pagina.url
+
+
+def es_pagina_de_reclamos(url, video_id):
+    # Studio redirige /copyright a /claims.
+    return any(f"/video/{video_id}/{ruta}" in url for ruta in ("copyright", "claims"))
+
+
+def esperar_resultado_de_reclamos(pagina, ver_detalles, timeout_s=ESPERA_RESULTADO_RECLAMOS_S):
+    """La lista de reclamos llega después del resumen: espera botones o el texto de 'sin reclamos'."""
+    limite = time.monotonic() + timeout_s
+    while True:
+        texto = pagina.evaluate("() => (document.body && document.body.innerText) || ''")
+        botones = pagina.get_by_role("button", name=ver_detalles).count()
+        if botones > 0 or P_SIN_PROBLEMAS.search(texto):
+            return botones, texto
+        if time.monotonic() >= limite:
+            return botones, texto
+        time.sleep(1)
+
+
+def revisar_reclamo_en_studio(video_id):
+    from playwright.sync_api import Error as PlaywrightError
+    from playwright.sync_api import sync_playwright
+
+    try:
+        user_data_dir, ejecutable, perfil = preparar_perfil_studio()
+    except PerfilNoDisponible as exc:
+        return {"estado": "desconocido", "motivo": exc.motivo}
+    apelacion = apelacion_agente()
     headless = os.environ.get("AGENTE_STUDIO_HEADLESS", "1") != "0"
     captura = DIR_CAPTURAS / f"studio_{video_id}.png"
     captura.parent.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as playwright:
         try:
-            contexto = apelacion.launch_context(
-                playwright,
-                user_data_dir,
-                headless,
-                channel,
-                apelacion.profile_name_from_args(args),
-                ejecutable,
-            )
+            contexto = abrir_contexto_studio(playwright, user_data_dir, headless, ejecutable, perfil)
         except PlaywrightError as exc:
             print(f"No se pudo abrir el navegador: {exc}")
             return {"estado": "desconocido", "motivo": "error_navegador"}
         try:
             pagina = contexto.pages[0] if contexto.pages else contexto.new_page()
             reclamantes = apelacion.extract_claimants_from_video(pagina, video_id)
-            en_copyright = f"/video/{video_id}/copyright" in pagina.url
-            botones = pagina.get_by_role("button", name=apelacion.P_VER_DETALLES_BTN).count()
-            texto = pagina.evaluate("() => (document.body && document.body.innerText) || ''")
+            if esta_en_login_de_google(pagina):
+                pagina.screenshot(path=str(captura))
+                return {
+                    "estado": "desconocido",
+                    "motivo": "sin_sesion_en_studio",
+                    "captura_studio": str(captura),
+                }
+            en_pagina_de_reclamos = es_pagina_de_reclamos(pagina.url, video_id)
+            botones, texto = esperar_resultado_de_reclamos(pagina, apelacion.P_VER_DETALLES_BTN)
             pagina.screenshot(path=str(captura))
         except PlaywrightError as exc:
             print(f"Error revisando Studio: {exc}")
@@ -908,7 +1034,7 @@ def revisar_reclamo_en_studio(video_id):
             contexto.close()
 
     return {
-        "estado": clasificar_reclamo(botones, texto, en_copyright),
+        "estado": clasificar_reclamo(botones, texto, en_pagina_de_reclamos),
         "reclamantes": reclamantes,
         "captura_studio": str(captura),
     }

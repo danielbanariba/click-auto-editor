@@ -93,6 +93,24 @@ class TestClasificarReclamo(unittest.TestCase):
         )
 
 
+# Texto real de Studio (cuenta en español de España) con la sesión ya iniciada.
+PAGINA_SIN_RECLAMOS = (
+    "Resumen de reclamaciones\n¿Qué ha ocurrido?\n"
+    "No se han encontrado reclamaciones en este vídeo\nNo afecta a la cobertura del vídeo"
+)
+
+
+class TestReclamoEnStudioActual(unittest.TestCase):
+    def test_studio_actual_sin_reclamaciones_cuenta_como_sin_reclamo(self):
+        self.assertEqual(pa.clasificar_reclamo(0, PAGINA_SIN_RECLAMOS, True), "sin_reclamo")
+
+    def test_studio_redirige_copyright_a_claims_y_no_es_una_pagina_de_otro_video(self):
+        for url in ("https://studio.youtube.com/video/V1/copyright", "https://studio.youtube.com/video/V1/claims"):
+            self.assertTrue(pa.es_pagina_de_reclamos(url, "V1"), url)
+        self.assertFalse(pa.es_pagina_de_reclamos("https://studio.youtube.com/video/V2/claims", "V1"))
+        self.assertFalse(pa.es_pagina_de_reclamos("https://accounts.google.com/v3/signin", "V1"))
+
+
 def ffmpeg(*args):
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *args], check=True)
 
@@ -480,6 +498,50 @@ class TestSubir(unittest.TestCase):
         self.assertEqual(resultado["motivo"], "carpeta_fuera_de_raiz")
         self.assertEqual(self.subidas, [])
         self.assertTrue(afuera.exists())
+
+
+class PlaywrightFalso:
+    """Registra con qué argumentos se lanza el navegador, sin abrir ninguno."""
+
+    def __init__(self):
+        self.lanzamientos = []
+        self.chromium = SimpleNamespace(launch_persistent_context=self.lanzar)
+
+    def lanzar(self, **kwargs):
+        self.lanzamientos.append(kwargs)
+        return "contexto"
+
+
+class TestSesionDeStudio(unittest.TestCase):
+    def test_el_navegador_se_lanza_con_acceso_al_llavero_y_sin_firma_de_headless(self):
+        # Sin esto Brave no descifra las cookies copiadas y Studio pide iniciar sesión.
+        playwright = PlaywrightFalso()
+        contexto = pa.abrir_contexto_studio(playwright, Path("/perfil"), True, "/usr/bin/brave", "Default")
+        self.assertEqual(contexto, "contexto")
+        (lanzamiento,) = playwright.lanzamientos
+        self.assertIn("--password-store=basic", lanzamiento["ignore_default_args"])
+        self.assertIn("--use-mock-keychain", lanzamiento["ignore_default_args"])
+        self.assertNotIn("Headless", lanzamiento["user_agent"])
+        self.assertIn("--profile-directory=Default", lanzamiento["args"])
+        self.assertEqual(lanzamiento["executable_path"], "/usr/bin/brave")
+
+    def test_servicio_arrancado_antes_del_escritorio_toma_las_variables_del_gestor_de_usuario(self):
+        # Con linger el servicio puede arrancar sin XDG_CURRENT_DESKTOP; sin él Brave no elige
+        # el llavero de KDE y Studio vuelve a pedir iniciar sesión.
+        gestor = "XDG_CURRENT_DESKTOP=KDE\nKDE_SESSION_VERSION=6\nPATH=/otro\n"
+        with mock.patch.dict(pa.os.environ, {"PATH": "/usr/bin"}, clear=True), \
+                mock.patch.object(pa.subprocess, "run", return_value=SimpleNamespace(stdout=gestor)):
+            entorno = pa.entorno_del_navegador()
+        self.assertEqual(entorno["XDG_CURRENT_DESKTOP"], "KDE")
+        self.assertEqual(entorno["KDE_SESSION_VERSION"], "6")
+        self.assertEqual(entorno["PATH"], "/usr/bin")
+
+    def test_con_el_escritorio_ya_definido_no_se_consulta_al_gestor(self):
+        with mock.patch.dict(pa.os.environ, {"XDG_CURRENT_DESKTOP": "GNOME"}, clear=True), \
+                mock.patch.object(pa.subprocess, "run") as correr:
+            entorno = pa.entorno_del_navegador()
+        self.assertEqual(entorno["XDG_CURRENT_DESKTOP"], "GNOME")
+        correr.assert_not_called()
 
 
 class Llamada:
