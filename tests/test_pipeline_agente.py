@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import httplib2
+import playwright.sync_api as playwright_api
 from google.auth.exceptions import RefreshError, TransportError
 from google.oauth2.credentials import Credentials
 from google_auth_httplib2 import AuthorizedHttp
@@ -49,8 +50,41 @@ class TestHorarios(unittest.TestCase):
 
     def test_con_reclamo_se_programa_dos_anios_despues(self):
         ahora = momento("2026-11-01 13:20")
-        self.assertEqual(pa.elegir_fecha(ahora, True, set()), momento("2028-11-01 14:00"))
-        self.assertEqual(pa.elegir_fecha(ahora, False, set()), momento("2026-11-01 14:00"))
+        self.assertEqual(pa.elegir_fecha(ahora, True, []), momento("2028-11-01 14:00"))
+
+    def test_con_reclamo_sigue_saltando_las_horas_ya_programadas(self):
+        ahora = momento("2026-11-01 13:20")
+        tomadas = [momento("2028-11-01 14:00"), momento("2028-11-01 15:30")]
+        self.assertEqual(pa.elegir_fecha(ahora, True, tomadas), momento("2028-11-01 16:00"))
+
+    def test_sin_reclamo_y_sin_videos_cerca_se_publica_en_el_acto(self):
+        ahora = momento("2026-11-01 13:20")
+        self.assertEqual(pa.elegir_fecha(ahora, False, []), ahora)
+        # A una hora justa de otro video ya alcanza.
+        lejanos = [ahora - timedelta(hours=1), ahora + timedelta(hours=1)]
+        self.assertEqual(pa.elegir_fecha(ahora, False, lejanos), ahora)
+
+    def test_sin_reclamo_con_un_video_a_menos_de_una_hora_espera_hasta_cumplir_la_hora(self):
+        ahora = momento("2026-11-01 13:20")
+        publicado_hace_20_min = ahora - timedelta(minutes=20)
+        self.assertEqual(
+            pa.elegir_fecha(ahora, False, [publicado_hace_20_min]), momento("2026-11-01 14:00")
+        )
+        programado_en_30_min = ahora + timedelta(minutes=30)
+        self.assertEqual(
+            pa.elegir_fecha(ahora, False, [programado_en_30_min]), momento("2026-11-01 14:50")
+        )
+
+    def test_sin_reclamo_encadena_videos_que_se_solapan_hasta_dejar_una_hora_libre(self):
+        # Esperar a que pase el publicado deja el momento a menos de una hora del programado.
+        ahora = momento("2026-11-01 13:20")
+        tomados = [ahora - timedelta(minutes=10), ahora + timedelta(minutes=50)]
+        self.assertEqual(pa.elegir_fecha(ahora, False, tomados), momento("2026-11-01 15:10"))
+
+    def test_sin_reclamo_nunca_programa_con_menos_de_dos_minutos_de_anticipacion(self):
+        ahora = momento("2026-11-01 13:20")
+        casi_listo = ahora - timedelta(minutes=59, seconds=30)
+        self.assertEqual(pa.elegir_fecha(ahora, False, [casi_listo]), momento("2026-11-01 13:22"))
 
     def test_dos_anios_desde_29_de_febrero(self):
         self.assertEqual(
@@ -91,6 +125,35 @@ class TestClasificarReclamo(unittest.TestCase):
         self.assertEqual(
             pa.clasificar_reclamo(0, "No se encontraron problemas", True), "sin_reclamo"
         )
+
+
+# Texto real de Studio (cuenta en español de España) con la sesión ya iniciada.
+PAGINA_SIN_RECLAMOS = (
+    "Resumen de reclamaciones\n¿Qué ha ocurrido?\n"
+    "No se han encontrado reclamaciones en este vídeo\nNo afecta a la cobertura del vídeo\n"
+    "No afecta a los ingresos\nEste vídeo genera ingresos según tu configuración\n"
+    "Reclamación\nTipo\n"
+    "No se ha encontrado contenido protegido por derechos de autor en tu vídeo."
+)
+
+
+class TestReclamoEnStudioActual(unittest.TestCase):
+    def test_studio_actual_sin_reclamaciones_cuenta_como_sin_reclamo(self):
+        self.assertEqual(pa.clasificar_reclamo(0, PAGINA_SIN_RECLAMOS, True), "sin_reclamo")
+
+    def test_studio_redirige_copyright_a_claims_y_no_es_una_pagina_de_otro_video(self):
+        for url in ("https://studio.youtube.com/video/V1/copyright", "https://studio.youtube.com/video/V1/claims"):
+            self.assertTrue(pa.es_pagina_de_reclamos(url, "V1"), url)
+        self.assertFalse(pa.es_pagina_de_reclamos("https://studio.youtube.com/video/V2/claims", "V1"))
+        self.assertFalse(pa.es_pagina_de_reclamos("https://accounts.google.com/v3/signin", "V1"))
+
+
+class TestReclamoQueSeContradice(unittest.TestCase):
+    def test_texto_de_sin_reclamos_junto_a_texto_de_reclamo_no_cuenta_como_sin_reclamo(self):
+        # Un video con reclamo que se publica pierde ingresos y no se puede deshacer:
+        # ante textos que se contradicen se pregunta al usuario.
+        contradictoria = PAGINA_SIN_RECLAMOS + "\nSe ha encontrado contenido protegido por derechos de autor"
+        self.assertEqual(pa.clasificar_reclamo(0, contradictoria, True), "desconocido")
 
 
 def ffmpeg(*args):
@@ -482,6 +545,104 @@ class TestSubir(unittest.TestCase):
         self.assertTrue(afuera.exists())
 
 
+class PlaywrightFalso:
+    """Registra con qué argumentos se lanza el navegador, sin abrir ninguno."""
+
+    def __init__(self):
+        self.lanzamientos = []
+        self.chromium = SimpleNamespace(launch_persistent_context=self.lanzar)
+
+    def lanzar(self, **kwargs):
+        self.lanzamientos.append(kwargs)
+        return "contexto"
+
+
+class TestSesionDeStudio(unittest.TestCase):
+    def test_el_navegador_se_lanza_con_acceso_al_llavero_y_sin_firma_de_headless(self):
+        # Sin esto Brave no descifra las cookies copiadas y Studio pide iniciar sesión.
+        playwright = PlaywrightFalso()
+        contexto = pa.abrir_contexto_studio(playwright, Path("/perfil"), True, "/usr/bin/brave", "Default")
+        self.assertEqual(contexto, "contexto")
+        (lanzamiento,) = playwright.lanzamientos
+        self.assertIn("--password-store=basic", lanzamiento["ignore_default_args"])
+        self.assertIn("--use-mock-keychain", lanzamiento["ignore_default_args"])
+        self.assertNotIn("Headless", lanzamiento["user_agent"])
+        self.assertIn("--profile-directory=Default", lanzamiento["args"])
+        self.assertEqual(lanzamiento["executable_path"], "/usr/bin/brave")
+
+    def test_servicio_arrancado_antes_del_escritorio_toma_las_variables_del_gestor_de_usuario(self):
+        # Con linger el servicio puede arrancar sin XDG_CURRENT_DESKTOP; sin él Brave no elige
+        # el llavero de KDE y Studio vuelve a pedir iniciar sesión.
+        gestor = "XDG_CURRENT_DESKTOP=KDE\nKDE_SESSION_VERSION=6\nPATH=/otro\n"
+        with mock.patch.dict(pa.os.environ, {"PATH": "/usr/bin"}, clear=True), \
+                mock.patch.object(pa.subprocess, "run", return_value=SimpleNamespace(stdout=gestor)):
+            entorno = pa.entorno_del_navegador()
+        self.assertEqual(entorno["XDG_CURRENT_DESKTOP"], "KDE")
+        self.assertEqual(entorno["KDE_SESSION_VERSION"], "6")
+        self.assertEqual(entorno["PATH"], "/usr/bin")
+
+    def test_con_el_escritorio_ya_definido_no_se_consulta_al_gestor(self):
+        with mock.patch.dict(pa.os.environ, {"XDG_CURRENT_DESKTOP": "GNOME"}, clear=True), \
+                mock.patch.object(pa.subprocess, "run") as correr:
+            entorno = pa.entorno_del_navegador()
+        self.assertEqual(entorno["XDG_CURRENT_DESKTOP"], "GNOME")
+        correr.assert_not_called()
+
+
+class ContextoFalso:
+    def __init__(self, cierra_mal=False):
+        self.cierra_mal = cierra_mal
+        self.pages = [SimpleNamespace(screenshot=lambda path: None)]
+
+    def close(self):
+        if self.cierra_mal:
+            raise playwright_api.Error("Target closed")
+
+
+class PlaywrightQueArranca:
+    def __enter__(self):
+        return SimpleNamespace()
+
+    def __exit__(self, *args):
+        return False
+
+
+class PlaywrightQueNoArranca:
+    def __enter__(self):
+        raise playwright_api.Error("el driver no arranca")
+
+    def __exit__(self, *args):
+        return False
+
+
+class TestActivarMonetizacionNuncaLanza(unittest.TestCase):
+    """`activar_monetizacion_en_studio` promete devolver siempre un diccionario."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def activar(self, playwright, contexto=None, paso=None):
+        paso = paso or (lambda pagina, video_id, captura: {"estado": "activada", "captura": None})
+        with mock.patch.object(pa, "DIR_CAPTURAS", self.tmp), \
+                mock.patch.object(pa, "preparar_perfil_studio", return_value=("/perfil", None, "Default")), \
+                mock.patch.object(playwright_api, "sync_playwright", return_value=playwright), \
+                mock.patch.object(pa, "abrir_contexto_studio", return_value=contexto or ContextoFalso()), \
+                mock.patch("studio_monetizacion.activar_monetizacion", paso):
+            return pa.activar_monetizacion_en_studio("V1")
+
+    def test_un_error_al_cerrar_el_navegador_no_descarta_el_resultado(self):
+        resultado = self.activar(PlaywrightQueArranca(), ContextoFalso(cierra_mal=True))
+        self.assertEqual(resultado["estado"], "activada")
+
+    def test_si_el_driver_de_playwright_no_arranca_devuelve_fallo(self):
+        resultado = self.activar(PlaywrightQueNoArranca())
+        self.assertEqual((resultado["estado"], resultado["motivo"]), ("fallo", "error_navegador"))
+
+    def test_sin_ejecutable_del_navegador_se_usa_la_version_por_defecto(self):
+        self.assertEqual(pa.version_del_navegador(None), pa.VERSION_STUDIO_POR_DEFECTO)
+
+
 class Llamada:
     def __init__(self, resultado):
         self.resultado = resultado
@@ -491,12 +652,15 @@ class Llamada:
 
 
 class VideosFalsos:
-    def __init__(self, estados, demora_actualizacion):
+    def __init__(self, estados, demora_actualizacion, catalogo=None):
         self.estados = list(estados)
         self.demora_actualizacion = demora_actualizacion
+        self.catalogo = catalogo or {}
         self.actualizaciones = []
 
     def list(self, part, id):
+        if "snippet" in part:  # el escaneo de publicados recientes
+            return Llamada({"items": [self.catalogo[v] for v in id.split(",") if v in self.catalogo]})
         estado = self.estados.pop(0) if len(self.estados) > 1 else self.estados[0]
         status = {
             "privacyStatus": "private",
@@ -511,19 +675,41 @@ class VideosFalsos:
         return Llamada(body)
 
 
+class ListaDeSubidas:
+    def __init__(self, ids):
+        self.ids = ids
+
+    def list(self, part, playlistId, maxResults):
+        return Llamada({"items": [{"snippet": {"resourceId": {"videoId": v}}} for v in self.ids]})
+
+
 class YouTubeFalso:
-    def __init__(self, estados, demora_actualizacion=0.0):
-        self.videos_falsos = VideosFalsos(estados, demora_actualizacion)
+    def __init__(self, estados, demora_actualizacion=0.0, subidas=()):
+        """`subidas`: (id, privacidad, publishedAt) de la lista de subidas del canal."""
+        catalogo = {
+            vid: {"id": vid, "snippet": {"publishedAt": cuando.isoformat()}, "status": {"privacyStatus": privacidad}}
+            for vid, privacidad, cuando in subidas
+        }
+        self.videos_falsos = VideosFalsos(estados, demora_actualizacion, catalogo)
+        self.subidas = ListaDeSubidas([vid for vid, _, _ in subidas])
 
     def videos(self):
         return self.videos_falsos
 
+    def playlistItems(self):
+        return self.subidas
 
-def uploader_para_programar(youtube):
+
+def monetizacion_activada(video_id):
+    return {"estado": "activada", "captura": "/tmp/monetizacion.png"}
+
+
+def uploader_para_programar(youtube, programados=()):
     return SimpleNamespace(
         cargar_env=lambda: None,
         probar_credenciales_disponibles=lambda prefix: (youtube, [], [], []),
-        fetch_scheduled_publish_times=lambda cliente, max_items: (set(), {}),
+        get_uploads_playlist_id=lambda cliente: "UU1",
+        fetch_scheduled_publish_times=lambda cliente, max_items: (set(programados), {}),
         is_quota_error=lambda exc: False,
         is_invalid_grant_error=lambda exc: False,
         authenticate_next=lambda prefix: None,
@@ -556,13 +742,12 @@ class TestProgramar(unittest.TestCase):
                 "V1",
                 esperar=True,
                 revisar=lambda video_id: {"estado": "sin_reclamo", "reclamantes": []},
+                activar=monetizacion_activada,
                 uploader=uploader_para_programar(youtube),
             )
         self.assertTrue(resultado["ok"], resultado)
         self.assertGreaterEqual(max(esperas), 59 * 60)
-        status = youtube.videos_falsos.actualizaciones[0]["status"]
-        self.assertEqual(status["privacyStatus"], "private")
-        self.assertEqual(status["publishAt"], resultado["publica_en"])
+        self.assertEqual(len(youtube.videos_falsos.actualizaciones), 1)
         self.assertEqual(pa.leer_pendientes(), [])
 
     def test_dos_programar_a_la_vez_no_eligen_la_misma_hora(self):
@@ -572,7 +757,9 @@ class TestProgramar(unittest.TestCase):
         def correr(video_id):
             # La demora abre la ventana entre elegir la hora y registrarla.
             uploader = uploader_para_programar(YouTubeFalso(["succeeded"], demora_actualizacion=0.5))
-            resultados.put(pa.programar(video_id, reclamo=False, uploader=uploader)["publica_en"])
+            resultados.put(
+                pa.programar(video_id, reclamo=False, activar=monetizacion_activada, uploader=uploader)["publica_en"]
+            )
 
         procesos = [contexto.Process(target=correr, args=(v,)) for v in ("V1", "V2")]
         for proceso in procesos:
@@ -581,6 +768,157 @@ class TestProgramar(unittest.TestCase):
             proceso.join(timeout=30)
         horas = {resultados.get(timeout=5), resultados.get(timeout=5)}
         self.assertEqual(len(horas), 2, horas)
+
+
+    def programar_con(self, youtube, reclamo, activar):
+        return pa.programar(
+            "V1", reclamo=reclamo, activar=activar, uploader=uploader_para_programar(youtube)
+        )
+
+    def test_sin_reclamo_activa_la_monetizacion_antes_de_publicar_y_lo_informa(self):
+        youtube = YouTubeFalso(["succeeded"])
+        llamadas = []
+
+        def activar(video_id):
+            # Todavía no se tocó la privacidad del video.
+            llamadas.append((video_id, list(youtube.videos_falsos.actualizaciones)))
+            return {"estado": "activada", "captura": "/tmp/m.png"}
+
+        resultado = self.programar_con(youtube, False, activar)
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(llamadas, [("V1", [])])
+        self.assertEqual(resultado["monetizacion"]["estado"], "activada")
+        self.assertEqual(len(youtube.videos_falsos.actualizaciones), 1)
+
+    def test_con_reclamo_no_intenta_monetizar_y_sigue_dos_anios_adelante(self):
+        youtube = YouTubeFalso(["succeeded"])
+
+        def activar(video_id):
+            raise AssertionError("un video con reclamo no se monetiza")
+
+        antes = datetime.now().astimezone()
+        resultado = self.programar_con(youtube, True, activar)
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(resultado["monetizacion"]["estado"], "omitida")
+        publica_en = datetime.fromisoformat(resultado["publica_en"])
+        self.assertEqual(publica_en.year, antes.year + 2)
+        status = youtube.videos_falsos.actualizaciones[0]["status"]
+        self.assertEqual((status["privacyStatus"], status["publishAt"]), ("private", resultado["publica_en"]))
+
+    def test_si_la_monetizacion_falla_el_video_se_programa_igual_y_el_fallo_viaja_en_el_resultado(self):
+        youtube = YouTubeFalso(["succeeded"])
+        fallo = {"estado": "fallo", "motivo": "cuestionario_de_idoneidad", "captura": "/tmp/m.png"}
+        resultado = self.programar_con(youtube, False, lambda video_id: fallo)
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(resultado["monetizacion"], fallo)
+        self.assertEqual(len(youtube.videos_falsos.actualizaciones), 1)
+
+
+    def test_un_fallo_inesperado_del_paso_de_studio_no_frena_la_publicacion(self):
+        errores = [
+            playwright_api.Error("Target closed"),
+            playwright_api.TimeoutError("Timeout 30000ms"),
+            OSError("sin espacio"),
+            ImportError("playwright"),
+            subprocess.SubprocessError("brave"),
+            pa.NavegadorNoDisponible("sin_perfil_de_navegador"),
+        ]
+        for error in errores:
+            with self.subTest(error=type(error).__name__):
+                youtube = YouTubeFalso(["succeeded"])
+
+                def activar(video_id, error=error):
+                    raise error
+
+                resultado = self.programar_con(youtube, False, activar)
+                self.assertTrue(resultado["ok"], resultado)
+                self.assertEqual(resultado["monetizacion"]["estado"], "fallo")
+                self.assertEqual(len(youtube.videos_falsos.actualizaciones), 1)
+
+    def test_la_fecha_se_elige_despues_del_paso_de_studio_que_tarda_minutos(self):
+        # El paso de Studio tarda: una fecha calculada antes puede quedar en el pasado al enviarla.
+        class RelojFalso(datetime):
+            adelanto = timedelta(0)
+
+            @classmethod
+            def now(cls, tz=None):
+                return super().now(tz) + cls.adelanto
+
+        def activar_lento(video_id):
+            RelojFalso.adelanto += timedelta(minutes=3)
+            return {"estado": "activada", "captura": None}
+
+        publicado = datetime.now().astimezone() - timedelta(minutes=59)
+        youtube = YouTubeFalso(["succeeded"], subidas=[("P1", "public", publicado)])
+        with mock.patch.object(pa, "datetime", RelojFalso):
+            resultado = self.programar_con(youtube, False, activar_lento)
+            ahora_al_enviar = RelojFalso.now().astimezone()
+        self.assertTrue(resultado["ok"], resultado)
+        status = youtube.videos_falsos.actualizaciones[0]["status"]
+        # Con el reloj al día, el publicado de hace 59 min ya cumplió su hora: se publica en el acto.
+        self.assertEqual(status["privacyStatus"], "public", status)
+        self.assertLessEqual(datetime.fromisoformat(resultado["publica_en"]), ahora_al_enviar)
+
+    def programar_sin_reclamo(self, youtube, programados=()):
+        resultado = pa.programar(
+            "V1",
+            reclamo=False,
+            activar=monetizacion_activada,
+            uploader=uploader_para_programar(youtube, programados),
+        )
+        self.assertTrue(resultado["ok"], resultado)
+        return resultado, youtube.videos_falsos.actualizaciones[-1]["status"]
+
+    def test_sin_reclamo_ni_videos_cerca_se_publica_en_el_acto_sin_contarse_a_si_mismo(self):
+        ahora = datetime.now().astimezone()
+        subidas = [
+            ("V1", "private", ahora - timedelta(minutes=5)),  # el propio video, recién subido
+            ("P0", "public", ahora - timedelta(hours=3)),
+        ]
+        resultado, status = self.programar_sin_reclamo(YouTubeFalso(["succeeded"], subidas=subidas))
+        self.assertEqual(status["privacyStatus"], "public")
+        self.assertNotIn("publishAt", status)
+        self.assertTrue(resultado["publicado_ahora"])
+        self.assertIn("publicado ahora", resultado["resumen"])
+
+    def test_publicado_hace_20_minutos_el_video_espera_hasta_cumplir_la_hora(self):
+        publicado = (datetime.now().astimezone() - timedelta(minutes=20)).replace(microsecond=0)
+        youtube = YouTubeFalso(["succeeded"], subidas=[("P1", "public", publicado)])
+        resultado, status = self.programar_sin_reclamo(youtube)
+        self.assertEqual(status["privacyStatus"], "private")
+        self.assertEqual(status["publishAt"], (publicado + timedelta(hours=1)).isoformat())
+        self.assertFalse(resultado["publicado_ahora"])
+        self.assertIn("programado para", resultado["resumen"])
+
+    def test_un_video_programado_a_menos_de_una_hora_empuja_la_fecha(self):
+        programado = (datetime.now().astimezone() + timedelta(minutes=30)).replace(microsecond=0)
+        resultado, status = self.programar_sin_reclamo(YouTubeFalso(["succeeded"]), [programado])
+        self.assertEqual(status["publishAt"], (programado + timedelta(hours=1)).isoformat())
+
+    def test_un_publicado_viejo_o_un_privado_no_frenan_la_publicacion(self):
+        ahora = datetime.now().astimezone()
+        subidas = [
+            ("PRIV", "private", ahora - timedelta(minutes=10)),
+            ("VIEJO", "public", ahora - timedelta(minutes=61)),
+        ]
+        resultado, status = self.programar_sin_reclamo(YouTubeFalso(["succeeded"], subidas=subidas))
+        self.assertTrue(resultado["publicado_ahora"])
+
+    def test_el_segundo_video_espera_una_hora_al_primero_aunque_la_api_aun_no_lo_liste(self):
+        primero, _ = self.programar_sin_reclamo(YouTubeFalso(["succeeded"]))
+        segundo, status = self.programar_sin_reclamo(YouTubeFalso(["succeeded"]))
+        self.assertTrue(primero["publicado_ahora"])
+        publicado_el_primero = datetime.fromisoformat(primero["publica_en"])
+        self.assertEqual(
+            datetime.fromisoformat(status["publishAt"]), publicado_el_primero + timedelta(hours=1)
+        )
+
+    def test_el_resumen_dice_publicado_ahora_o_programado_para(self):
+        cuando = momento("2026-11-02 18:00")
+        ahora = pa.armar_resumen_programado("T", cuando, False, [], publicado_ahora=True)
+        self.assertEqual(ahora, "✓ T\nSin reclamos: publicado ahora.")
+        luego = pa.armar_resumen_programado("T", cuando, False, [], publicado_ahora=False)
+        self.assertEqual(luego, "✓ T\nSin reclamos: programado para 2026-11-02 18:00.")
 
 
 class ServidorKeepAliveQueMuere:
@@ -731,6 +1069,7 @@ class VideosConConexionMuerta(VideosFalsos):
 class YouTubeConConexionMuerta(YouTubeFalso):
     def __init__(self, estados):
         self.videos_falsos = VideosConConexionMuerta(estados)
+        self.subidas = ListaDeSubidas([])
         self.cierres = 0
 
     def close(self):
@@ -850,7 +1189,9 @@ class TestProgramarSinConexion(unittest.TestCase):
 
     def test_se_agotan_los_reintentos_y_programar_responde_sin_conexion(self):
         cliente = ClienteQueFalla([BrokenPipeError(32, "Broken pipe")] * 10)
-        resultado = pa.programar("V1", reclamo=False, uploader=uploader_para_programar(cliente))
+        resultado = pa.programar(
+            "V1", reclamo=False, activar=monetizacion_activada, uploader=uploader_para_programar(cliente)
+        )
         self.assertFalse(resultado["ok"])
         self.assertEqual(resultado["motivo"], "sin_conexion")
         self.assertEqual(resultado["video_id"], "V1")
@@ -860,7 +1201,13 @@ class TestProgramarSinConexion(unittest.TestCase):
     def test_conexion_muerta_tras_la_espera_no_aborta_la_programacion(self):
         # Caso real: la consulta tras la espera de 5 min usa una conexión keep-alive ya cerrada.
         youtube = YouTubeConConexionMuerta(["processing", "succeeded"])
-        resultado = pa.programar("V1", esperar=True, reclamo=False, uploader=uploader_para_programar(youtube))
+        resultado = pa.programar(
+            "V1",
+            esperar=True,
+            reclamo=False,
+            activar=monetizacion_activada,
+            uploader=uploader_para_programar(youtube),
+        )
         self.assertTrue(resultado["ok"], resultado)
         self.assertEqual(youtube.cierres, 2)
         self.assertEqual(len(youtube.videos_falsos.actualizaciones), 1)

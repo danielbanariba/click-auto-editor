@@ -317,6 +317,39 @@ class TestReclamos(BaseServicio):
 
         self.assertEqual(self.telegram.mensajes[-1]["texto"], "📅 T se publica el 02/11 10:00")
 
+    def terminar_programar_con(self, monetizacion):
+        self.servicio.lanzar_paso("programar", "--video-id", "VID1", "--esperar")
+        self.lanzador.terminar(
+            "programar",
+            {
+                "ok": True,
+                "video_id": "VID1",
+                "titulo": "Banda - Disco",
+                "resumen": "✓ Banda - Disco\nSin reclamos: programado para 2026-11-02 18:00.",
+                "monetizacion": monetizacion,
+            },
+        )
+        self.servicio.paso()
+        # El mismo paso puede avisar otras cosas (la cola de álbumes vacía).
+        return [m["texto"] for m in self.telegram.mensajes if "Banda - Disco" in m["texto"]]
+
+    def test_si_falla_la_monetizacion_avisa_con_el_link_de_studio_para_hacerlo_a_mano(self):
+        textos = self.terminar_programar_con(
+            {"estado": "fallo", "motivo": "cuestionario_ya_enviado", "captura": "/tmp/m.png"}
+        )
+        self.assertEqual(len(textos), 2, textos)
+        self.assertIn("Sin reclamos: programado", textos[0])
+        self.assertIn("Banda - Disco", textos[1])
+        # Es irreversible: el aviso tiene que decir que el cuestionario ya salió.
+        self.assertIn("ya envié el cuestionario", textos[1])
+        self.assertIn("https://studio.youtube.com/video/VID1/monetization", textos[1])
+
+    def test_monetizacion_activada_u_omitida_no_manda_aviso_aparte(self):
+        for monetizacion in ({"estado": "activada"}, {"estado": "ya_activa"}, {"estado": "omitida"}):
+            with self.subTest(monetizacion=monetizacion):
+                self.telegram.mensajes.clear()
+                self.assertEqual(len(self.terminar_programar_con(monetizacion)), 1)
+
     def test_reclamo_dudoso_pregunta_y_programa_con_la_respuesta(self):
         self.servicio.lanzar_paso("programar", "--video-id", "VID1", "--esperar")
         self.lanzador.terminar(
