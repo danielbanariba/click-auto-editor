@@ -20,6 +20,7 @@ Necesita en .env:
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -34,7 +35,11 @@ from config import PROJECT_ROOT
 
 ESTADO_JSON = pa.DIR_AGENTE / "servicio.json"
 ESPERA_TELEGRAM_S = 20
+# Tope de la espera creciente con Telegram caído: la espera frena todo el ciclo,
+# y las tareas terminadas se atienden recién al volver.
+PAUSA_TELEGRAM_MAX_S = 60
 REINTENTO_S = 30 * 60
+INTENTOS_PROGRAMAR = 3  # fallos seguidos de `programar` antes de preguntar
 LIMITE_LEYENDA = 1024
 LIMITE_TEXTO = 4096
 SIN_CONFIGURACION = 78  # EX_CONFIG: el unit de systemd no reinicia con este código
@@ -47,6 +52,7 @@ BOTONES = {
     ],
     "reclamo": [[("Sí, tiene reclamo", "si"), ("No tiene", "no")]],
     "reintentar": [[("🔁 Reintentar", "reintentar")]],
+    "reprogramar": [[("🔁 Reintentar", "reintentar")]],
 }
 AVISO_BOTON = {
     "subir": "Subiendo…",
@@ -57,8 +63,19 @@ AVISO_BOTON = {
     "reintentar": "Reintentando…",
 }
 # Mientras haya una de estas preguntas abiertas no se renderiza otro álbum.
+# "reprogramar" no frena: el video ya está subido y no depende del render.
 PREGUNTAS_QUE_FRENAN = ("subir", "reintentar")
 PASOS_DEL_ALBUM = ("renderizar", "verificar", "subir", "eliminar")
+# Tiempo máximo de cada paso. Los cortables son idempotentes; los demás mueven o
+# borran carpetas y cortarlos a medias dejaría un álbum a medio mover: solo se avisa.
+LIMITE_PASO_S = 30 * 60  # verificar, eliminar y cualquier paso que no esté abajo
+LIMITES_PASO_S = {
+    "renderizar": pa.ESPERA_RENDER_MAX_S,
+    "subir": 4 * 3600,
+    "programar": 8 * 3600,  # espera el procesado de YouTube y el margen del reclamo
+}
+PASOS_CORTABLES = ("verificar", "programar")
+GRACIA_CORTE_S = 10  # entre SIGTERM y SIGKILL
 MOTIVOS_SUBIDA = {
     "limite_canal": "YouTube no deja subir más videos por hoy",
     "sin_credenciales": "no hay credenciales con cuota",
@@ -66,6 +83,17 @@ MOTIVOS_SUBIDA = {
 }
 
 log = logging.getLogger("servicio_publicar")
+
+
+def limite_del_paso(paso):
+    return LIMITES_PASO_S.get(paso, LIMITE_PASO_S)
+
+
+def duracion_legible(segundos):
+    horas, minutos = divmod(int(segundos) // 60, 60)
+    if not horas:
+        return f"{minutos} min"
+    return f"{horas} h {minutos} min" if minutos else f"{horas} h"
 
 
 def acciones(tipo):
@@ -163,17 +191,32 @@ def ultimo_json(ruta):
 class Proceso:
     """Un paso de pipeline_agente.py corriendo aparte; su JSON final es el resultado."""
 
-    def __init__(self, argumentos):
+    def __init__(self, argumentos, comando=None):
         pa.DIR_LOGS.mkdir(parents=True, exist_ok=True)
         marca = f"{time.strftime('%Y%m%d-%H%M%S')}_{uuid.uuid4().hex[:6]}"
         self.salida = pa.DIR_LOGS / f"servicio_{argumentos[0]}_{marca}.out"
         with open(self.salida, "w", encoding="utf-8") as archivo:
             self.popen = subprocess.Popen(
-                [sys.executable, "pipeline_agente.py", *argumentos],
+                comando or [sys.executable, "pipeline_agente.py", *argumentos],
                 cwd=PROJECT_ROOT,
                 stdout=archivo,
                 stderr=subprocess.STDOUT,
+                start_new_session=True,  # grupo propio: cortarlo alcanza a Playwright y Chromium
             )
+
+    def cortar(self):
+        """Mata el paso y todo lo que lanzó: SIGTERM al grupo y, si sigue vivo, SIGKILL."""
+        grupo = self.popen.pid
+        try:
+            os.killpg(grupo, signal.SIGTERM)
+            self.popen.wait(timeout=GRACIA_CORTE_S)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            pass
+        try:
+            os.killpg(grupo, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        self.popen.wait()
 
     def resultado(self):
         if self.popen.poll() is None:
@@ -190,6 +233,14 @@ def valor(argumentos, opcion):
     return argumentos[list(argumentos).index(opcion) + 1]
 
 
+def carpetas_de_origen():
+    """Las carpetas de donde toma álbumes el servicio: «a/, b/ ni c/»."""
+    nombres = [f"{origen.name}/" for origen in pa.DIRS_ORIGEN_RENDER]
+    if len(nombres) == 1:
+        return nombres[0]
+    return f"{', '.join(nombres[:-1])} ni {nombres[-1]}"
+
+
 class Servicio:
     def __init__(self, telegram, lanzar, estado_json=ESTADO_JSON, reloj=time.monotonic):
         self.telegram = telegram
@@ -199,10 +250,15 @@ class Servicio:
         # rechazados y subidos: álbumes que siguen en Renderizando/ pero no se vuelven a ofrecer.
         self.estado = {"offset": 0, "preguntas": {}, "rechazados": [], "subidos": []}
         self.tareas = []
+        self.inicios = {}  # proceso -> momento en que se lanzó
+        self.largos_avisados = set()  # procesos que pasaron su límite y ya se avisó
         self.reintentos = []
+        self.fallos_programar = {}  # video_id -> fallos seguidos que llegaron al reintento genérico
         self.album_pausado_hasta = 0.0
         self.avisos = set()
         self.pausa_error_s = 5
+        self.fallos_telegram = 0  # fallos seguidos de getUpdates; 0 es que Telegram responde
+        self.telegram_caido_desde = None
 
     # -- estado -------------------------------------------------------------
 
@@ -234,17 +290,43 @@ class Servicio:
 
     def lanzar_paso(self, *argumentos):
         log.info("Lanzo: %s", " ".join(argumentos))
-        self.tareas.append((argumentos, self.lanzar(argumentos)))
+        proceso = self.lanzar(argumentos)
+        self.inicios[proceso] = self.reloj()
+        self.tareas.append((argumentos, proceso))
 
     def revisar_tareas(self):
         for tarea in list(self.tareas):
             argumentos, proceso = tarea
             resultado = proceso.resultado()
             if resultado is None:
+                resultado = self.vigilar_tiempo(argumentos, proceso)
+            if resultado is None:
                 continue
             self.tareas.remove(tarea)
+            self.inicios.pop(proceso, None)
+            self.largos_avisados.discard(proceso)
             log.info("Terminó %s: %s", argumentos[0], json.dumps(resultado, ensure_ascii=False)[:500])
             getattr(self, f"tras_{argumentos[0]}")(resultado, argumentos)
+
+    def vigilar_tiempo(self, argumentos, proceso):
+        """Un paso que pasó su límite se corta si es seguro; si no, se avisa una vez y se espera."""
+        paso = argumentos[0]
+        limite = limite_del_paso(paso)
+        corrido = self.reloj() - self.inicios[proceso]
+        if corrido <= limite:
+            return None
+        if paso in PASOS_CORTABLES:
+            log.warning("%s pasó los %s: lo corto", " ".join(argumentos), duracion_legible(limite))
+            proceso.cortar()
+            return {"ok": False, "motivo": "tiempo_agotado", "log": str(proceso.salida)}
+        if proceso not in self.largos_avisados:
+            self.largos_avisados.add(proceso)
+            self.avisar(
+                f"⏳ {' '.join(argumentos)} lleva {duracion_legible(corrido)} corriendo "
+                f"(el máximo es {duracion_legible(limite)}). No lo corto porque mueve o borra "
+                f"carpetas; sigo esperando.\nLog: {proceso.salida}"
+            )
+        return None
 
     def revisar_reintentos(self):
         ahora = self.reloj()
@@ -272,7 +354,8 @@ class Servicio:
             self.lanzar_paso("renderizar")
         else:
             self.avisar_una_vez(
-                "sin_albumes", "📭 No quedan álbumes en la cola. Sigo solo cuando aparezca uno."
+                "sin_albumes",
+                f"📭 No quedan álbumes en {carpetas_de_origen()}. Sigo solo cuando aparezca uno.",
             )
 
     # -- resultados de cada paso -------------------------------------------
@@ -298,7 +381,7 @@ class Servicio:
                 self.avisar(f"{texto}\n\nLo moví a Error404; sigo con el próximo.")
             else:
                 self.preguntar(
-                    "reintentar", f"{texto}\n\nSigue en la cola. Arreglalo y apretá Reintentar."
+                    "reintentar", f"{texto}\n\nSigue en su carpeta. Arreglalo y apretá Reintentar."
                 )
         else:
             detalle = resultado.get("detalle") or resultado.get("libre_gb") or ""
@@ -315,6 +398,14 @@ class Servicio:
             self.estado["rechazados"].append(album)
             self.guardar()
             self.avisar(f"⚠️ {album}: el render no dejó el mp4. Lo dejo de lado.")
+            return
+        if resultado.get("motivo") == "tiempo_agotado":
+            self.avisar(
+                f"⚠️ No pude verificar {album}: el paso pasó los "
+                f"{duracion_legible(limite_del_paso('verificar'))} y lo corté. "
+                f"Reintento en 30 min.\nLog: {resultado.get('log')}"
+            )
+            self.album_pausado_hasta = self.reloj() + REINTENTO_S
             return
         texto = resultado.get("resumen") or album
         if not resultado.get("ok"):
@@ -381,6 +472,7 @@ class Servicio:
         video_id = valor(argumentos, "--video-id")
         motivo = resultado.get("motivo")
         if resultado.get("ok"):
+            self.fallos_programar.pop(video_id, None)
             self.avisar(resultado["resumen"])
         elif motivo == "reclamo_desconocido":
             titulo = resultado.get("titulo") or video_id
@@ -397,8 +489,18 @@ class Servicio:
         elif motivo == "no_es_privado":
             self.avisar(f"⚠️ {video_id} ya no es privado: no lo programo.")
         else:
-            self.avisar(f"⚠️ No pude programar {video_id} ({motivo}). Reintento en 30 min.")
-            self.reintentos.append((self.reloj() + REINTENTO_S, argumentos))
+            fallos = self.fallos_programar.get(video_id, 0) + 1
+            self.fallos_programar[video_id] = fallos
+            if fallos < INTENTOS_PROGRAMAR:
+                self.avisar(f"⚠️ No pude programar {video_id} ({motivo}). Reintento en 30 min.")
+                self.reintentos.append((self.reloj() + REINTENTO_S, argumentos))
+            else:
+                self.preguntar(
+                    "reprogramar",
+                    f"⚠️ No pude programar {video_id} ({motivo}) después de {fallos} intentos.\n\n"
+                    "¿Reintento?",
+                    video_id=video_id,
+                )
 
     # -- Telegram -----------------------------------------------------------
 
@@ -441,7 +543,9 @@ class Servicio:
                     pregunta["texto"], botones=botones, foto=pregunta["foto"]
                 )
             except ERRORES_TELEGRAM as exc:
-                log.warning("No se pudo mandar la pregunta; reintento en el próximo ciclo: %s", exc)
+                # Con Telegram caído, atender_telegram ya avisó: no se repite cada ciclo.
+                if not self.fallos_telegram:
+                    log.warning("No se pudo mandar la pregunta; reintento en el próximo ciclo: %s", exc)
                 return
             self.guardar()
 
@@ -449,15 +553,36 @@ class Servicio:
         try:
             actualizaciones = self.telegram.actualizaciones(self.estado["offset"], ESPERA_TELEGRAM_S)
         except ERRORES_TELEGRAM as exc:
-            log.warning("Telegram no responde: %s", exc)
-            time.sleep(self.pausa_error_s)
+            self.fallo_telegram(exc)
+            # 5 s, 10 s, 20 s... hasta PAUSA_TELEGRAM_MAX_S; el exponente se acota para no crecer sin fin.
+            pausa = self.pausa_error_s * 2 ** min(self.fallos_telegram - 1, 10)
+            time.sleep(min(pausa, PAUSA_TELEGRAM_MAX_S))
             return
+        self.telegram_responde()
         for actualizacion in actualizaciones:
             # Se guarda antes de atender: un botón nunca se procesa dos veces.
             self.estado["offset"] = actualizacion["update_id"] + 1
             self.guardar()
             if "callback_query" in actualizacion:
                 self.atender_boton(actualizacion["callback_query"])
+
+    def fallo_telegram(self, exc):
+        """Avisa solo el primer fallo de una caída; los siguientes no llenan el log."""
+        if not self.fallos_telegram:
+            self.telegram_caido_desde = self.reloj()
+            log.warning("Telegram no responde; sigo intentando con esperas cada vez más largas: %s", exc)
+        self.fallos_telegram += 1
+
+    def telegram_responde(self):
+        if not self.fallos_telegram:
+            return
+        log.info(
+            "Telegram responde de nuevo (%d fallos seguidos, %d s sin respuesta)",
+            self.fallos_telegram,
+            self.reloj() - self.telegram_caido_desde,
+        )
+        self.fallos_telegram = 0
+        self.telegram_caido_desde = None
 
     def atender_boton(self, consulta):
         if str(consulta.get("from", {}).get("id")) != self.telegram.chat_id:
@@ -495,6 +620,10 @@ class Servicio:
 
     def respuesta_reclamo(self, accion, pregunta):
         self.lanzar_paso("programar", "--video-id", pregunta["video_id"], "--reclamo", accion)
+
+    def respuesta_reprogramar(self, accion, pregunta):
+        self.fallos_programar.pop(pregunta["video_id"], None)
+        self.lanzar_paso("programar", "--video-id", pregunta["video_id"], "--esperar")
 
     def respuesta_reintentar(self, accion, pregunta):
         """Sacar la pregunta alcanza: el próximo ciclo vuelve a renderizar."""
