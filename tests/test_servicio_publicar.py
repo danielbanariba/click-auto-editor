@@ -339,6 +339,116 @@ class TestReclamos(BaseServicio):
         )
 
 
+class TestProgramarFallido(BaseServicio):
+    ARGUMENTOS = ["programar", "--video-id", "VID1", "--esperar"]
+    REINTENTO = "⚠️ No pude programar VID1 (error_api). Reintento en 30 min."
+
+    def setUp(self):
+        super().setUp()
+        self.ahora = 0.0
+        self.servicio.reloj = lambda: self.ahora
+
+    def fallar(self):
+        """Lanza `programar` si no hay uno corriendo y lo termina con un motivo no previsto."""
+        if not any(p.salida is None for p in self.lanzador.procesos if p.argumentos[0] == "programar"):
+            self.servicio.lanzar_paso(*self.ARGUMENTOS)
+        self.lanzador.terminar("programar", {"ok": False, "motivo": "error_api", "video_id": "VID1"})
+        self.servicio.paso()
+
+    def esperar_reintento(self):
+        self.ahora += sp.REINTENTO_S
+        self.servicio.paso()
+
+    def textos(self):
+        return [m["texto"] for m in self.telegram.mensajes]
+
+    def preguntas(self):
+        return [m for m in self.telegram.mensajes if m["botones"]]
+
+    def fallar_tres_veces(self):
+        self.fallar()
+        self.esperar_reintento()
+        self.fallar()
+        self.esperar_reintento()
+        self.fallar()
+
+    def test_tercer_fallo_pregunta_en_vez_de_reintentar_otra_vez(self):
+        self.fallar()
+        self.assertEqual(self.textos().count(self.REINTENTO), 1)
+        self.assertEqual(len(self.lanzador.lanzados("programar")), 1)
+        self.esperar_reintento()
+        self.assertEqual(self.lanzador.lanzados("programar"), [self.ARGUMENTOS, self.ARGUMENTOS])
+        self.fallar()
+        self.assertEqual(self.textos().count(self.REINTENTO), 2)
+        self.esperar_reintento()
+        self.fallar()
+
+        # El tercer fallo ya no avisa "Reintento en 30 min": pregunta una sola vez.
+        self.assertEqual(self.textos().count(self.REINTENTO), 2)
+        pregunta = self.ultima_pregunta()
+        self.assertEqual(len(self.preguntas()), 1)
+        self.assertIn("VID1", pregunta["texto"])
+        self.assertIn("error_api", pregunta["texto"])
+        self.assertIn("3 intentos", pregunta["texto"])
+        self.assertIn("🔁 Reintentar", dict(pregunta["botones"]))
+        # Y no vuelve a lanzar `programar` por su cuenta, por mucho que pase el tiempo.
+        lanzados = len(self.lanzador.lanzados("programar"))
+        self.ahora += 10 * sp.REINTENTO_S
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("programar")), lanzados)
+
+    def test_boton_reintentar_relanza_programar_y_reinicia_la_cuenta(self):
+        self.fallar_tres_veces()
+        self.telegram.apretar(self.ultima_pregunta(), "🔁 Reintentar")
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("programar")[-1], self.ARGUMENTOS)
+        self.assertEqual(len(self.lanzador.lanzados("programar")), 4)
+        # La cuenta arrancó de cero: el próximo fallo es el primero, no vuelve a preguntar.
+        self.fallar()
+        self.assertEqual(self.textos().count(self.REINTENTO), 3)
+        self.assertEqual(len(self.preguntas()), 1)
+
+    def test_programar_exitoso_reinicia_la_cuenta(self):
+        self.fallar()
+        self.esperar_reintento()
+        self.fallar()
+        self.esperar_reintento()
+        self.lanzador.terminar("programar", {"ok": True, "video_id": "VID1", "resumen": "📅 T se publica"})
+        self.servicio.paso()
+
+        # Dos fallos más de un video que ya se programó una vez no suman al tercero.
+        self.fallar()
+        self.esperar_reintento()
+        self.fallar()
+
+        self.assertEqual(self.preguntas(), [])
+
+    def test_pregunta_abierta_no_frena_el_render_de_otros_albumes(self):
+        self.fallar_tres_veces()
+        self.assertEqual(len(self.preguntas()), 1)
+        self.album_en_cola("Banda - Disco")
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [["renderizar"]])
+
+    def test_reinicio_con_la_pregunta_abierta_no_relanza_programar(self):
+        pa.guardar_pendientes([{"video_id": "VID1", "titulo": "T"}])
+        self.fallar_tres_veces()
+        pregunta = self.ultima_pregunta()
+
+        self.lanzador = LanzadorFalso()
+        self.servicio = self.nuevo_servicio()
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("programar"), [])
+        self.assertEqual(len(self.preguntas()), 1)
+        # El botón del mensaje de antes del reinicio sigue valiendo.
+        self.telegram.apretar(pregunta, "🔁 Reintentar")
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("programar"), [self.ARGUMENTOS])
+
+
 class TestReinicio(BaseServicio):
     def test_reinicio_retoma_la_pregunta_y_los_videos_sin_programar(self):
         carpeta, mensaje = self.pedir_aprobacion()

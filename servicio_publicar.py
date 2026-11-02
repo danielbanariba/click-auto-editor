@@ -35,6 +35,7 @@ from config import PROJECT_ROOT
 ESTADO_JSON = pa.DIR_AGENTE / "servicio.json"
 ESPERA_TELEGRAM_S = 20
 REINTENTO_S = 30 * 60
+INTENTOS_PROGRAMAR = 3  # fallos seguidos de `programar` antes de preguntar
 LIMITE_LEYENDA = 1024
 LIMITE_TEXTO = 4096
 SIN_CONFIGURACION = 78  # EX_CONFIG: el unit de systemd no reinicia con este código
@@ -47,6 +48,7 @@ BOTONES = {
     ],
     "reclamo": [[("Sí, tiene reclamo", "si"), ("No tiene", "no")]],
     "reintentar": [[("🔁 Reintentar", "reintentar")]],
+    "reprogramar": [[("🔁 Reintentar", "reintentar")]],
 }
 AVISO_BOTON = {
     "subir": "Subiendo…",
@@ -57,6 +59,7 @@ AVISO_BOTON = {
     "reintentar": "Reintentando…",
 }
 # Mientras haya una de estas preguntas abiertas no se renderiza otro álbum.
+# "reprogramar" no frena: el video ya está subido y no depende del render.
 PREGUNTAS_QUE_FRENAN = ("subir", "reintentar")
 PASOS_DEL_ALBUM = ("renderizar", "verificar", "subir", "eliminar")
 MOTIVOS_SUBIDA = {
@@ -208,6 +211,7 @@ class Servicio:
         self.estado = {"offset": 0, "preguntas": {}, "rechazados": [], "subidos": []}
         self.tareas = []
         self.reintentos = []
+        self.fallos_programar = {}  # video_id -> fallos seguidos que llegaron al reintento genérico
         self.album_pausado_hasta = 0.0
         self.avisos = set()
         self.pausa_error_s = 5
@@ -390,6 +394,7 @@ class Servicio:
         video_id = valor(argumentos, "--video-id")
         motivo = resultado.get("motivo")
         if resultado.get("ok"):
+            self.fallos_programar.pop(video_id, None)
             self.avisar(resultado["resumen"])
         elif motivo == "reclamo_desconocido":
             titulo = resultado.get("titulo") or video_id
@@ -406,8 +411,18 @@ class Servicio:
         elif motivo == "no_es_privado":
             self.avisar(f"⚠️ {video_id} ya no es privado: no lo programo.")
         else:
-            self.avisar(f"⚠️ No pude programar {video_id} ({motivo}). Reintento en 30 min.")
-            self.reintentos.append((self.reloj() + REINTENTO_S, argumentos))
+            fallos = self.fallos_programar.get(video_id, 0) + 1
+            self.fallos_programar[video_id] = fallos
+            if fallos < INTENTOS_PROGRAMAR:
+                self.avisar(f"⚠️ No pude programar {video_id} ({motivo}). Reintento en 30 min.")
+                self.reintentos.append((self.reloj() + REINTENTO_S, argumentos))
+            else:
+                self.preguntar(
+                    "reprogramar",
+                    f"⚠️ No pude programar {video_id} ({motivo}) después de {fallos} intentos.\n\n"
+                    "¿Reintento?",
+                    video_id=video_id,
+                )
 
     # -- Telegram -----------------------------------------------------------
 
@@ -504,6 +519,10 @@ class Servicio:
 
     def respuesta_reclamo(self, accion, pregunta):
         self.lanzar_paso("programar", "--video-id", pregunta["video_id"], "--reclamo", accion)
+
+    def respuesta_reprogramar(self, accion, pregunta):
+        self.fallos_programar.pop(pregunta["video_id"], None)
+        self.lanzar_paso("programar", "--video-id", pregunta["video_id"], "--esperar")
 
     def respuesta_reintentar(self, accion, pregunta):
         """Sacar la pregunta alcanza: el próximo ciclo vuelve a renderizar."""
