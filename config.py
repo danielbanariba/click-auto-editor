@@ -71,7 +71,6 @@ DIR_METAL_TRACKER = BASE_DIR / "metal-tracker"
 
 PROJECT_ROOT = Path(__file__).parent
 INTRO_VIDEO = PROJECT_ROOT / "content" / "0000000000000000.mp4"
-BANDAS_SUBIDAS_TXT = PROJECT_ROOT / "bandas-subidas-al-canal.txt"
 PLAYWRIGHT_PROFILE_DIR = PROJECT_ROOT / ".playwright_profile"
 PLAYWRIGHT_SELECTORS_DIR = PROJECT_ROOT / "selectores"
 
@@ -170,8 +169,6 @@ DISABLE_CPP_ON_CUDA = False
 CUDA_FAIL_FAST = False
 
 # LEGACY: Mantener compatibilidad con scripts antiguos
-VIDEO_PRESET = VIDEO_PRESET_CPU
-
 # ============================================================================
 # CONFIGURACIÓN DE AUDIO
 # ============================================================================
@@ -180,8 +177,6 @@ VIDEO_PRESET = VIDEO_PRESET_CPU
 AUDIO_FORMATS = (".mp3", ".flac", ".wav", ".wma", ".m4a", ".MP3", ".Mp3")
 
 # Formatos de imagen soportados
-IMAGE_FORMATS = (".png", ".jpg", ".jpeg", ".jfif", ".gif", ".tiff", ".raw")
-
 # ============================================================================
 # FUNCIONES AUXILIARES
 # ============================================================================

@@ -73,9 +73,6 @@ METADATA_MAX_WAIT_MINUTES = int(
     os.environ.get("DEATHGRIND_METADATA_MAX_WAIT_MINUTES", "30")
 )
 
-DEFAULT_SCHEDULE_HOURS = [8, 12]
-DEFAULT_PLAYLIST_PRIVACY = os.environ.get("YOUTUBE_PLAYLIST_PRIVACY", "public")
-
 TIPOS_DISCO = {
     1: "Album",
     2: "EP",
@@ -120,25 +117,6 @@ FOLLOW_SERVICES = [
     "discogs",
     "vk",
 ]
-
-SERVICE_LABELS = {
-    "bandcamp": "Bandcamp",
-    "spotify": "Spotify",
-    "youtube_music": "YouTube Music",
-    "apple_music": "Apple Music",
-    "deezer": "Deezer",
-    "amazon": "Amazon Music",
-    "official_site": "Official Site",
-    "facebook": "Facebook",
-    "instagram": "Instagram",
-    "youtube": "YouTube",
-    "tiktok": "TikTok",
-    "twitter": "X/Twitter",
-    "metal_archives": "Metal Archives",
-    "spirit_of_metal": "Spirit of Metal",
-    "discogs": "Discogs",
-    "vk": "VK",
-}
 
 SERVICE_MATCHERS = {
     "bandcamp": ["bandcamp.com"],
@@ -2106,25 +2084,6 @@ def buscar_primer_dia_libre(fecha_inicial, counts_by_date, max_dias=365):
     return fecha_inicial
 
 
-def parse_schedule_hours():
-    raw = os.environ.get("YOUTUBE_SCHEDULE_HOURS")
-    if raw:
-        hours = []
-        for part in raw.split(","):
-            part = part.strip()
-            if not part:
-                continue
-            try:
-                hour = int(part)
-            except ValueError:
-                continue
-            if 0 <= hour <= 23:
-                hours.append(hour)
-        if hours:
-            return sorted(set(hours))
-    return DEFAULT_SCHEDULE_HOURS
-
-
 def get_uploads_playlist_id(youtube):
     response = youtube.channels().list(part="contentDetails", mine=True).execute()
     items = response.get("items", [])
@@ -2305,54 +2264,6 @@ def prompt_confirm_schedule_date(
             continue
 
         return candidato
-
-
-def build_daily_slot(date_value, hour, tz_local, taken_slots):
-    minute_choices = [0, 15, 30, 45]
-    for _ in range(60):
-        minute = random.choice(minute_choices)
-        candidate = datetime.combine(date_value, dtime(hour, minute), tzinfo=tz_local)
-        slot = normalize_slot(candidate)
-        if slot not in taken_slots:
-            return slot
-    for minute in minute_choices:
-        candidate = datetime.combine(date_value, dtime(hour, minute), tzinfo=tz_local)
-        slot = normalize_slot(candidate)
-        if slot not in taken_slots:
-            return slot
-    return normalize_slot(datetime.combine(date_value, dtime(hour, 0), tzinfo=tz_local))
-
-
-def find_next_publish_slot(start_dt, taken_slots, counts_by_date, hours):
-    tz_local = start_dt.tzinfo
-    min_start = start_dt + timedelta(minutes=5)
-    max_per_day = min(len(hours), 2)
-    current_date = start_dt.date()
-
-    while True:
-        if counts_by_date.get(current_date, 0) >= max_per_day:
-            current_date += timedelta(days=1)
-            continue
-
-        day_slots = []
-        for hour in hours:
-            day_slots.append(
-                build_daily_slot(current_date, hour, tz_local, taken_slots)
-            )
-        day_slots.sort()
-
-        for slot in day_slots:
-            if slot < min_start:
-                continue
-            if slot in taken_slots:
-                continue
-            if counts_by_date.get(current_date, 0) >= max_per_day:
-                break
-            taken_slots.add(slot)
-            counts_by_date[current_date] = counts_by_date.get(current_date, 0) + 1
-            return slot
-
-        current_date += timedelta(days=1)
 
 
 def clean_url(url):

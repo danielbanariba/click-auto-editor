@@ -19,3 +19,15 @@ content/vhs_noise.mp4
 
 data/impugnar_evidencia/
 data/agente/
+
+# Artefactos de compilación y salidas de prueba
+cpp/build/
+test_output.jpg
+.codex
+_restaurar_generos_*.txt
+
+# Estado de "12. mapear_playlists.py" (lo reescribe el timer cada 30 min)
+mapear_playlists_checkpoint.txt*
+mapear_playlists_state.json*
+mapear_playlists.lock
+data/playlist_links_cache.json

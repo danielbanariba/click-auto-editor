@@ -132,10 +132,6 @@ def google_cookie_count(user_data_dir, profile_name="Default"):
         conn.close()
 
 
-def has_google_session(user_data_dir, profile_name="Default", min_count=MIN_GOOGLE_COOKIE_COUNT):
-    return google_cookie_count(user_data_dir, profile_name=profile_name) >= min_count
-
-
 def discover_signed_in_profile(profile_name="Default"):
     best = None
     for candidate in KNOWN_BROWSER_PROFILES:

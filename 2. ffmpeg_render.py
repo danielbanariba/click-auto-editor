@@ -82,8 +82,6 @@ from config import (
 
 # Rutas principales
 MAIN_DIR = DIR_AUDIO_SCRIPTS
-OUTPUT_DIR = DIR_AUDIO_SCRIPTS
-
 # Sombra de portada
 SHADOW_OPACITY = 255
 SHADOW_DIRECTION = 68
@@ -884,21 +882,6 @@ def move_folder_to_error(source_folder: Path, folder_name: str, reason=None):
         return None
     except Exception as exc:
         print(f"[ERROR] No se pudo mover {folder_name} a Error404: {exc}")
-        return None
-
-
-def move_folder_to_censored(source_folder: Path, folder_name: str, reason=None):
-    CENSORED_DIR.mkdir(parents=True, exist_ok=True)
-    if not source_folder.exists():
-        return None
-    destination = get_unique_destination(CENSORED_DIR, folder_name)
-    try:
-        shutil.move(str(source_folder), str(destination))
-        label = f" ({reason})" if reason else ""
-        print(f"[CENSURA] {folder_name} movido a revision{label}")
-        return destination
-    except Exception as exc:
-        print(f"[CENSURA] No se pudo mover {folder_name} a revision: {exc}")
         return None
 
 
@@ -1959,19 +1942,6 @@ def measure_text(draw: ImageDraw.ImageDraw, text: str, font) -> float:
             return font.getsize(text)[0]
 
 
-def truncate_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str:
-    """
-    Recorta el texto para que entre en el ancho disponible.
-    """
-    if measure_text(draw, text, font) <= max_width:
-        return text
-    ellipsis = "..."
-    trimmed = text
-    while trimmed and measure_text(draw, trimmed + ellipsis, font) > max_width:
-        trimmed = trimmed[:-1]
-    return (trimmed + ellipsis) if trimmed else text
-
-
 def font_line_height(font, fallback_size: int) -> int:
     try:
         ascent, descent = font.getmetrics()
@@ -2378,53 +2348,6 @@ def extract_cover_from_audio_files(audio_files, folder_path, original_folder_pat
             return cover_path
 
     return None
-
-
-def analyze_audio_amplitude(audio_path, fps=30):
-    """
-    Analiza la amplitud del audio usando FFmpeg (más rápido que librosa)
-    Retorna valores normalizados para escala reactiva al audio
-    """
-    try:
-        # Usar FFmpeg para extraer volumen RMS
-        # Esto es MÁS RÁPIDO que librosa y ya tienes FFmpeg instalado
-        cmd = [
-            "ffmpeg",
-            "-i",
-            str(audio_path),
-            "-af",
-            f"astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
-            "-f",
-            "null",
-            "-",
-        ]
-
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            stderr=subprocess.DEVNULL,
-        )
-
-        # Parsear salida (simplificado - usaremos valores fijos para velocidad)
-        # Para 3 videos diarios, pre-calcular audio es overhead innecesario
-        # Usamos expresión dinámica de FFmpeg directamente
-        return None
-
-    except Exception as e:
-        log_verbose(f"Error analizando audio {audio_path}: {e}")
-        return None
-
-
-def generate_wiggle_expression(seed):
-    """
-    Genera valores aleatorios para simular wiggle(3,3) de After Effects
-    Usa un seed para reproducibilidad
-    """
-    np.random.seed(seed)
-    # Generar ruido aleatorio que cambia cada ~0.33 segundos (3 veces por segundo)
-    return np.random.uniform(-3, 3)
 
 
 AUDIO_INFO_CACHE = {}
