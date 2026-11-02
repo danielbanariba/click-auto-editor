@@ -500,6 +500,8 @@ class Servicio:
                     f"⚠️ No pude programar {video_id} ({motivo}) después de {fallos} intentos.\n\n"
                     "¿Reintento?",
                     video_id=video_id,
+                    # El mismo comando que falló: si traía --reclamo, se respeta.
+                    argumentos=list(argumentos),
                 )
 
     # -- Telegram -----------------------------------------------------------
@@ -623,7 +625,7 @@ class Servicio:
 
     def respuesta_reprogramar(self, accion, pregunta):
         self.fallos_programar.pop(pregunta["video_id"], None)
-        self.lanzar_paso("programar", "--video-id", pregunta["video_id"], "--esperar")
+        self.lanzar_paso(*pregunta["argumentos"])
 
     def respuesta_reintentar(self, accion, pregunta):
         """Sacar la pregunta alcanza: el próximo ciclo vuelve a renderizar."""
