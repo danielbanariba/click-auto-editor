@@ -8,7 +8,7 @@ decida el paso siguiente; el resto de la salida va a data/agente/logs/.
     verificar    corre los tests del video y genera la captura
     subir        sube el video como privado y borra la carpeta del álbum
     eliminar     borra la carpeta del álbum sin subirlo (ya estaba publicado)
-    programar    espera el procesado, revisa reclamos y programa la fecha
+    programar    espera el procesado, revisa reclamos, activa la monetización y programa
     estado       videos sin programar, álbumes sin aprobar y render en curso
 """
 import argparse
@@ -876,8 +876,8 @@ def consultar_video(uploader, yt, video_id):
     return "procesando", status
 
 
-class PerfilNoDisponible(RuntimeError):
-    """No hay perfil del navegador con la sesión de Studio; `motivo` va a la respuesta."""
+class NavegadorNoDisponible(RuntimeError):
+    """No hay navegador con la sesión de Studio; `motivo` va a la respuesta."""
 
     def __init__(self, motivo):
         super().__init__(motivo)
@@ -966,9 +966,9 @@ def preparar_perfil_studio():
         user_data_dir, _, fuente = apelacion.resolve_user_data_dir(args)
     except OSError as exc:
         print(f"No se pudo preparar el perfil del navegador: {exc}")
-        raise PerfilNoDisponible("perfil_de_navegador") from exc
+        raise NavegadorNoDisponible("perfil_de_navegador") from exc
     if user_data_dir is None:
-        raise PerfilNoDisponible("sin_perfil_de_navegador")
+        raise NavegadorNoDisponible("sin_perfil_de_navegador")
     _, ejecutable = apelacion.resolve_launch_config(args, fuente)
     return user_data_dir, ejecutable, apelacion.profile_name_from_args(args)
 
@@ -995,49 +995,73 @@ def esperar_resultado_de_reclamos(pagina, ver_detalles, timeout_s=ESPERA_RESULTA
         time.sleep(1)
 
 
-def revisar_reclamo_en_studio(video_id):
+@contextlib.contextmanager
+def pagina_de_studio():
+    """Entrega una página del navegador con la sesión de Studio y lo cierra al salir.
+
+    Lanza NavegadorNoDisponible (con el motivo) si no hay perfil o no abre el navegador.
+    """
     from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
 
-    try:
-        user_data_dir, ejecutable, perfil = preparar_perfil_studio()
-    except PerfilNoDisponible as exc:
-        return {"estado": "desconocido", "motivo": exc.motivo}
-    apelacion = apelacion_agente()
+    user_data_dir, ejecutable, perfil = preparar_perfil_studio()
     headless = os.environ.get("AGENTE_STUDIO_HEADLESS", "1") != "0"
-    captura = DIR_CAPTURAS / f"studio_{video_id}.png"
-    captura.parent.mkdir(parents=True, exist_ok=True)
-
     with sync_playwright() as playwright:
         try:
             contexto = abrir_contexto_studio(playwright, user_data_dir, headless, ejecutable, perfil)
         except PlaywrightError as exc:
             print(f"No se pudo abrir el navegador: {exc}")
-            return {"estado": "desconocido", "motivo": "error_navegador"}
+            raise NavegadorNoDisponible("error_navegador") from exc
         try:
-            pagina = contexto.pages[0] if contexto.pages else contexto.new_page()
-            reclamantes = apelacion.extract_claimants_from_video(pagina, video_id)
-            if esta_en_login_de_google(pagina):
-                pagina.screenshot(path=str(captura))
-                return {
-                    "estado": "desconocido",
-                    "motivo": "sin_sesion_en_studio",
-                    "captura_studio": str(captura),
-                }
-            en_pagina_de_reclamos = es_pagina_de_reclamos(pagina.url, video_id)
-            botones, texto = esperar_resultado_de_reclamos(pagina, apelacion.P_VER_DETALLES_BTN)
-            pagina.screenshot(path=str(captura))
-        except PlaywrightError as exc:
-            print(f"Error revisando Studio: {exc}")
-            return {"estado": "desconocido", "motivo": "error_navegador"}
+            yield contexto.pages[0] if contexto.pages else contexto.new_page()
         finally:
             contexto.close()
+
+
+def revisar_reclamo_en_studio(video_id):
+    from playwright.sync_api import Error as PlaywrightError
+
+    apelacion = apelacion_agente()
+    captura = DIR_CAPTURAS / f"studio_{video_id}.png"
+    captura.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with pagina_de_studio() as pagina:
+            try:
+                reclamantes = apelacion.extract_claimants_from_video(pagina, video_id)
+                if esta_en_login_de_google(pagina):
+                    pagina.screenshot(path=str(captura))
+                    return {
+                        "estado": "desconocido",
+                        "motivo": "sin_sesion_en_studio",
+                        "captura_studio": str(captura),
+                    }
+                en_pagina_de_reclamos = es_pagina_de_reclamos(pagina.url, video_id)
+                botones, texto = esperar_resultado_de_reclamos(pagina, apelacion.P_VER_DETALLES_BTN)
+                pagina.screenshot(path=str(captura))
+            except PlaywrightError as exc:
+                print(f"Error revisando Studio: {exc}")
+                return {"estado": "desconocido", "motivo": "error_navegador"}
+    except NavegadorNoDisponible as exc:
+        return {"estado": "desconocido", "motivo": exc.motivo}
 
     return {
         "estado": clasificar_reclamo(botones, texto, en_pagina_de_reclamos),
         "reclamantes": reclamantes,
         "captura_studio": str(captura),
     }
+
+
+def activar_monetizacion_en_studio(video_id):
+    """Activa la monetización del video; siempre devuelve un diccionario, nunca lanza."""
+    import studio_monetizacion
+
+    captura = DIR_CAPTURAS / f"monetizacion_{video_id}.png"
+    captura.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with pagina_de_studio() as pagina:
+            return studio_monetizacion.activar_monetizacion(pagina, video_id, captura)
+    except NavegadorNoDisponible as exc:
+        return {"estado": "fallo", "motivo": exc.motivo}
 
 
 def horas_tomadas(uploader, yt):
@@ -1049,15 +1073,25 @@ def horas_tomadas(uploader, yt):
     return horas_ocupadas(programados) | horas_ocupadas(fechas_programadas_localmente())
 
 
-def armar_resumen_programado(titulo, publica_en, con_reclamo, reclamantes):
+def armar_resumen_programado(titulo, publica_en, con_reclamo, reclamantes, monetizacion=None):
     fecha = publica_en.strftime("%Y-%m-%d %H:%M")
     if con_reclamo:
         quienes = f" ({', '.join(reclamantes)})" if reclamantes else ""
         return f"⚠️ {titulo}\nTiene reclamo{quienes}: programado para {fecha} para apelar."
-    return f"✓ {titulo}\nSin reclamos: programado para {fecha}."
+    texto = f"✓ {titulo}\nSin reclamos: programado para {fecha}."
+    if (monetizacion or {}).get("estado") in ("activada", "ya_activa"):
+        texto += "\nMonetización activada."
+    return texto
 
 
-def programar(video_id, esperar=False, reclamo=None, revisar=revisar_reclamo_en_studio, uploader=None):
+def programar(
+    video_id,
+    esperar=False,
+    reclamo=None,
+    revisar=revisar_reclamo_en_studio,
+    activar=activar_monetizacion_en_studio,
+    uploader=None,
+):
     uploader = uploader or uploader_real()
     titulo = (buscar_pendiente(video_id) or {}).get("titulo", video_id)
     log = ruta_log("programar")
@@ -1120,6 +1154,11 @@ def programar(video_id, esperar=False, reclamo=None, revisar=revisar_reclamo_en_
                 publica_en = elegir_fecha(
                     datetime.now().astimezone(), con_reclamo, horas_tomadas(uploader, yt)
                 )
+                # Con reclamo el video no genera ingresos: no se intenta activar nada.
+                if con_reclamo:
+                    monetizacion = {"estado": "omitida", "motivo": "con_reclamo"}
+                else:
+                    monetizacion = activar(video_id)
                 cuerpo = {"id": video_id, "status": armar_status_programado(status, publica_en)}
                 ejecutar_api(
                     uploader,
@@ -1150,7 +1189,10 @@ def programar(video_id, esperar=False, reclamo=None, revisar=revisar_reclamo_en_
         "con_reclamo": con_reclamo,
         "reclamantes": reclamantes,
         "publica_en": publica_en.isoformat(),
-        "resumen": armar_resumen_programado(titulo, publica_en, con_reclamo, reclamantes),
+        "monetizacion": monetizacion,
+        "resumen": armar_resumen_programado(
+            titulo, publica_en, con_reclamo, reclamantes, monetizacion
+        ),
         "log": str(log),
     }
 

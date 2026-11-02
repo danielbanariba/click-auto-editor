@@ -81,6 +81,14 @@ MOTIVOS_SUBIDA = {
     "sin_credenciales": "no hay credenciales con cuota",
     "sin_metadata": "no se pudo armar la descripción",
 }
+MOTIVOS_MONETIZACION = {
+    "cuestionario_de_idoneidad": "Studio pide responder el cuestionario de idoneidad para anuncios",
+    "sin_sesion_en_studio": "Studio no tiene la sesión iniciada",
+    "no_se_guardo": "Studio no guardó el cambio",
+    "no_se_pudo_guardar": "Studio no dejó guardar el cambio",
+    "estado_desconocido": "la página de monetización no se parece a la esperada",
+    "error_navegador": "falló el navegador",
+}
 
 log = logging.getLogger("servicio_publicar")
 
@@ -474,6 +482,15 @@ class Servicio:
         if resultado.get("ok"):
             self.fallos_programar.pop(video_id, None)
             self.avisar(resultado["resumen"])
+            monetizacion = resultado.get("monetizacion") or {}
+            if monetizacion.get("estado") == "fallo":
+                titulo = resultado.get("titulo") or video_id
+                causa = MOTIVOS_MONETIZACION.get(monetizacion.get("motivo")) or monetizacion.get("motivo")
+                self.avisar(
+                    f"⚠️ No pude activar la monetización de \"{titulo}\" ({causa}).\n"
+                    "No frené el video por esto; actívala a mano:\n"
+                    f"https://studio.youtube.com/video/{video_id}/monetization"
+                )
         elif motivo == "reclamo_desconocido":
             titulo = resultado.get("titulo") or video_id
             self.preguntar(

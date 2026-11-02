@@ -581,6 +581,10 @@ class YouTubeFalso:
         return self.videos_falsos
 
 
+def monetizacion_activada(video_id):
+    return {"estado": "activada", "captura": "/tmp/monetizacion.png"}
+
+
 def uploader_para_programar(youtube):
     return SimpleNamespace(
         cargar_env=lambda: None,
@@ -618,6 +622,7 @@ class TestProgramar(unittest.TestCase):
                 "V1",
                 esperar=True,
                 revisar=lambda video_id: {"estado": "sin_reclamo", "reclamantes": []},
+                activar=monetizacion_activada,
                 uploader=uploader_para_programar(youtube),
             )
         self.assertTrue(resultado["ok"], resultado)
@@ -634,7 +639,9 @@ class TestProgramar(unittest.TestCase):
         def correr(video_id):
             # La demora abre la ventana entre elegir la hora y registrarla.
             uploader = uploader_para_programar(YouTubeFalso(["succeeded"], demora_actualizacion=0.5))
-            resultados.put(pa.programar(video_id, reclamo=False, uploader=uploader)["publica_en"])
+            resultados.put(
+                pa.programar(video_id, reclamo=False, activar=monetizacion_activada, uploader=uploader)["publica_en"]
+            )
 
         procesos = [contexto.Process(target=correr, args=(v,)) for v in ("V1", "V2")]
         for proceso in procesos:
@@ -643,6 +650,50 @@ class TestProgramar(unittest.TestCase):
             proceso.join(timeout=30)
         horas = {resultados.get(timeout=5), resultados.get(timeout=5)}
         self.assertEqual(len(horas), 2, horas)
+
+
+    def programar_con(self, youtube, reclamo, activar):
+        return pa.programar(
+            "V1", reclamo=reclamo, activar=activar, uploader=uploader_para_programar(youtube)
+        )
+
+    def test_sin_reclamo_activa_la_monetizacion_antes_de_publicar_y_lo_informa(self):
+        youtube = YouTubeFalso(["succeeded"])
+        llamadas = []
+
+        def activar(video_id):
+            # Todavía no se tocó la privacidad del video.
+            llamadas.append((video_id, list(youtube.videos_falsos.actualizaciones)))
+            return {"estado": "activada", "captura": "/tmp/m.png"}
+
+        resultado = self.programar_con(youtube, False, activar)
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(llamadas, [("V1", [])])
+        self.assertEqual(resultado["monetizacion"]["estado"], "activada")
+        self.assertEqual(len(youtube.videos_falsos.actualizaciones), 1)
+
+    def test_con_reclamo_no_intenta_monetizar_y_sigue_dos_anios_adelante(self):
+        youtube = YouTubeFalso(["succeeded"])
+
+        def activar(video_id):
+            raise AssertionError("un video con reclamo no se monetiza")
+
+        antes = datetime.now().astimezone()
+        resultado = self.programar_con(youtube, True, activar)
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(resultado["monetizacion"]["estado"], "omitida")
+        publica_en = datetime.fromisoformat(resultado["publica_en"])
+        self.assertEqual(publica_en.year, antes.year + 2)
+        status = youtube.videos_falsos.actualizaciones[0]["status"]
+        self.assertEqual((status["privacyStatus"], status["publishAt"]), ("private", resultado["publica_en"]))
+
+    def test_si_la_monetizacion_falla_el_video_se_programa_igual_y_el_fallo_viaja_en_el_resultado(self):
+        youtube = YouTubeFalso(["succeeded"])
+        fallo = {"estado": "fallo", "motivo": "cuestionario_de_idoneidad", "captura": "/tmp/m.png"}
+        resultado = self.programar_con(youtube, False, lambda video_id: fallo)
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(resultado["monetizacion"], fallo)
+        self.assertEqual(len(youtube.videos_falsos.actualizaciones), 1)
 
 
 class ServidorKeepAliveQueMuere:
@@ -912,7 +963,9 @@ class TestProgramarSinConexion(unittest.TestCase):
 
     def test_se_agotan_los_reintentos_y_programar_responde_sin_conexion(self):
         cliente = ClienteQueFalla([BrokenPipeError(32, "Broken pipe")] * 10)
-        resultado = pa.programar("V1", reclamo=False, uploader=uploader_para_programar(cliente))
+        resultado = pa.programar(
+            "V1", reclamo=False, activar=monetizacion_activada, uploader=uploader_para_programar(cliente)
+        )
         self.assertFalse(resultado["ok"])
         self.assertEqual(resultado["motivo"], "sin_conexion")
         self.assertEqual(resultado["video_id"], "V1")
@@ -922,7 +975,13 @@ class TestProgramarSinConexion(unittest.TestCase):
     def test_conexion_muerta_tras_la_espera_no_aborta_la_programacion(self):
         # Caso real: la consulta tras la espera de 5 min usa una conexión keep-alive ya cerrada.
         youtube = YouTubeConConexionMuerta(["processing", "succeeded"])
-        resultado = pa.programar("V1", esperar=True, reclamo=False, uploader=uploader_para_programar(youtube))
+        resultado = pa.programar(
+            "V1",
+            esperar=True,
+            reclamo=False,
+            activar=monetizacion_activada,
+            uploader=uploader_para_programar(youtube),
+        )
         self.assertTrue(resultado["ok"], resultado)
         self.assertEqual(youtube.cierres, 2)
         self.assertEqual(len(youtube.videos_falsos.actualizaciones), 1)
