@@ -475,9 +475,7 @@ def armar_resumen(album, duracion, checks):
 
 
 def generar_captura(video, duracion, destino):
-    instante = INTRO_DURATION + min(30.0, max(0.0, (duracion - INTRO_DURATION) / 2))
-    if instante >= duracion:
-        instante = duracion / 2
+    instante = duracion / 2
     destino.parent.mkdir(parents=True, exist_ok=True)
     resultado = subprocess.run(
         [

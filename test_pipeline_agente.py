@@ -136,6 +136,26 @@ class TestVerificar(unittest.TestCase):
         self.assertFalse(resultado["ok"])
         self.assertEqual(self.fallidos(resultado), {"duracion", "resolucion"})
 
+    def test_captura_sale_de_la_mitad_del_video(self):
+        from PIL import Image
+
+        carpeta = self.tmp / "Largo"
+        carpeta.mkdir()
+        tramos = "".join(
+            f"color=c={color}:s=320x180:r=5:d={segundos}[{nombre}];"
+            for nombre, color, segundos in (("a", "red", 90), ("b", "lime", 20), ("c", "blue", 90))
+        )
+        ffmpeg(
+            "-filter_complex", f"{tramos}[a][b][c]concat=n=3:v=1:a=0[v]",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=200",
+            "-map", "[v]", "-map", "0:a", "-c:v", "libx264", "-preset", "ultrafast",
+            "-c:a", "aac", str(carpeta / "Largo.mp4"),
+        )
+        resultado = pa.verificar(carpeta, ancho=320, alto=180, intro=1.0)
+        rojo, verde, azul = Image.open(resultado["captura"]).convert("RGB").getpixel((640, 360))
+        self.assertGreater(verde, 150, (rojo, verde, azul))
+        self.assertLess(rojo, 100, (rojo, verde, azul))
+
 
 class TestSubir(unittest.TestCase):
     def setUp(self):
