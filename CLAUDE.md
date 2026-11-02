@@ -89,12 +89,15 @@ page returns `reclamo_desconocido` and the service asks the user instead of
 guessing, and a missing session returns `sin_sesion_en_studio`.
 
 Monetization (`studio_monetizacion.py`) turns ads on at
-`/video/<id>/monetization`. Studio asks for the ad-suitability questionnaire
-when ads are turned on; its answers cannot be changed afterwards, so the step
-does not answer it: it cancels, leaves the video as it was and `programar`
-reports `monetizacion.motivo = cuestionario_de_idoneidad`. Any monetization
-failure never stops the video: the service sends a Telegram notice with the
-`/monetization` link of that video.
+`/video/<id>/monetization`. Studio then asks for the ad-suitability
+questionnaire; its answers cannot be changed afterwards. The user's decision
+(`RESPUESTA_CUESTIONARIO`) is to always answer "Nada de lo anterior" (his videos
+are art) and select no radios. The step sends it (Enviar, then Guardar, then
+reloads to confirm ads are on) only if the side panel reads "Adecuado para
+anuncios"; with anything else, or no checkbox, it cancels and the video is left
+as it was. A failure after Enviar returns `motivo = cuestionario_ya_enviado`.
+Any monetization failure never stops the video: the service sends a Telegram
+notice with the `/monetization` link of that video.
 
 ### Common commands
 

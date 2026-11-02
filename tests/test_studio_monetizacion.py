@@ -8,6 +8,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 try:
     from playwright.sync_api import Error as PlaywrightError
@@ -18,6 +19,7 @@ except ImportError:  # pragma: no cover
 import studio_monetizacion as sm
 
 URL = "https://studio.youtube.com/video/V1/monetization"
+DEMORA_GUARDADO_MS = 1500  # lo que tarda el "servidor" en guardar tras pulsar Guardar
 
 PAGINA = """<!doctype html><html><body>
 <h1>Formas de obtener ingresos</h1>
@@ -31,7 +33,10 @@ PAGINA = """<!doctype html><html><body>
 </div>
 <div role="dialog" id="dialogo" hidden>
   <h2>Cuéntanos qué aparece en tu vídeo</h2>
-  <button id="cancelar">Cancelar</button><button disabled>Enviar</button>
+  <label><input type="radio" name="cat" value="violencia-leve"> Se incluye violencia leve</label>
+  __CHECKBOX__
+  <div id="panel"><div>Cómo has calificado tu vídeo en general:</div><div id="calificacion"></div></div>
+  <button id="cancelar">Cancelar</button><button id="enviar" disabled>Enviar</button>
 </div>
 <script>
 const pedirCuestionario = __CUESTIONARIO__;
@@ -46,10 +51,31 @@ $("continuar").onclick = () => {
   $("popup").hidden = true;
   $("guardar").disabled = !activar;
 };
-$("cancelar").onclick = () => { $("dialogo").hidden = true; $("popup").hidden = true; };
-$("guardar").onclick = async () => {
-  await fetch("/_guardar", {method: "POST"});
+const nada = $("nada");
+if (nada) nada.onclick = () => {
+  const marcado = nada.getAttribute("aria-checked") !== "true";
+  nada.setAttribute("aria-checked", String(marcado));
+  $("calificacion").textContent = marcado ? "__CALIFICACION__" : "";
+  $("enviar").disabled = !marcado;
+};
+$("enviar").onclick = async () => {
+  const radios = [...document.querySelectorAll("input[name=cat]:checked")].map((r) => r.value);
+  await fetch("/_enviar", {method: "POST", body: JSON.stringify({nada: nada.getAttribute("aria-checked") === "true", radios})});
+  $("dialogo").hidden = true; $("popup").hidden = true; $("guardar").disabled = false;
+};
+$("cancelar").onclick = async () => {
+  await fetch("/_cancelar", {method: "POST"});
+  $("dialogo").hidden = true; $("popup").hidden = true;
+};
+// Como en Studio: Guardar se apaga al instante, el estado pasa por "Comprobando" y el guardado
+// real llega después. Recargar la página antes de que llegue cancela el guardado.
+$("guardar").onclick = () => {
   $("guardar").disabled = true;
+  $("estado").textContent = "Comprobando";
+  setTimeout(async () => {
+    const respuesta = await fetch("/_guardar", {method: "POST"});
+    $("estado").textContent = (await respuesta.json()).estado;
+  }, __DEMORA_GUARDADO_MS__);
 };
 </script></body></html>"""
 
@@ -57,24 +83,54 @@ $("guardar").onclick = async () => {
 class StudioFalso:
     """Estado del video en el 'servidor' y todo lo que la automatización le mandó."""
 
-    def __init__(self, estado="Desactivada", cuestionario=False, guarda=True, pagina=None):
+    def __init__(
+        self,
+        estado="Desactivada",
+        cuestionario=False,
+        guarda=True,
+        pagina=None,
+        calificacion="Adecuado para anuncios",
+        con_checkbox=True,
+    ):
         self.estado = estado
         self.cuestionario = cuestionario
         self.guarda = guarda
         self.pagina = pagina
+        self.calificacion = calificacion
+        self.con_checkbox = con_checkbox
         self.guardados = 0
+        self.enviados = []  # lo que se mandó con "Enviar" (irreversible en Studio)
+        self.cancelados = 0
 
     def atender(self, ruta):
         peticion = ruta.request
+        if peticion.url.endswith("/_enviar"):
+            self.enviados.append(json.loads(peticion.post_data))
+            return ruta.fulfill(status=200, body="{}", content_type="application/json")
+        if peticion.url.endswith("/_cancelar"):
+            self.cancelados += 1
+            return ruta.fulfill(status=200, body="{}", content_type="application/json")
         if peticion.url.endswith("/_guardar"):
             self.guardados += 1
             if self.guarda:
                 self.estado = "Activada"
-            return ruta.fulfill(status=200, body="{}", content_type="application/json")
+            return ruta.fulfill(
+                status=200, body=json.dumps({"estado": self.estado}), content_type="application/json"
+            )
         if self.pagina is not None:
             return ruta.fulfill(status=200, body=self.pagina, content_type="text/html; charset=utf-8")
-        html = PAGINA.replace("__ESTADO__", self.estado).replace(
-            "__CUESTIONARIO__", json.dumps(self.cuestionario)
+        checkbox = (
+            '<div role="checkbox" id="nada" tabindex="0" aria-checked="false" '
+            'aria-label="Nada de lo anterior">Nada de lo anterior</div>'
+            if self.con_checkbox
+            else ""
+        )
+        html = (
+            PAGINA.replace("__ESTADO__", self.estado)
+            .replace("__CUESTIONARIO__", json.dumps(self.cuestionario))
+            .replace("__CHECKBOX__", checkbox)
+            .replace("__CALIFICACION__", self.calificacion)
+            .replace("__DEMORA_GUARDADO_MS__", str(DEMORA_GUARDADO_MS))
         )
         return ruta.fulfill(status=200, body=html, content_type="text/html; charset=utf-8")
 
@@ -113,12 +169,36 @@ class TestActivarMonetizacion(unittest.TestCase):
         self.assertEqual(resultado["estado"], "ya_activa", resultado)
         self.assertEqual(studio.guardados, 0)
 
-    def test_no_responde_el_cuestionario_de_idoneidad_y_deja_el_video_como_estaba(self):
+    def test_cuestionario_se_responde_nada_de_lo_anterior_sin_elegir_radios_y_queda_activada(self):
         studio = StudioFalso(cuestionario=True)
         resultado = self.activar(studio)
+        self.assertEqual(resultado["estado"], "activada", resultado)
+        self.assertEqual(studio.enviados, [{"nada": True, "radios": []}])
+        self.assertEqual((studio.guardados, studio.estado), (1, "Activada"))
+
+    def test_si_el_panel_no_dice_adecuado_para_anuncios_cancela_y_no_envia(self):
+        studio = StudioFalso(cuestionario=True, calificacion="Anuncios limitados")
+        with mock.patch.object(sm, "ESPERA_PASO_S", 1):
+            resultado = self.activar(studio)
         self.assertEqual(resultado["estado"], "fallo", resultado)
-        self.assertEqual(resultado["motivo"], "cuestionario_de_idoneidad")
-        self.assertEqual((studio.guardados, studio.estado), (0, "Desactivada"))
+        self.assertEqual(resultado["motivo"], "calificacion_no_adecuada")
+        self.assertEqual((studio.enviados, studio.cancelados, studio.guardados), ([], 1, 0))
+        self.assertEqual(studio.estado, "Desactivada")
+
+    def test_sin_el_checkbox_nada_de_lo_anterior_cancela_y_no_envia(self):
+        studio = StudioFalso(cuestionario=True, con_checkbox=False)
+        with mock.patch.object(sm, "ESPERA_PASO_S", 1):
+            resultado = self.activar(studio)
+        self.assertEqual(resultado["motivo"], "no_se_encontro_nada_de_lo_anterior", resultado)
+        self.assertEqual((studio.enviados, studio.cancelados, studio.guardados), ([], 1, 0))
+
+    def test_si_falla_despues_de_enviar_avisa_que_el_cuestionario_ya_se_envio(self):
+        # Las respuestas son irreversibles: el motivo tiene que decir que ya salieron.
+        studio = StudioFalso(cuestionario=True, guarda=False)
+        resultado = self.activar(studio)
+        self.assertEqual(resultado["estado"], "fallo", resultado)
+        self.assertEqual(resultado["motivo"], "cuestionario_ya_enviado")
+        self.assertEqual(len(studio.enviados), 1)
 
     def test_guardar_sin_que_studio_lo_guarde_se_reporta_como_fallo(self):
         # El botón se apaga igual: solo recargar muestra si quedó guardado.

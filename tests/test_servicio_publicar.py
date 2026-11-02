@@ -335,12 +335,13 @@ class TestReclamos(BaseServicio):
 
     def test_si_falla_la_monetizacion_avisa_con_el_link_de_studio_para_hacerlo_a_mano(self):
         textos = self.terminar_programar_con(
-            {"estado": "fallo", "motivo": "cuestionario_de_idoneidad", "captura": "/tmp/m.png"}
+            {"estado": "fallo", "motivo": "cuestionario_ya_enviado", "captura": "/tmp/m.png"}
         )
         self.assertEqual(len(textos), 2, textos)
         self.assertIn("Sin reclamos: programado", textos[0])
         self.assertIn("Banda - Disco", textos[1])
-        self.assertIn("cuestionario", textos[1])
+        # Es irreversible: el aviso tiene que decir que el cuestionario ya salió.
+        self.assertIn("ya envié el cuestionario", textos[1])
         self.assertIn("https://studio.youtube.com/video/VID1/monetization", textos[1])
 
     def test_monetizacion_activada_u_omitida_no_manda_aviso_aparte(self):

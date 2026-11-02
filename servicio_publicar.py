@@ -83,7 +83,11 @@ MOTIVOS_SUBIDA = {
     "sin_metadata": "no se pudo armar la descripción",
 }
 MOTIVOS_MONETIZACION = {
-    "cuestionario_de_idoneidad": "Studio pide responder el cuestionario de idoneidad para anuncios",
+    "cuestionario_ya_enviado": (
+        "ya envié el cuestionario de anuncios (no se puede deshacer) pero la monetización no quedó activa"
+    ),
+    "calificacion_no_adecuada": "el cuestionario no dio «Adecuado para anuncios», no lo envié",
+    "no_se_encontro_nada_de_lo_anterior": "no encontré «Nada de lo anterior» en el cuestionario, no lo envié",
     "sin_sesion_en_studio": "Studio no tiene la sesión iniciada",
     "no_se_guardo": "Studio no guardó el cambio",
     "no_se_pudo_guardar": "Studio no dejó guardar el cambio",
