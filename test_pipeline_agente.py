@@ -206,6 +206,11 @@ class TestRetomar(unittest.TestCase):
             resultado = pa.renderizar()
         self.assertEqual(resultado, {"ok": False, "motivo": "render_en_curso"})
 
+    def test_un_editor_con_el_script_abierto_no_cuenta_como_render(self):
+        editor = subprocess.Popen(["/bin/sh", "-c", "sleep 30; true", str(self.tmp / self.proceso)])
+        self.procesos.append(editor)
+        self.assertFalse(pa.estado()["render_en_curso"])
+
     def test_estado_espera_a_que_termine_el_render_de_otra_sesion(self):
         self.lanzar_render_falso(1.5)
         self.assertTrue(pa.estado()["render_en_curso"])

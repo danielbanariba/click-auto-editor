@@ -317,7 +317,10 @@ def render_en_curso():
             argumentos = cmdline.read_bytes().decode("utf-8", "replace").split("\0")
         except OSError:
             continue
-        if any(a.endswith(PROCESO_RENDER) for a in argumentos):
+        # Solo Python cuenta: un editor con el script abierto también lo tiene en sus argumentos.
+        if Path(argumentos[0]).name.startswith("python") and any(
+            a.endswith(PROCESO_RENDER) for a in argumentos[1:]
+        ):
             return True
     return False
 
