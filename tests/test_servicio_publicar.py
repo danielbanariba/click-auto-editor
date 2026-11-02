@@ -3,6 +3,7 @@
 Telegram y los pasos de pipeline_agente.py son falsos; las carpetas y el
 estado del servicio son reales (en un directorio temporal).
 """
+import logging
 import shutil
 import tempfile
 import unittest
@@ -526,6 +527,115 @@ class TestAvisos(BaseServicio):
         self.servicio.paso()
 
         self.assertEqual(self.lanzador.lanzados("renderizar"), [["renderizar"]])
+
+
+class TestTelegramCaido(BaseServicio):
+    """Con Telegram sin responder, la espera crece y el log avisa una sola vez."""
+
+    def setUp(self):
+        super().setUp()
+        self.servicio.pausa_error_s = 5
+        self.tiempo = [1000.0]
+        self.servicio.reloj = lambda: self.tiempo[0]
+        parche = mock.patch.object(sp.time, "sleep")
+        self.dormir = parche.start()
+        self.addCleanup(parche.stop)
+        self.telegram.falla = sp.ErrorTelegram("sin red")
+
+    def esperas(self):
+        return [llamada.args[0] for llamada in self.dormir.call_args_list]
+
+    def avisos_en(self, capturado, nivel):
+        return [r.getMessage() for r in capturado.records if r.levelno == nivel]
+
+    def test_la_espera_se_duplica_hasta_un_minuto(self):
+        for _ in range(7):
+            self.servicio.atender_telegram()
+
+        self.assertEqual(self.esperas(), [5, 10, 20, 40, 60, 60, 60])
+
+    def test_al_responder_la_espera_vuelve_a_la_inicial(self):
+        for _ in range(3):
+            self.servicio.atender_telegram()
+        self.telegram.falla = None
+        self.servicio.atender_telegram()
+        self.telegram.falla = sp.ErrorTelegram("sin red")
+        self.servicio.atender_telegram()
+
+        self.assertEqual(self.esperas(), [5, 10, 20, 5])
+
+    def test_avisa_una_sola_vez_cuando_telegram_deja_de_responder(self):
+        with self.assertLogs("servicio_publicar", "INFO") as capturado:
+            for _ in range(5):
+                self.servicio.atender_telegram()
+
+        avisos = self.avisos_en(capturado, logging.WARNING)
+        self.assertEqual(len(avisos), 1)
+        self.assertIn("sin red", avisos[0])
+
+    def test_avisa_una_sola_vez_cuando_telegram_vuelve(self):
+        with self.assertLogs("servicio_publicar", "INFO") as capturado:
+            for _ in range(3):
+                self.servicio.atender_telegram()
+                self.tiempo[0] += 10
+            self.telegram.falla = None
+            self.servicio.atender_telegram()
+            self.servicio.atender_telegram()
+
+        avisos = self.avisos_en(capturado, logging.INFO)
+        self.assertEqual(len(avisos), 1)
+        self.assertIn("3 fallos", avisos[0])
+        self.assertIn("30 s", avisos[0])
+
+    def test_un_segundo_corte_vuelve_a_avisar(self):
+        with self.assertLogs("servicio_publicar", "INFO") as capturado:
+            self.servicio.atender_telegram()
+            self.telegram.falla = None
+            self.servicio.atender_telegram()
+            self.telegram.falla = sp.ErrorTelegram("otra vez sin red")
+            self.servicio.atender_telegram()
+
+        avisos = self.avisos_en(capturado, logging.WARNING)
+        self.assertEqual(len(avisos), 2)
+        self.assertIn("otra vez sin red", avisos[1])
+
+    def test_con_telegram_caido_la_pregunta_pendiente_no_repite_el_aviso(self):
+        caida = sp.ErrorTelegram("sin red")
+        with mock.patch.object(self.telegram, "mandar", side_effect=caida):
+            self.servicio.preguntar("reintentar", "¿Reintento?")
+            self.servicio.atender_telegram()
+            with self.assertNoLogs("servicio_publicar", "WARNING"):
+                for _ in range(3):
+                    self.servicio.enviar_preguntas()
+
+        # La pregunta no se perdió: sale en cuanto Telegram vuelve.
+        self.telegram.falla = None
+        self.servicio.atender_telegram()
+        self.servicio.enviar_preguntas()
+        self.assertEqual([m["texto"] for m in self.telegram.mensajes], ["¿Reintento?"])
+
+    def test_con_telegram_respondiendo_la_pregunta_que_falla_sigue_avisando(self):
+        self.telegram.falla = None
+        with mock.patch.object(self.telegram, "mandar", side_effect=sp.ErrorTelegram("PHOTO_INVALID")):
+            self.servicio.preguntar("reintentar", "¿Reintento?")
+            self.servicio.atender_telegram()
+            with self.assertLogs("servicio_publicar", "WARNING") as capturado:
+                self.servicio.enviar_preguntas()
+
+        self.assertIn("PHOTO_INVALID", capturado.output[0])
+
+    def test_los_avisos_de_caida_no_dejan_el_token_en_el_log(self):
+        self.servicio.telegram = sp.Telegram("123:SECRETO", "42")
+        error = requests.ConnectionError("Max retries exceeded with url: /bot123:SECRETO/getUpdates")
+        with mock.patch.object(sp.requests, "post", side_effect=error):
+            with self.assertLogs("servicio_publicar", "INFO") as capturado:
+                for _ in range(2):
+                    self.servicio.atender_telegram()
+        with mock.patch.object(sp.requests, "post", return_value=mock.Mock(json=lambda: {"ok": True, "result": []})):
+            with self.assertLogs("servicio_publicar", "INFO") as vuelta:
+                self.servicio.atender_telegram()
+
+        self.assertNotIn("SECRETO", "\n".join(capturado.output + vuelta.output))
 
 
 class TestConexiones(unittest.TestCase):

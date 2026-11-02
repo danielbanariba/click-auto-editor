@@ -34,6 +34,9 @@ from config import PROJECT_ROOT
 
 ESTADO_JSON = pa.DIR_AGENTE / "servicio.json"
 ESPERA_TELEGRAM_S = 20
+# Tope de la espera creciente con Telegram caído: la espera frena todo el ciclo,
+# y las tareas terminadas se atienden recién al volver.
+PAUSA_TELEGRAM_MAX_S = 60
 REINTENTO_S = 30 * 60
 INTENTOS_PROGRAMAR = 3  # fallos seguidos de `programar` antes de preguntar
 LIMITE_LEYENDA = 1024
@@ -215,6 +218,8 @@ class Servicio:
         self.album_pausado_hasta = 0.0
         self.avisos = set()
         self.pausa_error_s = 5
+        self.fallos_telegram = 0  # fallos seguidos de getUpdates; 0 es que Telegram responde
+        self.telegram_caido_desde = None
 
     # -- estado -------------------------------------------------------------
 
@@ -465,7 +470,9 @@ class Servicio:
                     pregunta["texto"], botones=botones, foto=pregunta["foto"]
                 )
             except ERRORES_TELEGRAM as exc:
-                log.warning("No se pudo mandar la pregunta; reintento en el próximo ciclo: %s", exc)
+                # Con Telegram caído, atender_telegram ya avisó: no se repite cada ciclo.
+                if not self.fallos_telegram:
+                    log.warning("No se pudo mandar la pregunta; reintento en el próximo ciclo: %s", exc)
                 return
             self.guardar()
 
@@ -473,15 +480,36 @@ class Servicio:
         try:
             actualizaciones = self.telegram.actualizaciones(self.estado["offset"], ESPERA_TELEGRAM_S)
         except ERRORES_TELEGRAM as exc:
-            log.warning("Telegram no responde: %s", exc)
-            time.sleep(self.pausa_error_s)
+            self.fallo_telegram(exc)
+            # 5 s, 10 s, 20 s... hasta PAUSA_TELEGRAM_MAX_S; el exponente se acota para no crecer sin fin.
+            pausa = self.pausa_error_s * 2 ** min(self.fallos_telegram - 1, 10)
+            time.sleep(min(pausa, PAUSA_TELEGRAM_MAX_S))
             return
+        self.telegram_responde()
         for actualizacion in actualizaciones:
             # Se guarda antes de atender: un botón nunca se procesa dos veces.
             self.estado["offset"] = actualizacion["update_id"] + 1
             self.guardar()
             if "callback_query" in actualizacion:
                 self.atender_boton(actualizacion["callback_query"])
+
+    def fallo_telegram(self, exc):
+        """Avisa solo el primer fallo de una caída; los siguientes no llenan el log."""
+        if not self.fallos_telegram:
+            self.telegram_caido_desde = self.reloj()
+            log.warning("Telegram no responde; sigo intentando con esperas cada vez más largas: %s", exc)
+        self.fallos_telegram += 1
+
+    def telegram_responde(self):
+        if not self.fallos_telegram:
+            return
+        log.info(
+            "Telegram responde de nuevo (%d fallos seguidos, %d s sin respuesta)",
+            self.fallos_telegram,
+            self.reloj() - self.telegram_caido_desde,
+        )
+        self.fallos_telegram = 0
+        self.telegram_caido_desde = None
 
     def atender_boton(self, consulta):
         if str(consulta.get("from", {}).get("id")) != self.telegram.chat_id:
