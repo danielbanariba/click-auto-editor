@@ -36,7 +36,10 @@ class TelegramFalso:
         return pendientes
 
     def mandar(self, texto, botones=None, foto=None):
-        self.mensajes.append({"texto": texto, "botones": botones or [], "foto": foto})
+        filas = botones or []
+        self.mensajes.append(
+            {"texto": texto, "botones": [b for fila in filas for b in fila], "foto": foto}
+        )
         return len(self.mensajes)
 
     def quitar_botones(self, message_id):
@@ -139,6 +142,8 @@ class BaseServicio(unittest.TestCase):
                 "ok": True,
                 "album": nombre,
                 "captura": str(self.tmp / "captura.jpg"),
+                "captura_busqueda": str(self.tmp / "busqueda.png"),
+                "busqueda": f"{nombre} (Full Album)",
                 "resumen": f"{nombre} · 45:00\n✓ tiene sonido: sí",
             },
         )
@@ -151,10 +156,17 @@ class TestAprobacion(BaseServicio):
         carpeta, mensaje = self.pedir_aprobacion()
 
         self.assertEqual(self.lanzador.lanzados("verificar"), [["verificar", "--carpeta", carpeta]])
-        self.assertEqual(len(self.telegram.mensajes), 1)
+        busqueda, pregunta = self.telegram.mensajes
+        self.assertEqual(busqueda["foto"], str(self.tmp / "busqueda.png"))
+        self.assertIn("Banda - Disco (Full Album)", busqueda["texto"])
+        self.assertEqual(busqueda["botones"], [])
+        self.assertIs(pregunta, mensaje)
         self.assertEqual(mensaje["foto"], str(self.tmp / "captura.jpg"))
         self.assertIn("Banda - Disco · 45:00", mensaje["texto"])
-        self.assertEqual([etiqueta for etiqueta, _ in mensaje["botones"]], ["✅ Subir", "❌ Rechazar"])
+        self.assertEqual(
+            [etiqueta for etiqueta, _ in mensaje["botones"]],
+            ["✅ Subir", "❌ Rechazar", "🗑 Eliminar (ya está publicado)"],
+        )
 
     def test_no_sube_ni_renderiza_otro_mientras_no_haya_respuesta(self):
         self.album_en_cola("Banda - Otro")
@@ -244,6 +256,33 @@ class TestAprobacion(BaseServicio):
         self.assertEqual(self.lanzador.lanzados("verificar"), [self.lanzador.lanzados("verificar")[0]])
         self.assertIn(["programar", "--video-id", "VID1", "--esperar"], self.lanzador.lanzados())
 
+    def test_eliminar_borra_el_album_sin_subirlo_y_sigue(self):
+        carpeta, mensaje = self.pedir_aprobacion()
+        self.album_en_cola("Banda - Siguiente")
+
+        self.telegram.apretar(mensaje, "🗑 Eliminar (ya está publicado)")
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 1)
+        shutil.rmtree(carpeta)
+        self.lanzador.terminar("eliminar", {"ok": True, "album": "Banda - Disco"})
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("eliminar"), [["eliminar", "--carpeta", carpeta]])
+        self.assertEqual(self.lanzador.lanzados("subir"), [])
+        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 2)
+
+    def test_si_no_se_puede_eliminar_no_se_vuelve_a_ofrecer(self):
+        _, mensaje = self.pedir_aprobacion()
+
+        self.telegram.apretar(mensaje, "🗑 Eliminar (ya está publicado)")
+        self.servicio.paso()
+        self.lanzador.terminar("eliminar", {"ok": False, "motivo": "no_se_pudo_borrar"})
+        self.servicio.paso()
+        self.servicio.paso()
+
+        self.assertEqual(len(self.lanzador.lanzados("verificar")), 1)
+        self.assertTrue(any("No pude borrar" in m["texto"] for m in self.telegram.mensajes))
+
     def test_rechazar_no_sube_no_vuelve_a_preguntar_y_sigue(self):
         _, mensaje = self.pedir_aprobacion()
         self.album_en_cola("Banda - Siguiente")
@@ -311,7 +350,7 @@ class TestReinicio(BaseServicio):
         self.telegram.apretar(mensaje, "✅ Subir")
         self.servicio.paso()
 
-        self.assertEqual(len(self.telegram.mensajes), 1)
+        self.assertEqual(len(self.telegram.mensajes), 2)
         self.assertEqual(self.lanzador.lanzados("verificar"), [])
         self.assertIn(["programar", "--video-id", "VID0", "--esperar"], self.lanzador.lanzados())
         self.assertIn(["subir", "--carpeta", carpeta], self.lanzador.lanzados())
@@ -369,7 +408,7 @@ class TestConexiones(unittest.TestCase):
         telegram = sp.Telegram("123:SECRETO", "42")
 
         with mock.patch.object(sp.requests, "post", side_effect=[rechazo, enviado]) as post:
-            message_id = telegram.mandar("¿Lo subo?", botones=[("✅ Subir", "subir:q1")], foto=foto)
+            message_id = telegram.mandar("¿Lo subo?", botones=[[("✅ Subir", "subir:q1")]], foto=foto)
 
         self.assertEqual(message_id, 7)
         self.assertTrue(post.call_args.args[0].endswith("/sendMessage"))

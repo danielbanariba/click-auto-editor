@@ -25,6 +25,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import quote
 
 import requests
 
@@ -38,21 +39,26 @@ LIMITE_LEYENDA = 1024
 LIMITE_TEXTO = 4096
 SIN_CONFIGURACION = 78  # EX_CONFIG: el unit de systemd no reinicia con este código
 
+# Filas de botones. Eliminar va en su propia fila, lejos de Subir, para no apretarlo sin querer.
 BOTONES = {
-    "subir": [("✅ Subir", "subir"), ("❌ Rechazar", "rechazar")],
-    "reclamo": [("Sí, tiene reclamo", "si"), ("No tiene", "no")],
-    "reintentar": [("🔁 Reintentar", "reintentar")],
+    "subir": [
+        [("✅ Subir", "subir"), ("❌ Rechazar", "rechazar")],
+        [("🗑 Eliminar (ya está publicado)", "eliminar")],
+    ],
+    "reclamo": [[("Sí, tiene reclamo", "si"), ("No tiene", "no")]],
+    "reintentar": [[("🔁 Reintentar", "reintentar")]],
 }
 AVISO_BOTON = {
     "subir": "Subiendo…",
     "rechazar": "No lo subo",
+    "eliminar": "Borrando…",
     "si": "Programando…",
     "no": "Programando…",
     "reintentar": "Reintentando…",
 }
 # Mientras haya una de estas preguntas abiertas no se renderiza otro álbum.
 PREGUNTAS_QUE_FRENAN = ("subir", "reintentar")
-PASOS_DEL_ALBUM = ("renderizar", "verificar", "subir")
+PASOS_DEL_ALBUM = ("renderizar", "verificar", "subir", "eliminar")
 MOTIVOS_SUBIDA = {
     "limite_canal": "YouTube no deja subir más videos por hoy",
     "sin_credenciales": "no hay credenciales con cuota",
@@ -60,6 +66,10 @@ MOTIVOS_SUBIDA = {
 }
 
 log = logging.getLogger("servicio_publicar")
+
+
+def acciones(tipo):
+    return [accion for fila in BOTONES[tipo] for _, accion in fila]
 
 
 class ErrorTelegram(Exception):
@@ -107,7 +117,9 @@ class Telegram:
         datos = {"chat_id": self.chat_id}
         if botones:
             datos["reply_markup"] = {
-                "inline_keyboard": [[{"text": t, "callback_data": d} for t, d in botones]]
+                "inline_keyboard": [
+                    [{"text": t, "callback_data": d} for t, d in fila] for fila in botones
+                ]
             }
         if foto and Path(foto).is_file():
             try:
@@ -307,8 +319,20 @@ class Servicio:
         texto = resultado.get("resumen") or album
         if not resultado.get("ok"):
             texto += "\n\n⚠️ Hay tests fallidos."
+        previas = []
+        busqueda = resultado.get("busqueda")
+        if resultado.get("captura_busqueda"):
+            previas.append(
+                {"texto": f"🔎 Búsqueda en YouTube: {busqueda}", "foto": resultado["captura_busqueda"]}
+            )
+        elif busqueda:
+            texto += f"\n\n🔎 https://www.youtube.com/results?search_query={quote(busqueda)}"
         self.preguntar(
-            "subir", f"{texto}\n\n¿Lo subo?", foto=resultado.get("captura"), carpeta=carpeta
+            "subir",
+            f"{texto}\n\n¿Lo subo?",
+            foto=resultado.get("captura"),
+            carpeta=carpeta,
+            previas=previas,
         )
 
     def tras_subir(self, resultado, argumentos):
@@ -342,6 +366,16 @@ class Servicio:
             self.avisar(f"❌ No pude subir {album}: {explicacion}. La carpeta ya no existe.")
             return
         self.preguntar("subir", f"❌ No pude subir {album}: {explicacion}.\n\n¿Reintento?", carpeta=carpeta)
+
+    def tras_eliminar(self, resultado, argumentos):
+        album = Path(valor(argumentos, "--carpeta")).name
+        if resultado.get("ok"):
+            self.avisar(f"🗑 Borré {album}: ya estaba publicado. Sigo con el próximo.")
+            return
+        # Que no se vuelva a ofrecer: la carpeta sigue ahí y el usuario ya decidió.
+        self.estado["rechazados"].append(album)
+        self.guardar()
+        self.avisar(f"❌ No pude borrar {album} ({resultado.get('motivo')}). Quedó en Renderizando/.")
 
     def tras_programar(self, resultado, argumentos):
         video_id = valor(argumentos, "--video-id")
@@ -392,8 +426,17 @@ class Servicio:
         for qid, pregunta in self.estado["preguntas"].items():
             if pregunta["message_id"] is not None:
                 continue
-            botones = [(etiqueta, f"{accion}:{qid}") for etiqueta, accion in BOTONES[pregunta["tipo"]]]
+            botones = [
+                [(etiqueta, f"{accion}:{qid}") for etiqueta, accion in fila]
+                for fila in BOTONES[pregunta["tipo"]]
+            ]
             try:
+                # Las fotos previas (la búsqueda en YouTube) van antes, sin botones.
+                for previa in pregunta.get("previas", []):
+                    if not previa.get("enviada"):
+                        self.telegram.mandar(previa["texto"], foto=previa["foto"])
+                        previa["enviada"] = True
+                        self.guardar()
                 pregunta["message_id"] = self.telegram.mandar(
                     pregunta["texto"], botones=botones, foto=pregunta["foto"]
                 )
@@ -423,7 +466,7 @@ class Servicio:
             return
         accion, _, qid = (consulta.get("data") or "").partition(":")
         pregunta = self.estado["preguntas"].get(qid)
-        if not pregunta or accion not in [a for _, a in BOTONES[pregunta["tipo"]]]:
+        if not pregunta or accion not in acciones(pregunta["tipo"]):
             self.responder_boton(consulta, "Esa pregunta ya no está vigente.")
             return
         del self.estado["preguntas"][qid]
@@ -442,8 +485,8 @@ class Servicio:
             log.warning("No se pudo responder el botón: %s", exc)
 
     def respuesta_subir(self, accion, pregunta):
-        if accion == "subir":
-            self.lanzar_paso("subir", "--carpeta", pregunta["carpeta"])
+        if accion in ("subir", "eliminar"):
+            self.lanzar_paso(accion, "--carpeta", pregunta["carpeta"])
             return
         album = Path(pregunta["carpeta"]).name
         self.estado["rechazados"].append(album)

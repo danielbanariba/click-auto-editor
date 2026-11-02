@@ -7,6 +7,7 @@ decida el paso siguiente; el resto de la salida va a data/agente/logs/.
     renderizar   renderiza el próximo álbum y devuelve su carpeta
     verificar    corre los tests del video y genera la captura
     subir        sube el video como privado y borra la carpeta del álbum
+    eliminar     borra la carpeta del álbum sin subirlo (ya estaba publicado)
     programar    espera el procesado, revisa reclamos y programa la fecha
     estado       videos sin programar, álbumes sin aprobar y render en curso
 """
@@ -25,6 +26,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import quote
 
 from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
@@ -532,6 +534,46 @@ def generar_captura(video, duracion, destino):
     return destino if resultado.returncode == 0 and destino.exists() else None
 
 
+def capturar_busqueda(carpeta, uploader=None):
+    """Captura la búsqueda pública del álbum en YouTube, para ver si ya está publicado.
+
+    Usa el mismo título que la verificación manual de `3. subir_video_API.py`.
+    Navegador propio y sin perfil: no choca con la revisión de Studio.
+    """
+    carpeta = Path(carpeta)
+    uploader = uploader or uploader_real()
+    titulo = uploader.build_preview_title(carpeta, uploader.cargar_repertorio())
+    destino = DIR_CAPTURAS / f"busqueda_{slug(carpeta.name)}.png"
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        print(f"Sin Playwright, no hay captura de la búsqueda: {exc}")
+        return None, titulo
+    try:
+        with sync_playwright() as playwright:
+            navegador = playwright.chromium.launch(headless=True)
+            try:
+                pagina = navegador.new_page(viewport={"width": 1280, "height": 1000}, locale="es-419")
+                pagina.goto(
+                    f"https://www.youtube.com/results?search_query={quote(titulo)}",
+                    wait_until="domcontentloaded",
+                    timeout=60000,
+                )
+                try:
+                    pagina.wait_for_selector("ytd-video-renderer", timeout=20000)
+                except PlaywrightError:
+                    pass  # Sin resultados también sirve: se captura lo que haya.
+                pagina.screenshot(path=str(destino))
+            finally:
+                navegador.close()
+    except PlaywrightError as exc:
+        print(f"No se pudo capturar la búsqueda en YouTube: {exc}")
+        return None, titulo
+    return destino, titulo
+
+
 def verificar(carpeta, ancho=VIDEO_WIDTH, alto=VIDEO_HEIGHT, intro=INTRO_DURATION):
     carpeta = Path(carpeta)
     # El mismo archivo que después elige `subir`.
@@ -544,11 +586,14 @@ def verificar(carpeta, ancho=VIDEO_WIDTH, alto=VIDEO_HEIGHT, intro=INTRO_DURATIO
     duracion = float((sondeo or {}).get("format", {}).get("duration", 0) or 0)
     captura = generar_captura(video, duracion, DIR_CAPTURAS / f"{slug(carpeta.name)}.jpg") if sondeo else None
     errores = [c for c in checks if not c["ok"] and c["nivel"] == "error"]
+    captura_busqueda, busqueda = capturar_busqueda(carpeta)
     return {
         "ok": not errores,
         "album": carpeta.name,
         "video": str(video),
         "captura": str(captura) if captura else None,
+        "captura_busqueda": str(captura_busqueda) if captura_busqueda else None,
+        "busqueda": busqueda,
         "checks": checks,
         "resumen": armar_resumen(carpeta.name, duracion, checks),
     }
@@ -594,6 +639,34 @@ def subir_con_rotacion(uploader, youtube, video, metadata):
             raise SinCredenciales("No hay mas credenciales de upload utilizables.")
 
 
+def borrar_album(uploader, carpeta, raiz):
+    """Borra la carpeta del álbum (audio, portada y video) y sus capturas."""
+    borrada = uploader.safe_delete_folder(carpeta, raiz)
+    for captura in (
+        DIR_CAPTURAS / f"{slug(carpeta.name)}.jpg",
+        DIR_CAPTURAS / f"busqueda_{slug(carpeta.name)}.png",
+    ):
+        captura.unlink(missing_ok=True)
+    return bool(borrada)
+
+
+def eliminar(carpeta, uploader=None, raices=RAICES_BORRABLES):
+    """Borra un álbum renderizado que ya estaba publicado, sin subirlo."""
+    carpeta = Path(carpeta)
+    if not carpeta.is_dir():
+        return {"ok": False, "motivo": "carpeta_no_existe", "carpeta": str(carpeta)}
+    raiz = raiz_borrable(carpeta, raices)
+    if raiz is None:
+        return {"ok": False, "motivo": "carpeta_fuera_de_raiz", "carpeta": str(carpeta)}
+    uploader = uploader or uploader_real()
+    log = ruta_log("eliminar")
+    with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
+        borrada = borrar_album(uploader, carpeta, raiz)
+    if not borrada:
+        return {"ok": False, "motivo": "no_se_pudo_borrar", "album": carpeta.name, "log": str(log)}
+    return {"ok": True, "album": carpeta.name, "log": str(log)}
+
+
 def subir(carpeta, uploader=None, sin_deathgrind=False, raices=RAICES_BORRABLES):
     carpeta = Path(carpeta)
     if not carpeta.is_dir():
@@ -637,13 +710,12 @@ def subir(carpeta, uploader=None, sin_deathgrind=False, raices=RAICES_BORRABLES)
         video_id, metadata["title"], carpeta.name, datetime.now().astimezone()
     )
     with open(log, "a", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
-        borrada = uploader.safe_delete_folder(carpeta, raiz)
-    (DIR_CAPTURAS / f"{slug(carpeta.name)}.jpg").unlink(missing_ok=True)
+        borrada = borrar_album(uploader, carpeta, raiz)
     return {
         "ok": True,
         "video_id": video_id,
         "titulo": metadata["title"],
-        "carpeta_borrada": bool(borrada),
+        "carpeta_borrada": borrada,
         "studio": f"https://studio.youtube.com/video/{video_id}/edit",
         "log": str(log),
     }
@@ -877,6 +949,9 @@ def parse_args(argv=None):
     p.add_argument("--carpeta", required=True, help="Carpeta devuelta por renderizar.")
     p.add_argument("--sin-deathgrind", action="store_true", help="No usar la API de DeathGrind.")
 
+    p = sub.add_parser("eliminar", help="Borra la carpeta del álbum sin subirlo (ya publicado).")
+    p.add_argument("--carpeta", required=True, help="Carpeta devuelta por renderizar.")
+
     p = sub.add_parser("programar", help="Revisa reclamos y programa la fecha de publicación.")
     p.add_argument("--video-id", required=True)
     p.add_argument(
@@ -910,6 +985,8 @@ def main(argv=None):
         return responder(verificar(args.carpeta))
     if args.comando == "subir":
         return responder(subir(args.carpeta, sin_deathgrind=args.sin_deathgrind))
+    if args.comando == "eliminar":
+        return responder(eliminar(args.carpeta))
     if args.comando == "programar":
         reclamo = None if args.reclamo is None else args.reclamo == "si"
         return responder(programar(args.video_id, esperar=args.esperar, reclamo=reclamo))

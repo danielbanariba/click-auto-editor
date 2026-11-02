@@ -42,8 +42,9 @@ The old Windows/Adobe pipeline (steps 0-8) lives in `old/` as reference only.
 
 `servicio_publicar.py` runs as a systemd user service
 (`systemd/publicar-albumes.service`) and publishes one album at a time:
-render → checks → one Telegram message with the screenshot and the
-Subir / Rechazar buttons → on Subir, private upload and folder deletion →
+render → checks → a YouTube search screenshot, then one Telegram message
+with the video screenshot and the Subir / Rechazar / Eliminar buttons → on
+Subir, private upload and folder deletion (Eliminar deletes without uploading) →
 claim check → schedule. Nothing is uploaded and no other album is rendered
 until the user presses a button. It needs `PUBLICAR_TELEGRAM_TOKEN` and
 `PUBLICAR_TELEGRAM_CHAT_ID` in `.env` (its own bot: Hermes keeps
@@ -60,8 +61,9 @@ logs, screenshots and state go to `data/agente/` (gitignored).
 
 ```bash
 env/bin/python pipeline_agente.py renderizar             # next album → Renderizando/
-env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/4K checks + screenshot
+env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/4K checks, screenshot + YouTube search screenshot
 env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, then deletes the album folder
+env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the album folder without uploading (already published)
 env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → next free hour or +2 years
 env/bin/python pipeline_agente.py estado [--esperar-render]  # unscheduled uploads, rendered albums awaiting approval, render running
 ```

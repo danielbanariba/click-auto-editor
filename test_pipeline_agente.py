@@ -99,7 +99,12 @@ def crear_album(carpeta, pista_s, video_s, audio="tono", tamanio="320x180"):
 class TestVerificar(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self.parches = [mock.patch.object(pa, "DIR_CAPTURAS", self.tmp / "capturas")]
+        self.busqueda = mock.Mock(return_value=(None, "Banda - Album (Full Album)"))
+        self.parches = [
+            mock.patch.object(pa, "DIR_CAPTURAS", self.tmp / "capturas"),
+            # La búsqueda real abre un navegador y sale a internet.
+            mock.patch.object(pa, "capturar_busqueda", self.busqueda),
+        ]
         for parche in self.parches:
             parche.start()
 
@@ -118,6 +123,17 @@ class TestVerificar(unittest.TestCase):
         self.assertEqual(self.fallidos(resultado), set())
         self.assertTrue(Path(resultado["captura"]).exists())
         self.assertIn("Banda - Album", resultado["resumen"])
+
+    def test_devuelve_la_captura_de_la_busqueda_del_album(self):
+        carpeta = crear_album(self.tmp / "Banda - Album", pista_s=4, video_s=5)
+        captura = self.tmp / "capturas" / "busqueda.png"
+        self.busqueda.return_value = (captura, "Banda - Album (Full Album)")
+
+        resultado = pa.verificar(carpeta, ancho=320, alto=180, intro=1.0)
+
+        self.assertEqual(Path(self.busqueda.call_args.args[0]), Path(carpeta))
+        self.assertEqual(resultado["captura_busqueda"], str(captura))
+        self.assertEqual(resultado["busqueda"], "Banda - Album (Full Album)")
 
     def test_video_mudo_falla(self):
         carpeta = crear_album(self.tmp / "Mudo", pista_s=4, video_s=5, audio="mudo")
@@ -297,6 +313,26 @@ class TestSubir(unittest.TestCase):
         self.assertEqual(resultado["motivo"], "limite_canal")
         self.assertTrue(self.carpeta.exists())
         self.assertFalse(pa.PENDIENTES_JSON.exists())
+
+    def test_eliminar_borra_la_carpeta_y_su_captura(self):
+        captura = pa.DIR_CAPTURAS / f"{pa.slug(self.carpeta.name)}.jpg"
+        captura.parent.mkdir(parents=True)
+        captura.write_bytes(b"jpg")
+
+        resultado = pa.eliminar(self.carpeta, uploader=self.uploader(None), raices=(self.raiz,))
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertFalse(self.carpeta.exists())
+        self.assertFalse(captura.exists())
+
+    def test_eliminar_fuera_de_las_raices_no_borra_nada(self):
+        afuera = self.tmp / "otra" / "Banda - Album"
+        shutil.copytree(self.carpeta, afuera)
+
+        resultado = pa.eliminar(afuera, uploader=self.uploader(None), raices=(self.raiz,))
+
+        self.assertEqual(resultado["motivo"], "carpeta_fuera_de_raiz")
+        self.assertTrue(afuera.exists())
 
     def test_carpeta_fuera_de_las_raices_no_se_sube_ni_se_borra(self):
         afuera = self.tmp / "otra" / "Banda - Album"
