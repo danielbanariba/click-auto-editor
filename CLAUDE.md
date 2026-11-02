@@ -127,6 +127,7 @@ Multiple OAuth credential pairs in `credentials/`:
 
 Central config for all scripts. Key settings:
 - `BASE_DIR`: root data directory (external drive at `/mnt/Entretenimiento/01_edicion_automatizada`)
+- `RENDER_SSD_DIR`: SSD (`/mnt/Render`, btrfs) that holds `Renderizando/`; rendered albums wait there for upload, and nothing renders while it is unmounted
 - `USE_CPP_VHS`: enable C++/CUDA VHS renderer (default `True`)
 - `USE_GPU` / `USE_RAMDISK`: GPU and ramdisk flags
 - `ALLOW_FFMPEG_FALLBACK`: fall back to FFmpeg if CUDA fails

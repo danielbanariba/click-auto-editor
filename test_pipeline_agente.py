@@ -216,6 +216,13 @@ class TestRetomar(unittest.TestCase):
         self.assertEqual(resultado["por_aprobar"], [str(listo)])
         self.assertFalse(resultado["render_en_curso"])
 
+    def test_renderizar_sin_el_ssd_montado_no_renderiza(self):
+        with mock.patch.object(pa, "RENDER_SSD_DIR", self.tmp), mock.patch.object(
+            pa.subprocess, "run", side_effect=AssertionError("lanzó un render")
+        ):
+            resultado = pa.renderizar()
+        self.assertEqual(resultado["motivo"], "disco_no_disponible")
+
     def test_renderizar_no_lanza_otro_render_si_ya_hay_uno(self):
         self.lanzar_render_falso(30)
         with mock.patch.object(pa.subprocess, "run", side_effect=AssertionError("lanzó un render")):

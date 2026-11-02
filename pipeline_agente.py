@@ -33,7 +33,6 @@ from googleapiclient.errors import HttpError
 
 from config import (
     AUDIO_FORMATS,
-    BASE_DIR,
     DIR_AUDIO_SCRIPTS,
     DIR_ERROR404,
     DIR_RENDERIZANDO,
@@ -41,6 +40,7 @@ from config import (
     INTRO_DURATION,
     MIN_FREE_SPACE_GB,
     PROJECT_ROOT,
+    RENDER_SSD_DIR,
     VIDEO_HEIGHT,
     VIDEO_WIDTH,
 )
@@ -331,8 +331,15 @@ def renderizar(carpeta=None):
     # Dos renders 4K a la vez llenan el disco y la GPU.
     if render_en_curso():
         return {"ok": False, "motivo": "render_en_curso"}
+    # El álbum renderizado queda en el SSD: sin él montado no se renderiza.
+    if not os.path.ismount(RENDER_SSD_DIR):
+        return {
+            "ok": False,
+            "motivo": "disco_no_disponible",
+            "detalle": f"el SSD {RENDER_SSD_DIR} no está montado",
+        }
     try:
-        libre_gb = shutil.disk_usage(BASE_DIR).free / 1024**3
+        libre_gb = shutil.disk_usage(RENDER_SSD_DIR).free / 1024**3
     except OSError as exc:
         return {"ok": False, "motivo": "disco_no_disponible", "detalle": str(exc)}
     if libre_gb < MIN_FREE_SPACE_GB:
