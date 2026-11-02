@@ -426,6 +426,19 @@ class TestProgramarFallido(BaseServicio):
         self.assertEqual(self.textos().count(self.REINTENTO), 3)
         self.assertEqual(len(self.preguntas()), 1)
 
+    def test_reintentar_repite_el_programar_que_fallo_con_la_respuesta_del_reclamo(self):
+        # Si ya contestaste si tenía reclamo, el botón no vuelve a revisar Studio:
+        # relanza el mismo programar que falló, con su --reclamo.
+        self.ARGUMENTOS = ["programar", "--video-id", "VID1", "--reclamo", "si"]
+        self.fallar_tres_veces()
+        self.telegram.apretar(self.ultima_pregunta(), "🔁 Reintentar")
+        self.servicio.paso()
+
+        self.assertEqual(
+            self.lanzador.lanzados("programar")[-1],
+            ["programar", "--video-id", "VID1", "--reclamo", "si"],
+        )
+
     def test_programar_exitoso_reinicia_la_cuenta(self):
         self.fallar()
         self.esperar_reintento()
