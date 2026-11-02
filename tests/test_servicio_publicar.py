@@ -4,8 +4,12 @@ Telegram y los pasos de pipeline_agente.py son falsos; las carpetas y el
 estado del servicio son reales (en un directorio temporal).
 """
 import logging
+import os
 import shutil
+import signal
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -481,6 +485,183 @@ class TestReinicio(BaseServicio):
         with mock.patch.object(pa, "render_en_curso", return_value=True):
             self.servicio.paso()
         self.assertEqual(self.lanzador.lanzados(), [])
+
+
+class TestTiempoMaximo(BaseServicio):
+    """Un paso colgado no puede frenar el servicio para siempre.
+
+    Los pasos son procesos reales (un guion de Python que duerme) y el reloj
+    del servicio es falso, así nadie espera 30 minutos de verdad.
+    """
+
+    def setUp(self):
+        super().setUp()
+        parche = mock.patch.object(pa, "DIR_LOGS", self.tmp / "logs")
+        parche.start()
+        self.addCleanup(parche.stop)
+        self.ahora = 1000.0
+        self.servicio.reloj = lambda: self.ahora
+        self.servicio.lanzar = self.lanzar_real
+        self.guion = "import time; time.sleep(600)"
+
+    def lanzar_real(self, argumentos):
+        proceso = sp.Proceso(argumentos, comando=[sys.executable, "-c", self.guion])
+        self.addCleanup(self.matar, proceso)
+        return proceso
+
+    @staticmethod
+    def matar(proceso):
+        try:
+            os.killpg(proceso.popen.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proceso.popen.kill()
+        proceso.popen.wait()
+
+    def primera_linea(self, proceso):
+        """Espera a que el guion avise que ya arrancó (instaló su señal, lanzó su hijo)."""
+        limite = time.monotonic() + 10
+        while time.monotonic() < limite:
+            texto = proceso.salida.read_text(encoding="utf-8")
+            if texto.strip():
+                return texto.splitlines()[0]
+            time.sleep(0.05)
+        self.fail("el paso no escribió nada")
+
+    @staticmethod
+    def esta_vivo(pid):
+        try:
+            with open(f"/proc/{pid}/stat", "r", encoding="utf-8") as archivo:
+                return archivo.read().rsplit(")", 1)[1].split()[0] != "Z"
+        except FileNotFoundError:
+            return False
+
+    def correr(self, segundos):
+        """Deja pasar `segundos` desde el lanzamiento y revisa las tareas."""
+        self.ahora = 1000.0 + segundos
+        self.servicio.revisar_tareas()
+
+    def paso_lanzado(self, *argumentos):
+        self.servicio.lanzar_paso(*argumentos)
+        return self.servicio.tareas[-1][1]
+
+    def test_verificar_colgado_se_corta_y_avisa_sin_ofrecer_subir(self):
+        carpeta = self.album_renderizado("Banda - Disco")
+        proceso = self.paso_lanzado("verificar", "--carpeta", carpeta)
+        limite = sp.limite_del_paso("verificar")
+
+        self.correr(limite - 1)
+        self.assertIsNone(proceso.popen.poll())
+        self.assertEqual(self.telegram.mensajes, [])
+
+        self.correr(limite + 1)
+        self.assertIsNotNone(proceso.popen.poll())
+        self.assertEqual(self.servicio.tareas, [])
+        self.assertEqual(len(self.telegram.mensajes), 1)
+        aviso = self.telegram.mensajes[0]
+        self.assertEqual(aviso["botones"], [])  # no "¿Lo subo?" de un álbum sin verificar
+        self.assertIn("Banda - Disco", aviso["texto"])
+        self.assertIn(str(proceso.salida), aviso["texto"])
+
+    def test_verificar_cortado_se_reintenta_al_pasar_la_pausa(self):
+        carpeta = self.album_renderizado("Banda - Disco")
+        self.servicio.lanzar = self.lanzador
+        argumentos = ("verificar", "--carpeta", carpeta)
+        self.servicio.tras_verificar(
+            {"ok": False, "motivo": "tiempo_agotado", "log": "paso.out"}, argumentos
+        )
+
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("verificar"), [])
+
+        self.ahora += sp.REINTENTO_S + 1
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("verificar"), [list(argumentos)])
+
+    def test_programar_aguanta_mas_que_un_paso_corto_y_se_corta_al_pasar_el_suyo(self):
+        proceso = self.paso_lanzado("programar", "--video-id", "VID1", "--esperar")
+
+        self.correr(sp.limite_del_paso("verificar") + 1)
+        self.assertIsNone(proceso.popen.poll())
+        self.assertEqual(self.telegram.mensajes, [])
+
+        self.correr(sp.limite_del_paso("programar") + 1)
+        self.assertIsNotNone(proceso.popen.poll())
+        self.assertIn("VID1", self.telegram.mensajes[0]["texto"])
+
+        self.servicio.lanzar = self.lanzador
+        self.ahora += sp.REINTENTO_S + 1
+        self.servicio.revisar_reintentos()
+        self.assertEqual(
+            self.lanzador.lanzados("programar"), [["programar", "--video-id", "VID1", "--esperar"]]
+        )
+
+    def test_cortar_mata_tambien_a_los_hijos_del_paso(self):
+        self.guion = (
+            "import subprocess, sys, time\n"
+            "hijo = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'])\n"
+            "print(hijo.pid, flush=True)\n"
+            "time.sleep(600)\n"
+        )
+        proceso = self.lanzar_real(("verificar", "--carpeta", "x"))
+        pid_hijo = int(self.primera_linea(proceso))
+        self.assertTrue(self.esta_vivo(pid_hijo))
+
+        proceso.cortar()
+
+        limite = time.monotonic() + 5
+        while self.esta_vivo(pid_hijo) and time.monotonic() < limite:
+            time.sleep(0.05)
+        self.assertFalse(self.esta_vivo(pid_hijo))
+
+    def test_paso_que_ignora_sigterm_muere_con_sigkill(self):
+        self.guion = (
+            "import signal, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "print('listo', flush=True)\n"
+            "time.sleep(600)\n"
+        )
+        proceso = self.lanzar_real(("verificar", "--carpeta", "x"))
+        self.primera_linea(proceso)
+
+        with mock.patch.object(sp, "GRACIA_CORTE_S", 0.3):
+            proceso.cortar()
+
+        self.assertEqual(proceso.popen.returncode, -signal.SIGKILL)
+
+    def comprobar_sin_cortar(self, argumentos, limite):
+        proceso = self.paso_lanzado(*argumentos)
+
+        self.correr(limite - 1)
+        self.assertEqual(self.telegram.mensajes, [])
+
+        self.correr(limite + 60)
+        self.correr(limite + 3600)
+
+        self.assertIsNone(proceso.popen.poll())
+        self.assertEqual(len(self.servicio.tareas), 1)
+        self.assertEqual(len(self.telegram.mensajes), 1)  # un solo aviso por corrida
+        texto = self.telegram.mensajes[0]["texto"]
+        self.assertIn(" ".join(argumentos), texto)
+        self.assertIn(sp.duracion_legible(limite + 60), texto)
+        self.assertIn(str(proceso.salida), texto)
+
+    def test_render_que_pasa_su_limite_no_se_corta_y_avisa_una_vez(self):
+        # Mismo tiempo que ya espera pipeline_agente.py por un render.
+        self.comprobar_sin_cortar(("renderizar",), pa.ESPERA_RENDER_MAX_S)
+
+    def test_subida_que_pasa_su_limite_no_se_corta_y_avisa_una_vez(self):
+        carpeta = self.album_renderizado("Banda - Disco")
+        self.comprobar_sin_cortar(("subir", "--carpeta", carpeta), sp.limite_del_paso("subir"))
+
+    def test_borrado_que_pasa_su_limite_no_se_corta_y_avisa_una_vez(self):
+        carpeta = self.album_renderizado("Banda - Disco")
+        self.comprobar_sin_cortar(("eliminar", "--carpeta", carpeta), sp.limite_del_paso("eliminar"))
+
+    def test_duracion_legible_en_horas_y_minutos(self):
+        self.assertEqual(sp.duracion_legible(45 * 60), "45 min")
+        self.assertEqual(sp.duracion_legible(6 * 3600), "6 h")
+        self.assertEqual(sp.duracion_legible(6 * 3600 + 90), "6 h 1 min")
 
 
 class TestAvisos(BaseServicio):

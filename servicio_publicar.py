@@ -20,6 +20,7 @@ Necesita en .env:
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -65,6 +66,16 @@ AVISO_BOTON = {
 # "reprogramar" no frena: el video ya está subido y no depende del render.
 PREGUNTAS_QUE_FRENAN = ("subir", "reintentar")
 PASOS_DEL_ALBUM = ("renderizar", "verificar", "subir", "eliminar")
+# Tiempo máximo de cada paso. Los cortables son idempotentes; los demás mueven o
+# borran carpetas y cortarlos a medias dejaría un álbum a medio mover: solo se avisa.
+LIMITE_PASO_S = 30 * 60  # verificar, eliminar y cualquier paso que no esté abajo
+LIMITES_PASO_S = {
+    "renderizar": pa.ESPERA_RENDER_MAX_S,
+    "subir": 4 * 3600,
+    "programar": 8 * 3600,  # espera el procesado de YouTube y el margen del reclamo
+}
+PASOS_CORTABLES = ("verificar", "programar")
+GRACIA_CORTE_S = 10  # entre SIGTERM y SIGKILL
 MOTIVOS_SUBIDA = {
     "limite_canal": "YouTube no deja subir más videos por hoy",
     "sin_credenciales": "no hay credenciales con cuota",
@@ -72,6 +83,17 @@ MOTIVOS_SUBIDA = {
 }
 
 log = logging.getLogger("servicio_publicar")
+
+
+def limite_del_paso(paso):
+    return LIMITES_PASO_S.get(paso, LIMITE_PASO_S)
+
+
+def duracion_legible(segundos):
+    horas, minutos = divmod(int(segundos) // 60, 60)
+    if not horas:
+        return f"{minutos} min"
+    return f"{horas} h {minutos} min" if minutos else f"{horas} h"
 
 
 def acciones(tipo):
@@ -169,17 +191,32 @@ def ultimo_json(ruta):
 class Proceso:
     """Un paso de pipeline_agente.py corriendo aparte; su JSON final es el resultado."""
 
-    def __init__(self, argumentos):
+    def __init__(self, argumentos, comando=None):
         pa.DIR_LOGS.mkdir(parents=True, exist_ok=True)
         marca = f"{time.strftime('%Y%m%d-%H%M%S')}_{uuid.uuid4().hex[:6]}"
         self.salida = pa.DIR_LOGS / f"servicio_{argumentos[0]}_{marca}.out"
         with open(self.salida, "w", encoding="utf-8") as archivo:
             self.popen = subprocess.Popen(
-                [sys.executable, "pipeline_agente.py", *argumentos],
+                comando or [sys.executable, "pipeline_agente.py", *argumentos],
                 cwd=PROJECT_ROOT,
                 stdout=archivo,
                 stderr=subprocess.STDOUT,
+                start_new_session=True,  # grupo propio: cortarlo alcanza a Playwright y Chromium
             )
+
+    def cortar(self):
+        """Mata el paso y todo lo que lanzó: SIGTERM al grupo y, si sigue vivo, SIGKILL."""
+        grupo = self.popen.pid
+        try:
+            os.killpg(grupo, signal.SIGTERM)
+            self.popen.wait(timeout=GRACIA_CORTE_S)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            pass
+        try:
+            os.killpg(grupo, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        self.popen.wait()
 
     def resultado(self):
         if self.popen.poll() is None:
@@ -213,6 +250,8 @@ class Servicio:
         # rechazados y subidos: álbumes que siguen en Renderizando/ pero no se vuelven a ofrecer.
         self.estado = {"offset": 0, "preguntas": {}, "rechazados": [], "subidos": []}
         self.tareas = []
+        self.inicios = {}  # proceso -> momento en que se lanzó
+        self.largos_avisados = set()  # procesos que pasaron su límite y ya se avisó
         self.reintentos = []
         self.fallos_programar = {}  # video_id -> fallos seguidos que llegaron al reintento genérico
         self.album_pausado_hasta = 0.0
@@ -251,17 +290,43 @@ class Servicio:
 
     def lanzar_paso(self, *argumentos):
         log.info("Lanzo: %s", " ".join(argumentos))
-        self.tareas.append((argumentos, self.lanzar(argumentos)))
+        proceso = self.lanzar(argumentos)
+        self.inicios[proceso] = self.reloj()
+        self.tareas.append((argumentos, proceso))
 
     def revisar_tareas(self):
         for tarea in list(self.tareas):
             argumentos, proceso = tarea
             resultado = proceso.resultado()
             if resultado is None:
+                resultado = self.vigilar_tiempo(argumentos, proceso)
+            if resultado is None:
                 continue
             self.tareas.remove(tarea)
+            self.inicios.pop(proceso, None)
+            self.largos_avisados.discard(proceso)
             log.info("Terminó %s: %s", argumentos[0], json.dumps(resultado, ensure_ascii=False)[:500])
             getattr(self, f"tras_{argumentos[0]}")(resultado, argumentos)
+
+    def vigilar_tiempo(self, argumentos, proceso):
+        """Un paso que pasó su límite se corta si es seguro; si no, se avisa una vez y se espera."""
+        paso = argumentos[0]
+        limite = limite_del_paso(paso)
+        corrido = self.reloj() - self.inicios[proceso]
+        if corrido <= limite:
+            return None
+        if paso in PASOS_CORTABLES:
+            log.warning("%s pasó los %s: lo corto", " ".join(argumentos), duracion_legible(limite))
+            proceso.cortar()
+            return {"ok": False, "motivo": "tiempo_agotado", "log": str(proceso.salida)}
+        if proceso not in self.largos_avisados:
+            self.largos_avisados.add(proceso)
+            self.avisar(
+                f"⏳ {' '.join(argumentos)} lleva {duracion_legible(corrido)} corriendo "
+                f"(el máximo es {duracion_legible(limite)}). No lo corto porque mueve o borra "
+                f"carpetas; sigo esperando.\nLog: {proceso.salida}"
+            )
+        return None
 
     def revisar_reintentos(self):
         ahora = self.reloj()
@@ -333,6 +398,14 @@ class Servicio:
             self.estado["rechazados"].append(album)
             self.guardar()
             self.avisar(f"⚠️ {album}: el render no dejó el mp4. Lo dejo de lado.")
+            return
+        if resultado.get("motivo") == "tiempo_agotado":
+            self.avisar(
+                f"⚠️ No pude verificar {album}: el paso pasó los "
+                f"{duracion_legible(limite_del_paso('verificar'))} y lo corté. "
+                f"Reintento en 30 min.\nLog: {resultado.get('log')}"
+            )
+            self.album_pausado_hasta = self.reloj() + REINTENTO_S
             return
         texto = resultado.get("resumen") or album
         if not resultado.get("ok"):
