@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Pasos del pipeline que ejecuta el agente (Hermes), de a un álbum.
+"""Pasos del pipeline que ejecuta servicio_publicar.py, de a un álbum.
 
-Cada subcomando termina imprimiendo UNA línea JSON para que el agente
+Cada subcomando termina imprimiendo UNA línea JSON para que el servicio
 decida el paso siguiente; el resto de la salida va a data/agente/logs/.
 
     renderizar   renderiza el próximo álbum y devuelve su carpeta

@@ -38,12 +38,25 @@ Scripts are numbered but **not all are sequential**. The active pipeline is:
 
 The old Windows/Adobe pipeline (steps 0-8) lives in `old/` as reference only.
 
-### Agent-driven pipeline (Hermes + Telegram)
+### Publishing service (Telegram approval)
 
-`pipeline_agente.py` runs the pipeline one album at a time for the Hermes
-skill `hermes/skills/publicar-album/SKILL.md` (loaded through
-`skills.external_dirs` in `~/.hermes/config.yaml`). Every subcommand prints
-one JSON line; logs, screenshots and state go to `data/agente/` (gitignored).
+`servicio_publicar.py` runs as a systemd user service
+(`systemd/publicar-albumes.service`) and publishes one album at a time:
+render → checks → one Telegram message with the screenshot and the
+Subir / Rechazar buttons → on Subir, private upload and folder deletion →
+claim check → schedule. Nothing is uploaded and no other album is rendered
+until the user presses a button. It needs `PUBLICAR_TELEGRAM_TOKEN` and
+`PUBLICAR_TELEGRAM_CHAT_ID` in `.env` (its own bot: Hermes keeps
+`@banar_precios_bot`). Open questions survive restarts in
+`data/agente/servicio.json`.
+
+```bash
+journalctl --user -u publicar-albumes -f         # what the service is doing
+systemctl --user restart publicar-albumes        # after changing the code
+```
+
+Each step is a `pipeline_agente.py` subcommand that prints one JSON line;
+logs, screenshots and state go to `data/agente/` (gitignored).
 
 ```bash
 env/bin/python pipeline_agente.py renderizar             # next album → Renderizando/
@@ -55,7 +68,7 @@ env/bin/python pipeline_agente.py estado [--esperar-render]  # unscheduled uploa
 
 Scheduling: one video per hour (24 per day); claimed videos go two years ahead.
 Claim detection reads YouTube Studio (`/video/<id>/copyright`); an unclear page
-returns `reclamo_desconocido` and the agent asks the user instead of guessing.
+returns `reclamo_desconocido` and the service asks the user instead of guessing.
 
 ### Common commands
 

@@ -1,0 +1,462 @@
+#!/usr/bin/env python3
+"""Servicio que publica los álbumes de a uno, con aprobación por Telegram.
+
+Corre siempre en segundo plano (systemd/publicar-albumes.service):
+
+1. Renderiza el próximo álbum, o toma uno que ya esté en Renderizando/.
+2. Lo verifica y manda UN mensaje con la captura y los botones Subir / Rechazar.
+3. No sube nada ni renderiza otro hasta que el usuario aprieta un botón.
+4. Con Subir: lo sube como privado, borra la carpeta y sigue con el próximo.
+   En paralelo espera el procesado, revisa reclamos y programa la fecha.
+
+Cada paso lo hace pipeline_agente.py en un proceso aparte. Las preguntas
+abiertas y los álbumes rechazados viven en data/agente/servicio.json, así un
+reinicio no pierde nada.
+
+Necesita en .env:
+    PUBLICAR_TELEGRAM_TOKEN     token del bot (de @BotFather)
+    PUBLICAR_TELEGRAM_CHAT_ID   chat del usuario: solo él puede apretar los botones
+"""
+import json
+import logging
+import os
+import subprocess
+import sys
+import time
+import uuid
+from pathlib import Path
+
+import requests
+
+import pipeline_agente as pa
+from config import PROJECT_ROOT
+
+ESTADO_JSON = pa.DIR_AGENTE / "servicio.json"
+ESPERA_TELEGRAM_S = 20
+REINTENTO_S = 30 * 60
+LIMITE_LEYENDA = 1024
+LIMITE_TEXTO = 4096
+SIN_CONFIGURACION = 78  # EX_CONFIG: el unit de systemd no reinicia con este código
+
+BOTONES = {
+    "subir": [("✅ Subir", "subir"), ("❌ Rechazar", "rechazar")],
+    "reclamo": [("Sí, tiene reclamo", "si"), ("No tiene", "no")],
+    "reintentar": [("🔁 Reintentar", "reintentar")],
+}
+AVISO_BOTON = {
+    "subir": "Subiendo…",
+    "rechazar": "No lo subo",
+    "si": "Programando…",
+    "no": "Programando…",
+    "reintentar": "Reintentando…",
+}
+# Mientras haya una de estas preguntas abiertas no se renderiza otro álbum.
+PREGUNTAS_QUE_FRENAN = ("subir", "reintentar")
+PASOS_DEL_ALBUM = ("renderizar", "verificar", "subir")
+MOTIVOS_SUBIDA = {
+    "limite_canal": "YouTube no deja subir más videos por hoy",
+    "sin_credenciales": "no hay credenciales con cuota",
+    "sin_metadata": "no se pudo armar la descripción",
+}
+
+log = logging.getLogger("servicio_publicar")
+
+
+class ErrorTelegram(Exception):
+    pass
+
+
+ERRORES_TELEGRAM = (ErrorTelegram, ValueError)
+
+
+class Telegram:
+    def __init__(self, token, chat_id):
+        self.token = token
+        self.chat_id = str(chat_id)
+
+    def llamar(self, metodo, limite_s=30, archivos=None, **datos):
+        datos = {
+            clave: json.dumps(valor) if isinstance(valor, (dict, list)) else valor
+            for clave, valor in datos.items()
+        }
+        try:
+            respuesta = requests.post(
+                f"https://api.telegram.org/bot{self.token}/{metodo}",
+                data=datos,
+                files=archivos,
+                timeout=limite_s,
+            )
+        except requests.RequestException as exc:
+            # El mensaje de requests trae la URL, y la URL trae el token.
+            raise ErrorTelegram(str(exc).replace(self.token, "<token>")) from None
+        cuerpo = respuesta.json()
+        if not cuerpo.get("ok"):
+            raise ErrorTelegram(f"{metodo}: {cuerpo.get('description')}")
+        return cuerpo["result"]
+
+    def actualizaciones(self, offset, espera):
+        return self.llamar(
+            "getUpdates",
+            limite_s=espera + 15,
+            offset=offset,
+            timeout=espera,
+            allowed_updates=["callback_query"],
+        )
+
+    def mandar(self, texto, botones=None, foto=None):
+        datos = {"chat_id": self.chat_id}
+        if botones:
+            datos["reply_markup"] = {
+                "inline_keyboard": [[{"text": t, "callback_data": d} for t, d in botones]]
+            }
+        if foto and Path(foto).is_file():
+            with open(foto, "rb") as archivo:
+                mensaje = self.llamar(
+                    "sendPhoto",
+                    limite_s=120,
+                    archivos={"photo": archivo},
+                    caption=texto[:LIMITE_LEYENDA],
+                    **datos,
+                )
+        else:
+            mensaje = self.llamar("sendMessage", text=texto[:LIMITE_TEXTO], **datos)
+        return mensaje["message_id"]
+
+    def quitar_botones(self, message_id):
+        self.llamar(
+            "editMessageReplyMarkup",
+            chat_id=self.chat_id,
+            message_id=message_id,
+            reply_markup={"inline_keyboard": []},
+        )
+
+    def responder_boton(self, consulta_id, texto):
+        self.llamar("answerCallbackQuery", callback_query_id=consulta_id, text=texto)
+
+
+def ultimo_json(ruta):
+    with open(ruta, "r", encoding="utf-8", errors="replace") as archivo:
+        lineas = archivo.read().splitlines()
+    for linea in reversed(lineas):
+        if linea.startswith("{"):
+            try:
+                return json.loads(linea)
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
+class Proceso:
+    """Un paso de pipeline_agente.py corriendo aparte; su JSON final es el resultado."""
+
+    def __init__(self, argumentos):
+        pa.DIR_LOGS.mkdir(parents=True, exist_ok=True)
+        marca = f"{time.strftime('%Y%m%d-%H%M%S')}_{uuid.uuid4().hex[:6]}"
+        self.salida = pa.DIR_LOGS / f"servicio_{argumentos[0]}_{marca}.out"
+        with open(self.salida, "w", encoding="utf-8") as archivo:
+            self.popen = subprocess.Popen(
+                [sys.executable, "pipeline_agente.py", *argumentos],
+                cwd=PROJECT_ROOT,
+                stdout=archivo,
+                stderr=subprocess.STDOUT,
+            )
+
+    def resultado(self):
+        if self.popen.poll() is None:
+            return None
+        return ultimo_json(self.salida) or {
+            "ok": False,
+            "motivo": "sin_respuesta",
+            "codigo": self.popen.returncode,
+            "log": str(self.salida),
+        }
+
+
+def valor(argumentos, opcion):
+    return argumentos[list(argumentos).index(opcion) + 1]
+
+
+class Servicio:
+    def __init__(self, telegram, lanzar, estado_json=ESTADO_JSON, reloj=time.monotonic):
+        self.telegram = telegram
+        self.lanzar = lanzar
+        self.ruta_estado = Path(estado_json)
+        self.reloj = reloj
+        self.estado = {"offset": 0, "preguntas": {}, "rechazados": []}
+        self.tareas = []
+        self.reintentos = []
+        self.album_pausado_hasta = 0.0
+        self.avisos = set()
+        self.pausa_error_s = 5
+
+    # -- estado -------------------------------------------------------------
+
+    def iniciar(self):
+        if self.ruta_estado.exists():
+            with open(self.ruta_estado, "r", encoding="utf-8") as archivo:
+                self.estado.update(json.load(archivo))
+        con_pregunta = {p.get("video_id") for p in self.estado["preguntas"].values()}
+        for pendiente in pa.leer_pendientes():
+            if pendiente["video_id"] not in con_pregunta:
+                self.lanzar_paso("programar", "--video-id", pendiente["video_id"], "--esperar")
+        self.enviar_preguntas()
+
+    def guardar(self):
+        self.ruta_estado.parent.mkdir(parents=True, exist_ok=True)
+        temporal = self.ruta_estado.with_name(f"{self.ruta_estado.name}.tmp")
+        with open(temporal, "w", encoding="utf-8") as archivo:
+            json.dump(self.estado, archivo, ensure_ascii=False, indent=2)
+        temporal.replace(self.ruta_estado)
+
+    # -- ciclo --------------------------------------------------------------
+
+    def paso(self):
+        self.revisar_tareas()
+        self.revisar_reintentos()
+        self.enviar_preguntas()
+        self.avanzar_album()
+        self.atender_telegram()
+
+    def lanzar_paso(self, *argumentos):
+        log.info("Lanzo: %s", " ".join(argumentos))
+        self.tareas.append((argumentos, self.lanzar(argumentos)))
+
+    def revisar_tareas(self):
+        for tarea in list(self.tareas):
+            argumentos, proceso = tarea
+            resultado = proceso.resultado()
+            if resultado is None:
+                continue
+            self.tareas.remove(tarea)
+            log.info("Terminó %s: %s", argumentos[0], json.dumps(resultado, ensure_ascii=False)[:500])
+            getattr(self, f"tras_{argumentos[0]}")(resultado, argumentos)
+
+    def revisar_reintentos(self):
+        ahora = self.reloj()
+        for reintento in [r for r in self.reintentos if r[0] <= ahora]:
+            self.reintentos.remove(reintento)
+            self.lanzar_paso(*reintento[1])
+
+    def avanzar_album(self):
+        if any(argumentos[0] in PASOS_DEL_ALBUM for argumentos, _ in self.tareas):
+            return
+        if any(p["tipo"] in PREGUNTAS_QUE_FRENAN for p in self.estado["preguntas"].values()):
+            return
+        if self.reloj() < self.album_pausado_hasta:
+            return
+        # Un render que lanzó otro (a mano o una sesión vieja) puede estar
+        # moviendo el mp4 a Renderizando/: se espera a que termine.
+        if pa.render_en_curso():
+            return
+        listos = [
+            c for c in pa.albumes_por_aprobar() if Path(c).name not in self.estado["rechazados"]
+        ]
+        if listos:
+            self.lanzar_paso("verificar", "--carpeta", listos[0])
+        elif pa.listar_carpetas(pa.DIR_AUDIO_SCRIPTS):
+            self.avisos.discard("sin_albumes")
+            self.lanzar_paso("renderizar")
+        else:
+            self.avisar_una_vez(
+                "sin_albumes", "📭 No quedan álbumes en la cola. Sigo solo cuando aparezca uno."
+            )
+
+    # -- resultados de cada paso -------------------------------------------
+
+    def tras_renderizar(self, resultado, argumentos):
+        motivo = resultado.get("motivo")
+        if resultado.get("ok"):
+            self.avisos.clear()
+            # Un render nuevo con el nombre de uno rechazado antes se vuelve a preguntar.
+            nombre = Path(resultado["carpeta"]).name
+            if nombre in self.estado["rechazados"]:
+                self.estado["rechazados"].remove(nombre)
+                self.guardar()
+            self.lanzar_paso("verificar", "--carpeta", resultado["carpeta"])
+        elif motivo in ("sin_albumes", "render_en_curso"):
+            return
+        elif motivo == "render_fallido":
+            texto = f"❌ Falló el render de {resultado.get('album')}."
+            if resultado.get("log_final"):
+                texto += f"\n\n{resultado['log_final'][-1500:]}"
+            if resultado.get("movido_a_error404"):
+                self.avisar(f"{texto}\n\nLo moví a Error404; sigo con el próximo.")
+            else:
+                self.preguntar(
+                    "reintentar", f"{texto}\n\nSigue en la cola. Arreglalo y apretá Reintentar."
+                )
+        else:
+            detalle = resultado.get("detalle") or resultado.get("libre_gb") or ""
+            self.avisar_una_vez(
+                f"render_{motivo}",
+                f"⚠️ No pude renderizar ({motivo} {detalle}). Reintento cada 30 min.",
+            )
+            self.album_pausado_hasta = self.reloj() + REINTENTO_S
+
+    def tras_verificar(self, resultado, argumentos):
+        carpeta = valor(argumentos, "--carpeta")
+        album = Path(carpeta).name
+        if resultado.get("motivo") == "sin_video":
+            self.estado["rechazados"].append(album)
+            self.guardar()
+            self.avisar(f"⚠️ {album}: el render no dejó el mp4. Lo dejo de lado.")
+            return
+        texto = resultado.get("resumen") or album
+        if not resultado.get("ok"):
+            texto += "\n\n⚠️ Hay tests fallidos."
+        self.preguntar(
+            "subir", f"{texto}\n\n¿Lo subo?", foto=resultado.get("captura"), carpeta=carpeta
+        )
+
+    def tras_subir(self, resultado, argumentos):
+        carpeta = valor(argumentos, "--carpeta")
+        album = Path(carpeta).name
+        if resultado.get("ok"):
+            texto = (
+                f"⏫ Subido como privado: {resultado['titulo']}\n"
+                "Espero que YouTube lo procese, reviso reclamos y te aviso la fecha."
+            )
+            if not resultado.get("carpeta_borrada"):
+                texto += f"\n⚠️ No pude borrar la carpeta; sigue ocupando espacio: {carpeta}"
+            self.avisar(texto)
+            self.lanzar_paso("programar", "--video-id", resultado["video_id"], "--esperar")
+            return
+        motivo = resultado.get("motivo")
+        explicacion = MOTIVOS_SUBIDA.get(motivo) or resultado.get("detalle") or motivo
+        if not Path(carpeta).is_dir():
+            self.avisar(f"❌ No pude subir {album}: {explicacion}. La carpeta ya no existe.")
+            return
+        self.preguntar("subir", f"❌ No pude subir {album}: {explicacion}.\n\n¿Reintento?", carpeta=carpeta)
+
+    def tras_programar(self, resultado, argumentos):
+        video_id = valor(argumentos, "--video-id")
+        motivo = resultado.get("motivo")
+        if resultado.get("ok"):
+            self.avisar(resultado["resumen"])
+        elif motivo == "reclamo_desconocido":
+            titulo = resultado.get("titulo") or video_id
+            self.preguntar(
+                "reclamo",
+                f"🤔 No pude saber si \"{titulo}\" tiene reclamo ({resultado.get('detalle')}).\n"
+                f"https://studio.youtube.com/video/{video_id}/copyright\n\n"
+                "¿Tiene reclamo de derechos de autor?",
+                foto=resultado.get("captura_studio"),
+                video_id=video_id,
+            )
+        elif motivo in ("fallo", "no_existe"):
+            self.avisar(f"❌ YouTube rechazó o perdió el video {video_id} ({motivo}).")
+        elif motivo == "no_es_privado":
+            self.avisar(f"⚠️ {video_id} ya no es privado: no lo programo.")
+        else:
+            self.avisar(f"⚠️ No pude programar {video_id} ({motivo}). Reintento en 30 min.")
+            self.reintentos.append((self.reloj() + REINTENTO_S, argumentos))
+
+    # -- Telegram -----------------------------------------------------------
+
+    def avisar(self, texto):
+        try:
+            self.telegram.mandar(texto)
+        except ERRORES_TELEGRAM as exc:
+            log.warning("No se pudo mandar el aviso (%s): %s", exc, texto)
+
+    def avisar_una_vez(self, clave, texto):
+        if clave not in self.avisos:
+            self.avisos.add(clave)
+            self.avisar(texto)
+
+    def preguntar(self, tipo, texto, foto=None, **datos):
+        qid = uuid.uuid4().hex[:8]
+        self.estado["preguntas"][qid] = {
+            "tipo": tipo, "texto": texto, "foto": foto, "message_id": None, **datos
+        }
+        self.guardar()
+        self.enviar_preguntas()
+
+    def enviar_preguntas(self):
+        """Manda las preguntas que todavía no llegaron (por ejemplo, sin red)."""
+        for qid, pregunta in self.estado["preguntas"].items():
+            if pregunta["message_id"] is not None:
+                continue
+            botones = [(etiqueta, f"{accion}:{qid}") for etiqueta, accion in BOTONES[pregunta["tipo"]]]
+            try:
+                pregunta["message_id"] = self.telegram.mandar(
+                    pregunta["texto"], botones=botones, foto=pregunta["foto"]
+                )
+            except ERRORES_TELEGRAM as exc:
+                log.warning("No se pudo mandar la pregunta; reintento en el próximo ciclo: %s", exc)
+                return
+            self.guardar()
+
+    def atender_telegram(self):
+        try:
+            actualizaciones = self.telegram.actualizaciones(self.estado["offset"], ESPERA_TELEGRAM_S)
+        except ERRORES_TELEGRAM as exc:
+            log.warning("Telegram no responde: %s", exc)
+            time.sleep(self.pausa_error_s)
+            return
+        for actualizacion in actualizaciones:
+            # Se guarda antes de atender: un botón nunca se procesa dos veces.
+            self.estado["offset"] = actualizacion["update_id"] + 1
+            self.guardar()
+            if "callback_query" in actualizacion:
+                self.atender_boton(actualizacion["callback_query"])
+
+    def atender_boton(self, consulta):
+        if str(consulta.get("from", {}).get("id")) != self.telegram.chat_id:
+            log.warning("Botón de un usuario no autorizado: %s", consulta.get("from"))
+            self.responder_boton(consulta, "No autorizado.")
+            return
+        accion, _, qid = (consulta.get("data") or "").partition(":")
+        pregunta = self.estado["preguntas"].get(qid)
+        if not pregunta or accion not in [a for _, a in BOTONES[pregunta["tipo"]]]:
+            self.responder_boton(consulta, "Esa pregunta ya no está vigente.")
+            return
+        del self.estado["preguntas"][qid]
+        self.guardar()
+        self.responder_boton(consulta, AVISO_BOTON[accion])
+        try:
+            self.telegram.quitar_botones(pregunta["message_id"])
+        except ERRORES_TELEGRAM as exc:
+            log.warning("No se pudieron quitar los botones: %s", exc)
+        getattr(self, f"respuesta_{pregunta['tipo']}")(accion, pregunta)
+
+    def responder_boton(self, consulta, texto):
+        try:
+            self.telegram.responder_boton(consulta.get("id"), texto)
+        except ERRORES_TELEGRAM as exc:
+            log.warning("No se pudo responder el botón: %s", exc)
+
+    def respuesta_subir(self, accion, pregunta):
+        if accion == "subir":
+            self.lanzar_paso("subir", "--carpeta", pregunta["carpeta"])
+            return
+        album = Path(pregunta["carpeta"]).name
+        self.estado["rechazados"].append(album)
+        self.guardar()
+        self.avisar(f"👌 No subo {album}. Quedó en Renderizando/; sigo con el próximo.")
+
+    def respuesta_reclamo(self, accion, pregunta):
+        self.lanzar_paso("programar", "--video-id", pregunta["video_id"], "--reclamo", accion)
+
+    def respuesta_reintentar(self, accion, pregunta):
+        """Sacar la pregunta alcanza: el próximo ciclo vuelve a renderizar."""
+
+
+def main():
+    os.chdir(PROJECT_ROOT)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    pa.uploader_real().cargar_env()
+    token = os.environ.get("PUBLICAR_TELEGRAM_TOKEN", "").strip()
+    chat_id = os.environ.get("PUBLICAR_TELEGRAM_CHAT_ID", "").strip()
+    if not token or not chat_id:
+        log.error("Faltan PUBLICAR_TELEGRAM_TOKEN o PUBLICAR_TELEGRAM_CHAT_ID en .env")
+        return SIN_CONFIGURACION
+    servicio = Servicio(Telegram(token, chat_id), Proceso)
+    servicio.iniciar()
+    log.info("Servicio en marcha")
+    while True:
+        servicio.paso()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
