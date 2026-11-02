@@ -1,15 +1,29 @@
+import http.client
 import json
 import multiprocessing
+import select
 import shutil
+import socket
+import ssl
+import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+
+import httplib2
+from google.auth.exceptions import RefreshError, TransportError
+from google.oauth2.credentials import Credentials
+from google_auth_httplib2 import AuthorizedHttp
+from googleapiclient.discovery import build_from_document
+from googleapiclient.errors import HttpError
 
 import pipeline_agente as pa
 
@@ -567,6 +581,289 @@ class TestProgramar(unittest.TestCase):
             proceso.join(timeout=30)
         horas = {resultados.get(timeout=5), resultados.get(timeout=5)}
         self.assertEqual(len(horas), 2, horas)
+
+
+class ServidorKeepAliveQueMuere:
+    """Servidor HTTPS/1.1 local que cierra la conexión keep-alive tras el primer pedido.
+
+    Cierra con FIN y luego RST (SO_LINGER 0), como un servidor que descartó una
+    conexión ociosa: el siguiente envío del cliente falla con EPIPE.
+    """
+
+    def __init__(self, directorio):
+        self.certificado = directorio / "certificado.pem"
+        clave = directorio / "clave.pem"
+        subprocess.run(
+            [
+                "openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
+                "-nodes", "-keyout", str(clave), "-out", str(self.certificado), "-days", "2",
+                "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        self.pedidos = 0
+        servidor = self
+
+        class Manejador(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_GET(self):
+                servidor.pedidos += 1
+                cuerpo = json.dumps({"items": [], "pedido": servidor.pedidos}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(cuerpo)))
+                self.end_headers()
+                self.wfile.write(cuerpo)
+                if servidor.pedidos == 1:
+                    self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                    self.close_connection = True
+
+            def log_message(self, *args):
+                pass
+
+        self.http = ThreadingHTTPServer(("127.0.0.1", 0), Manejador)
+        self.http.daemon_threads = True
+        contexto = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        contexto.load_cert_chain(self.certificado, clave)
+        self.http.socket = contexto.wrap_socket(self.http.socket, server_side=True)
+        threading.Thread(target=self.http.serve_forever, args=(0.01,), daemon=True).start()
+
+    def cerrar(self):
+        self.http.shutdown()
+        self.http.server_close()
+
+    def cliente_youtube(self):
+        """Mismo armado que en producción: googleapiclient + AuthorizedHttp + httplib2."""
+        raiz = f"https://127.0.0.1:{self.http.server_address[1]}/"
+        documento = {
+            "kind": "discovery#restDescription",
+            "name": "prueba",
+            "version": "v1",
+            "protocol": "rest",
+            "rootUrl": raiz,
+            "servicePath": "",
+            "baseUrl": raiz,
+            "basePath": "/",
+            "parameters": {},
+            "resources": {
+                "videos": {
+                    "methods": {
+                        "list": {
+                            "id": "prueba.videos.list",
+                            "path": "videos",
+                            "httpMethod": "GET",
+                            "parameters": {},
+                            "response": {"$ref": "Lista"},
+                        }
+                    }
+                }
+            },
+            "schemas": {"Lista": {"id": "Lista", "type": "object", "properties": {}}},
+        }
+        http = AuthorizedHttp(Credentials(token="falso"), http=httplib2.Http(ca_certs=str(self.certificado)))
+        return build_from_document(documento, http=http)
+
+
+class ClienteQueFalla:
+    """Cliente YouTube falso: lanza los errores indicados antes de responder."""
+
+    def __init__(self, errores, respuesta=None):
+        self.errores = list(errores)
+        self.respuesta = respuesta if respuesta is not None else {"items": []}
+        self.llamadas = 0
+        self.cierres = 0
+
+    def close(self):
+        self.cierres += 1
+
+    def videos(self):
+        return self
+
+    def list(self, **kwargs):
+        return self._ejecutable()
+
+    def update(self, part, body):
+        return self._ejecutable()
+
+    def _ejecutable(self):
+        cliente = self
+
+        class Ejecutable:
+            def execute(self):
+                cliente.llamadas += 1
+                if cliente.errores:
+                    raise cliente.errores.pop(0)
+                return cliente.respuesta
+
+        return Ejecutable()
+
+
+class LlamadaQueFalla:
+    def __init__(self, error):
+        self.error = error
+
+    def execute(self):
+        raise self.error
+
+
+class VideosConConexionMuerta(VideosFalsos):
+    """La 2.ª consulta y la 1.ª actualización fallan como en una conexión keep-alive cerrada."""
+
+    def __init__(self, estados):
+        super().__init__(estados, 0.0)
+        self.consultas = 0
+        self.intentos_de_actualizar = 0
+
+    def list(self, part, id):
+        self.consultas += 1
+        llamada = super().list(part, id)
+        return LlamadaQueFalla(BrokenPipeError(32, "Broken pipe")) if self.consultas == 2 else llamada
+
+    def update(self, part, body):
+        self.intentos_de_actualizar += 1
+        if self.intentos_de_actualizar == 1:
+            return LlamadaQueFalla(BrokenPipeError(32, "Broken pipe"))
+        return super().update(part, body)
+
+
+class YouTubeConConexionMuerta(YouTubeFalso):
+    def __init__(self, estados):
+        self.videos_falsos = VideosConConexionMuerta(estados)
+        self.cierres = 0
+
+    def close(self):
+        self.cierres += 1
+
+
+class TestEjecutarApi(unittest.TestCase):
+    def setUp(self):
+        self.esperas = []
+        parche = mock.patch.object(pa.time, "sleep", self.esperas.append)
+        parche.start()
+        self.addCleanup(parche.stop)
+
+    def uploader(self, **cambios):
+        return SimpleNamespace(**{**vars(uploader_para_programar(None)), **cambios})
+
+    @unittest.skipUnless(shutil.which("openssl"), "falta openssl para el certificado de prueba")
+    def test_conexion_keep_alive_muerta_se_reintenta_con_una_conexion_nueva(self):
+        directorio = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, directorio)
+        servidor = ServidorKeepAliveQueMuere(directorio)
+        self.addCleanup(servidor.cerrar)
+        cliente = servidor.cliente_youtube()
+        self.addCleanup(cliente.close)
+        yt = {"cliente": cliente}
+        listar = lambda c: c.videos().list().execute()
+        # El socket del primer pedido, para saber cuándo le llegó el cierre del servidor.
+        sockets = []
+        enviar_real = http.client.HTTPConnection.send
+
+        def enviar(conexion, datos):
+            sockets.append(conexion.sock)
+            return enviar_real(conexion, datos)
+
+        with mock.patch.object(http.client.HTTPConnection, "send", enviar):
+            self.assertEqual(pa.ejecutar_api(self.uploader(), yt, listar)["pedido"], 1)
+            # Esperar a que el RST del servidor llegue al cliente, como tras 5 minutos de espera.
+            vigilante = select.poll()
+            vigilante.register(sockets[0], select.POLLERR)
+            self.assertTrue(vigilante.poll(2000), "el servidor no cerró la conexión")
+            respuesta = pa.ejecutar_api(self.uploader(), yt, listar)
+
+        self.assertEqual(respuesta["pedido"], 2)
+        # httplib2 no cierra el socket que falló con EPIPE: reintentar sobre él vuelve a fallar
+        # (SSLError al leer) y recién el tercer intento abre otra conexión. Con las conexiones
+        # descartadas, un solo reintento alcanza.
+        self.assertEqual(len(self.esperas), 1)
+
+    def test_errores_de_conexion_transitorios_se_reintentan(self):
+        errores = [
+            BrokenPipeError(32, "Broken pipe"),
+            ConnectionResetError(104, "Connection reset by peer"),
+            TimeoutError("timed out"),
+            ssl.SSLError("EOF occurred in violation of protocol"),
+            httplib2.ServerNotFoundError("Unable to find the server"),
+            TransportError("no hay conexion"),
+        ]
+        for error in errores:
+            with self.subTest(error=type(error).__name__):
+                cliente = ClienteQueFalla([error], respuesta={"items": ["ok"]})
+                respuesta = pa.ejecutar_api(
+                    self.uploader(), {"cliente": cliente}, lambda c: c.videos().list().execute()
+                )
+                self.assertEqual(respuesta, {"items": ["ok"]})
+                self.assertEqual((cliente.llamadas, cliente.cierres), (2, 1))
+
+    def test_agotados_los_reintentos_vuelve_a_lanzar_el_error_original(self):
+        cliente = ClienteQueFalla([BrokenPipeError(32, "Broken pipe")] * 10)
+        with self.assertRaises(BrokenPipeError):
+            pa.ejecutar_api(self.uploader(), {"cliente": cliente}, lambda c: c.videos().list().execute())
+        self.assertEqual(cliente.llamadas, 1 + pa.REINTENTOS_CONEXION)
+        self.assertEqual(len(self.esperas), pa.REINTENTOS_CONEXION)
+
+    def test_error_de_cuota_sigue_rotando_la_credencial(self):
+        cuota = HttpError(httplib2.Response({"status": 403}), b"{}")
+        agotado = ClienteQueFalla([cuota])
+        siguiente = ClienteQueFalla([], respuesta={"items": ["otra credencial"]})
+        uploader = self.uploader(is_quota_error=lambda exc: True, authenticate_next=lambda prefix: siguiente)
+        yt = {"cliente": agotado}
+        respuesta = pa.ejecutar_api(uploader, yt, lambda c: c.videos().list().execute())
+        self.assertEqual(respuesta, {"items": ["otra credencial"]})
+        self.assertIs(yt["cliente"], siguiente)
+        self.assertEqual(self.esperas, [])
+
+    def test_token_revocado_sigue_rotando_la_credencial(self):
+        revocado = ClienteQueFalla([RefreshError("invalid_grant")])
+        siguiente = ClienteQueFalla([], respuesta={"items": ["otra credencial"]})
+        uploader = self.uploader(is_invalid_grant_error=lambda exc: True, authenticate_next=lambda prefix: siguiente)
+        yt = {"cliente": revocado}
+        respuesta = pa.ejecutar_api(uploader, yt, lambda c: c.videos().list().execute())
+        self.assertEqual(respuesta, {"items": ["otra credencial"]})
+        self.assertIs(yt["cliente"], siguiente)
+
+    def test_error_http_que_no_es_de_cuota_se_lanza_sin_reintentar(self):
+        cliente = ClienteQueFalla([HttpError(httplib2.Response({"status": 500}), b"{}")])
+        with self.assertRaises(HttpError):
+            pa.ejecutar_api(self.uploader(), {"cliente": cliente}, lambda c: c.videos().list().execute())
+        self.assertEqual((cliente.llamadas, cliente.cierres, self.esperas), (1, 0, []))
+
+
+class TestProgramarSinConexion(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.parches = [
+            mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "pendientes.json"),
+            mock.patch.object(pa, "PROGRAMADOS_JSONL", self.tmp / "programados.jsonl"),
+            mock.patch.object(pa, "DIR_LOGS", self.tmp / "logs"),
+            mock.patch.object(pa.time, "sleep"),
+        ]
+        for parche in self.parches:
+            parche.start()
+
+    def tearDown(self):
+        for parche in self.parches:
+            parche.stop()
+        shutil.rmtree(self.tmp)
+
+    def test_se_agotan_los_reintentos_y_programar_responde_sin_conexion(self):
+        cliente = ClienteQueFalla([BrokenPipeError(32, "Broken pipe")] * 10)
+        resultado = pa.programar("V1", reclamo=False, uploader=uploader_para_programar(cliente))
+        self.assertFalse(resultado["ok"])
+        self.assertEqual(resultado["motivo"], "sin_conexion")
+        self.assertEqual(resultado["video_id"], "V1")
+        self.assertIn("Broken pipe", resultado["detalle"])
+        self.assertEqual(cliente.llamadas, 1 + pa.REINTENTOS_CONEXION)
+
+    def test_conexion_muerta_tras_la_espera_no_aborta_la_programacion(self):
+        # Caso real: la consulta tras la espera de 5 min usa una conexión keep-alive ya cerrada.
+        youtube = YouTubeConConexionMuerta(["processing", "succeeded"])
+        resultado = pa.programar("V1", esperar=True, reclamo=False, uploader=uploader_para_programar(youtube))
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(youtube.cierres, 2)
+        self.assertEqual(len(youtube.videos_falsos.actualizaciones), 1)
 
 
 if __name__ == "__main__":

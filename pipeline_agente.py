@@ -20,6 +20,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import time
@@ -28,7 +29,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import quote
 
-from google.auth.exceptions import RefreshError
+import httplib2
+from google.auth.exceptions import RefreshError, TransportError
 from googleapiclient.errors import HttpError
 
 from config import (
@@ -58,6 +60,17 @@ SILENCIO_LARGO_S = 20
 ANTICIPACION_MIN = 15
 MARGEN_RECLAMO_MIN = 60
 ESPERA_ENTRE_CONSULTAS_S = 300
+REINTENTOS_CONEXION = 3
+ESPERA_CONEXION_S = 2
+# Los mismos fallos que googleapiclient considera transitorios, más el envoltorio
+# de google-auth para cuando falla el refresco del token.
+ERRORES_DE_CONEXION = (
+    ConnectionError,
+    TimeoutError,
+    ssl.SSLError,
+    httplib2.ServerNotFoundError,
+    TransportError,
+)
 PROCESO_RENDER = "ffmpeg_render.py"
 ESPERA_RENDER_MAX_S = 6 * 3600
 ESCANEO_PROGRAMADOS = int(os.environ.get("AGENTE_ESCANEO_PROGRAMADOS", "500"))
@@ -789,6 +802,7 @@ def subir(carpeta, uploader=None, sin_deathgrind=False, raices=RAICES_BORRABLES)
 
 
 def ejecutar_api(uploader, yt, llamada):
+    fallos_de_conexion = 0
     while True:
         try:
             return llamada(yt["cliente"])
@@ -800,6 +814,21 @@ def ejecutar_api(uploader, yt, llamada):
             if not uploader.is_invalid_grant_error(exc):
                 raise
             print(f"Token revocado/expirado: {exc}. Rotando...")
+        except ERRORES_DE_CONEXION as exc:
+            # Tras una espera larga Google ya cerró la conexión keep-alive. httplib2
+            # re-lanza EPIPE/ECONNRESET sin cerrar ese socket, así que se descartan
+            # las conexiones para que el reintento abra una nueva.
+            fallos_de_conexion += 1
+            if fallos_de_conexion > REINTENTOS_CONEXION:
+                raise
+            espera = ESPERA_CONEXION_S * 2 ** (fallos_de_conexion - 1)
+            print(
+                f"Conexion fallida ({type(exc).__name__}: {exc}). "
+                f"Reintento {fallos_de_conexion}/{REINTENTOS_CONEXION} en {espera}s..."
+            )
+            yt["cliente"].close()
+            time.sleep(espera)
+            continue
         yt["cliente"] = uploader.authenticate_next(prefix="upload")
         if yt["cliente"] is None:
             raise SinCredenciales("No hay mas credenciales de upload utilizables.")
@@ -977,6 +1006,16 @@ def programar(video_id, esperar=False, reclamo=None, revisar=revisar_reclamo_en_
         except HttpError as exc:
             print(f"Error YouTube API: {exc}")
             return {"ok": False, "motivo": "error_api", "detalle": str(exc), "log": str(log)}
+        except ERRORES_DE_CONEXION as exc:
+            detalle = f"{type(exc).__name__}: {exc}"[:200]
+            print(f"Sin conexion con YouTube tras {REINTENTOS_CONEXION} reintentos: {detalle}")
+            return {
+                "ok": False,
+                "motivo": "sin_conexion",
+                "video_id": video_id,
+                "detalle": detalle,
+                "log": str(log),
+            }
 
     return {
         "ok": True,
