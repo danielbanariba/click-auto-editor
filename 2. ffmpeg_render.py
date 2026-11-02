@@ -34,6 +34,7 @@ sys.path.append(str(Path(__file__).parent))
 from config import (
     DIR_AUDIO_SCRIPTS,
     DIR_RENDERIZANDO,
+    RENDER_SSD_DIR,
     INTRO_VIDEO,
     MAX_PARALLEL_RENDERS,
     MAX_FOLDERS_TO_PROCESS,
@@ -315,6 +316,10 @@ def has_enough_disk_space(min_gb: float = None) -> bool:
     """
     if min_gb is None:
         min_gb = MIN_FREE_SPACE_GB
+    # Sin el SSD montado, Renderizando/ caería en el disco del sistema.
+    if not os.path.ismount(RENDER_SSD_DIR):
+        log_verbose(f"[DISCO] El SSD {RENDER_SSD_DIR} no está montado.")
+        return False
     free_gb = get_free_space_gb(DIR_RENDERIZANDO)
     # Los videos aún en cola de finalización van a ocupar ese espacio en breve.
     return free_gb >= min_gb + get_pending_finalize_gb()
@@ -953,29 +958,43 @@ def finalize_render_output(
     carpeta a la cola de subida. Puede correr en un hilo de fondo.
     """
     move_start = time.time()
-    if temp_folder_path:
-        final_dest = original_folder_path / final_video.name
-        if final_video.exists():
+    # Primero la carpeta (audios y portada) y después el video directo a
+    # Renderizando/: escribir el video en el disco de la cola y moverlo
+    # después tardaba horas si ese disco es otro.
+    destination_folder = None
+    try:
+        destination_folder = move_folder_to_upload(
+            original_folder_path, folder_name, show_progress
+        )
+        if temp_folder_path and final_video.exists():
             if show_progress:
-                log_verbose("[SSD] Moviendo video final al disco destino...")
+                log_verbose("[SSD] Moviendo video final a Renderizando...")
+            shutil.move(str(final_video), str(destination_folder / final_video.name))
+    except OSError:
+        # Rescate ante CUALQUIER fallo del move: el video son horas de
+        # render y cleanup_temp() borraría el temp al salir.
+        if temp_folder_path and final_video.exists():
+            rescue_dir = SSD_TEMP_DIR / "_rescate"
             try:
-                shutil.move(str(final_video), str(final_dest))
-            except OSError:
-                # Rescate ante CUALQUIER fallo del move: el video son horas de
-                # render y cleanup_temp() borraría el temp al salir.
-                rescue_dir = SSD_TEMP_DIR / "_rescate"
-                try:
-                    rescue_dir.mkdir(parents=True, exist_ok=True)
-                    shutil.move(
-                        str(final_video),
-                        str(get_unique_file_path(rescue_dir, final_video.name)),
-                    )
-                    print(
-                        f"[FINALIZE] {folder_name}: video rescatado en {rescue_dir}"
-                    )
-                except Exception:
-                    pass
-                raise
+                rescue_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(
+                    str(final_video),
+                    str(get_unique_file_path(rescue_dir, final_video.name)),
+                )
+                print(f"[FINALIZE] {folder_name}: video rescatado en {rescue_dir}")
+            except Exception:
+                pass
+        # El álbum vuelve a la cola para renderizarse de nuevo.
+        if destination_folder is not None:
+            try:
+                shutil.move(str(destination_folder), str(original_folder_path))
+            except OSError as exc:
+                print(
+                    f"[FINALIZE] {folder_name}: quedó sin video en "
+                    f"{destination_folder} ({exc})"
+                )
+        raise
+    if temp_folder_path:
         if temp_folder_path.exists():
             shutil.rmtree(temp_folder_path)
     if track_overlays_path:
@@ -984,9 +1003,6 @@ def finalize_render_output(
         except Exception:
             pass
 
-    destination_folder = move_folder_to_upload(
-        original_folder_path, folder_name, show_progress
-    )
     elapsed = time.time() - start_time
     if timings is not None:
         timings["move_s"] = time.time() - move_start

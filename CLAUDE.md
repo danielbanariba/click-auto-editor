@@ -36,6 +36,40 @@ Scripts are numbered but **not all are sequential**. The active pipeline is:
 13. filtrar_portadas.py     → NSFW cover art filter (ONNX model)
 ```
 
+### Publishing service (Telegram approval)
+
+`servicio_publicar.py` runs as a systemd user service
+(`systemd/publicar-albumes.service`) and publishes one album at a time:
+render → checks → a YouTube search screenshot, then one Telegram message
+with the video screenshot and the Subir / Rechazar / Eliminar buttons → on
+Subir, private upload and folder deletion (Eliminar deletes without uploading) →
+claim check → schedule. Nothing is uploaded and no other album is rendered
+until the user presses a button. It needs `PUBLICAR_TELEGRAM_TOKEN` and
+`PUBLICAR_TELEGRAM_CHAT_ID` in `.env` (its own bot: Hermes keeps
+`@banar_precios_bot`). Open questions survive restarts in
+`data/agente/servicio.json`.
+
+```bash
+journalctl --user -u publicar-albumes -f         # what the service is doing
+systemctl --user restart publicar-albumes        # after changing the code
+```
+
+Each step is a `pipeline_agente.py` subcommand that prints one JSON line;
+logs, screenshots and state go to `data/agente/` (gitignored).
+
+```bash
+env/bin/python pipeline_agente.py renderizar             # next album → Renderizando/
+env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/4K checks, screenshot + YouTube search screenshot
+env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, then deletes the album folder
+env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the album folder without uploading (already published)
+env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → next free hour or +2 years
+env/bin/python pipeline_agente.py estado [--esperar-render]  # unscheduled uploads, rendered albums awaiting approval, render running
+```
+
+Scheduling: one video per hour (24 per day); claimed videos go two years ahead.
+Claim detection reads YouTube Studio (`/video/<id>/copyright`); an unclear page
+returns `reclamo_desconocido` and the service asks the user instead of guessing.
+
 ### Common commands
 
 ```bash
@@ -91,6 +125,7 @@ Multiple OAuth credential pairs in `credentials/`:
 
 Central config for all scripts. Key settings:
 - `BASE_DIR`: root data directory (external drive at `/mnt/Entretenimiento/01_edicion_automatizada`)
+- `RENDER_SSD_DIR`: SSD (`/mnt/Render`, btrfs) that holds `Renderizando/`; rendered albums wait there for upload, and nothing renders while it is unmounted
 - `USE_CPP_VHS`: enable C++/CUDA VHS renderer (default `True`)
 - `USE_GPU` / `USE_RAMDISK`: GPU and ramdisk flags
 - `ALLOW_FFMPEG_FALLBACK`: fall back to FFmpeg if CUDA fails

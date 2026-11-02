@@ -93,6 +93,7 @@ def test_render_job_defaults(render_mod):
 
 
 def test_has_enough_disk_space_descuenta_pendientes(render_mod, monkeypatch):
+    monkeypatch.setattr(render_mod, "RENDER_SSD_DIR", Path("/"))
     monkeypatch.setattr(render_mod, "get_free_space_gb", lambda path: 15.0)
     monkeypatch.setattr(render_mod, "PENDING_FINALIZE_BYTES", 0)
     assert render_mod.has_enough_disk_space(10.0) is True
@@ -114,3 +115,83 @@ def test_check_finalize_failures_detecta_no_space(render_mod, monkeypatch):
     )
     assert render_mod.check_finalize_failures() == "no_space"
     assert render_mod.FINALIZE_FUTURES == []
+
+
+def test_sin_el_ssd_montado_no_hay_espacio_para_renderizar(render_mod, monkeypatch, tmp_path):
+    # Sin el SSD, Renderizando/ caería en el disco del sistema.
+    monkeypatch.setattr(render_mod, "RENDER_SSD_DIR", tmp_path)
+    monkeypatch.setattr(render_mod, "get_free_space_gb", lambda path: 5000.0)
+    assert render_mod.has_enough_disk_space(10.0) is False
+
+
+@pytest.fixture
+def album_renderizado(render_mod, monkeypatch, tmp_path):
+    """Álbum en la cola, con su video final todavía en la carpeta temporal."""
+    cola = tmp_path / "cola" / "Banda - Disco"
+    cola.mkdir(parents=True)
+    (cola / "01 - Tema.mp3").write_bytes(b"audio")
+    (cola / "cover.jpg").write_bytes(b"jpg")
+    temporal = tmp_path / "temp" / "Banda - Disco"
+    temporal.mkdir(parents=True)
+    video = temporal / "Banda - Disco.mp4"
+    video.write_bytes(b"video")
+    renderizando = tmp_path / "ssd" / "Renderizando"
+    monkeypatch.setattr(render_mod, "DIR_RENDERIZANDO", renderizando)
+    monkeypatch.setattr(render_mod, "SSD_TEMP_DIR", tmp_path / "temp")
+    return cola, temporal, video, renderizando
+
+
+def finalizar(render_mod, cola, temporal, video):
+    render_mod.finalize_render_output(
+        final_video=video,
+        temp_folder_path=temporal,
+        track_overlays_path=None,
+        original_folder_path=cola,
+        folder_name=cola.name,
+        show_progress=False,
+        start_time=0.0,
+    )
+
+
+def test_finalize_lleva_el_video_directo_a_renderizando(render_mod, monkeypatch, album_renderizado):
+    cola, temporal, video, renderizando = album_renderizado
+    movidos = []
+    mover = render_mod.shutil.move
+
+    def espiar(origen, destino, *args, **kwargs):
+        movidos.append((str(origen), str(destino)))
+        return mover(origen, destino, *args, **kwargs)
+
+    monkeypatch.setattr(render_mod.shutil, "move", espiar)
+
+    finalizar(render_mod, cola, temporal, video)
+
+    destino = renderizando / "Banda - Disco"
+    assert sorted(p.name for p in destino.iterdir()) == ["01 - Tema.mp3", "Banda - Disco.mp4", "cover.jpg"]
+    assert not cola.exists()
+    assert not temporal.exists()
+    # El video nunca se escribe en el disco de la cola (el NTFS lento).
+    assert [d for o, d in movidos if o == str(video)] == [str(destino / video.name)]
+
+
+@pytest.mark.parametrize("falla", ["video", "carpeta"])
+def test_si_falla_pasar_al_ssd_el_album_vuelve_a_la_cola_y_el_video_se_rescata(
+    render_mod, monkeypatch, album_renderizado, falla
+):
+    cola, temporal, video, renderizando = album_renderizado
+    origen_que_falla = str(video) if falla == "video" else str(cola)
+    mover = render_mod.shutil.move
+
+    def falla_al_pasar_al_ssd(origen, destino, *args, **kwargs):
+        if str(origen) == origen_que_falla and str(renderizando) in str(destino):
+            raise OSError("sin espacio")
+        return mover(origen, destino, *args, **kwargs)
+
+    monkeypatch.setattr(render_mod.shutil, "move", falla_al_pasar_al_ssd)
+
+    with pytest.raises(OSError):
+        finalizar(render_mod, cola, temporal, video)
+
+    assert sorted(p.name for p in cola.iterdir()) == ["01 - Tema.mp3", "cover.jpg"]
+    assert not (renderizando / "Banda - Disco").exists()
+    assert [p.name for p in (temporal.parent / "_rescate").iterdir()] == ["Banda - Disco.mp4"]

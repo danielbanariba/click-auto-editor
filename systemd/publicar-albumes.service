@@ -1,0 +1,26 @@
+# Servicio de usuario que publica los álbumes con aprobación por Telegram.
+#
+# Instalar:
+#   cp systemd/publicar-albumes.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now publicar-albumes
+# Ver qué hace:
+#   journalctl --user -u publicar-albumes -f
+
+[Unit]
+Description=Publica álbumes en YouTube con aprobación por Telegram
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Desktop/click-auto-editor
+ExecStart=%h/Desktop/click-auto-editor/env/bin/python servicio_publicar.py
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=30
+# 78 = faltan las variables de Telegram en .env: reiniciar no lo arregla.
+RestartPreventExitStatus=78
+
+[Install]
+WantedBy=default.target
