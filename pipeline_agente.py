@@ -8,7 +8,7 @@ decida el paso siguiente; el resto de la salida va a data/agente/logs/.
     verificar    corre los tests del video y genera la captura
     subir        sube el video como privado y borra la carpeta del álbum
     programar    espera el procesado, revisa reclamos y programa la fecha
-    estado       lista los videos subidos que faltan programar
+    estado       videos sin programar, álbumes sin aprobar y render en curso
 """
 import argparse
 import contextlib
@@ -56,6 +56,8 @@ SILENCIO_LARGO_S = 20
 ANTICIPACION_MIN = 15
 MARGEN_RECLAMO_MIN = 60
 ESPERA_ENTRE_CONSULTAS_S = 300
+PROCESO_RENDER = "ffmpeg_render.py"
+ESPERA_RENDER_MAX_S = 6 * 3600
 ESCANEO_PROGRAMADOS = int(os.environ.get("AGENTE_ESCANEO_PROGRAMADOS", "500"))
 CAMPOS_STATUS_CONSERVADOS = ("embeddable", "license", "publicStatsViewable")
 
@@ -147,6 +149,28 @@ def leer_pendientes():
         return []
     with open(PENDIENTES_JSON, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def albumes_por_aprobar():
+    """Álbumes ya renderizados que todavía no se subieron (esperan el OK del usuario)."""
+    return [
+        str(DIR_RENDERIZANDO / nombre)
+        for nombre in listar_carpetas(DIR_RENDERIZANDO)
+        if any(p.suffix.lower() == ".mp4" for p in (DIR_RENDERIZANDO / nombre).iterdir())
+    ]
+
+
+def estado(esperar_render=False, intervalo=30, maximo_s=ESPERA_RENDER_MAX_S):
+    if esperar_render:
+        limite = time.monotonic() + maximo_s
+        while render_en_curso() and time.monotonic() < limite:
+            time.sleep(intervalo)
+    return {
+        "ok": True,
+        "pendientes": leer_pendientes(),
+        "por_aprobar": albumes_por_aprobar(),
+        "render_en_curso": render_en_curso(),
+    }
 
 
 def guardar_pendientes(pendientes):
@@ -286,7 +310,22 @@ def cola_de_log(log, lineas=20):
     return "\n".join([linea for linea in limpias if linea][-lineas:])
 
 
+def render_en_curso():
+    """True si corre un render, lo haya lanzado esta sesión, otra o el usuario a mano."""
+    for cmdline in Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            argumentos = cmdline.read_bytes().decode("utf-8", "replace").split("\0")
+        except OSError:
+            continue
+        if any(a.endswith(PROCESO_RENDER) for a in argumentos):
+            return True
+    return False
+
+
 def renderizar(carpeta=None):
+    # Dos renders 4K a la vez llenan el disco y la GPU.
+    if render_en_curso():
+        return {"ok": False, "motivo": "render_en_curso"}
     try:
         libre_gb = shutil.disk_usage(BASE_DIR).free / 1024**3
     except OSError as exc:
@@ -848,7 +887,14 @@ def parse_args(argv=None):
         help="Saltea la revisión en Studio (cuando el usuario ya respondió).",
     )
 
-    sub.add_parser("estado", help="Lista los videos subidos que faltan programar.")
+    p = sub.add_parser(
+        "estado", help="Videos sin programar, álbumes sin aprobar y si hay un render corriendo."
+    )
+    p.add_argument(
+        "--esperar-render",
+        action="store_true",
+        help="Espera a que termine el render en curso (lanzado por otra sesión).",
+    )
     return parser.parse_args(argv)
 
 
@@ -864,7 +910,7 @@ def main(argv=None):
     if args.comando == "programar":
         reclamo = None if args.reclamo is None else args.reclamo == "si"
         return responder(programar(args.video_id, esperar=args.esperar, reclamo=reclamo))
-    return responder({"ok": True, "pendientes": leer_pendientes()})
+    return responder(estado(esperar_render=args.esperar_render))
 
 
 if __name__ == "__main__":

@@ -34,7 +34,8 @@ Cada comando imprime UNA línea JSON al final. Leé `ok` y, si es `false`,
 
 | Comando | Cómo lanzarlo | Qué devuelve |
 |---|---|---|
-| `estado` | primer plano | `pendientes`: videos subidos sin programar |
+| `estado` | primer plano | `pendientes`, `por_aprobar`, `render_en_curso` |
+| `estado --esperar-render` | segundo plano | lo mismo, cuando termina el render en curso |
 | `renderizar` | segundo plano | `album`, `carpeta`, `restantes` |
 | `verificar --carpeta "<carpeta>"` | primer plano, `timeout=600` | `ok`, `captura`, `resumen` |
 | `subir --carpeta "<carpeta>"` | segundo plano | `video_id`, `titulo`, `carpeta_borrada` |
@@ -64,8 +65,16 @@ Escribí la ruta tal cual la devolvió el comando, sin comillas.
 
 ## Procedimiento
 
-1. **Al empezar**, corré `estado`. Por cada pendiente, lanzá en segundo plano
-   `programar --video-id <id> --esperar`.
+1. **Al empezar**, corré `estado`:
+   - Por cada `pendientes`, lanzá en segundo plano
+     `programar --video-id <id> --esperar`.
+   - Si `render_en_curso` es `true`, hay un render que no lanzaste vos (otra
+     sesión o el usuario a mano): no lances otro. Lanzá en segundo plano
+     `estado --esperar-render` y, cuando termine, volvé a este paso con lo
+     que devolvió.
+   - Si `por_aprobar` tiene carpetas, son álbumes ya renderizados que esperan
+     el OK: seguí desde el paso 4 con la primera.
+   - Si no, seguí con el paso 2.
 2. **Renderizá** el próximo álbum con `renderizar` en segundo plano. Un solo
    render a la vez: nunca lances otro mientras uno corre.
 3. **Cuando termine el render:**
@@ -73,6 +82,8 @@ Escribí la ruta tal cual la devolvió el comando, sin comillas.
    - `motivo: sin_espacio` → avisá con los GB libres y pará.
    - `motivo: disco_no_disponible` → el disco de datos no está montado;
      avisá con el `detalle` y pará.
+   - `motivo: render_en_curso` → ya hay otro render corriendo; hacé lo mismo
+     que en el paso 1.
    - `motivo: render_fallido` → mandá el `album` y las últimas líneas de
      `log_final`. Si `movido_a_error404` es `true`, el álbum ya quedó aparte:
      seguí con el paso 2. Si es `false`, el álbum sigue en la cola y se

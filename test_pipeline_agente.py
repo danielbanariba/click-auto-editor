@@ -2,6 +2,7 @@ import json
 import multiprocessing
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -155,6 +156,65 @@ class TestVerificar(unittest.TestCase):
         rojo, verde, azul = Image.open(resultado["captura"]).convert("RGB").getpixel((640, 360))
         self.assertGreater(verde, 150, (rojo, verde, azul))
         self.assertLess(rojo, 100, (rojo, verde, azul))
+
+
+class TestRetomar(unittest.TestCase):
+    """Una sesión nueva retoma lo que dejó otra: renders en curso y álbumes sin aprobar."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        # Un nombre propio, para no confundirse con un render real de la máquina.
+        self.proceso = f"render_falso_{self.tmp.name}.py"
+        self.parches = [
+            mock.patch.object(pa, "PROCESO_RENDER", self.proceso),
+            mock.patch.object(pa, "DIR_RENDERIZANDO", self.tmp / "Renderizando"),
+            mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "pendientes.json"),
+        ]
+        for parche in self.parches:
+            parche.start()
+        self.procesos = []
+
+    def tearDown(self):
+        for proceso in self.procesos:
+            proceso.kill()
+            proceso.wait()
+        for parche in self.parches:
+            parche.stop()
+        shutil.rmtree(self.tmp)
+
+    def lanzar_render_falso(self, segundos):
+        proceso = subprocess.Popen(
+            [sys.executable, "-c", f"import time; time.sleep({segundos})", str(self.tmp / self.proceso)]
+        )
+        self.procesos.append(proceso)
+        return proceso
+
+    def test_estado_lista_los_albumes_renderizados_que_esperan_aprobacion(self):
+        listo = self.tmp / "Renderizando" / "Banda - Listo"
+        listo.mkdir(parents=True)
+        (listo / "Banda - Listo.mp4").write_bytes(b"video")
+        (self.tmp / "Renderizando" / "Banda - Sin video").mkdir()
+
+        resultado = pa.estado()
+
+        self.assertEqual(resultado["por_aprobar"], [str(listo)])
+        self.assertFalse(resultado["render_en_curso"])
+
+    def test_renderizar_no_lanza_otro_render_si_ya_hay_uno(self):
+        self.lanzar_render_falso(30)
+        with mock.patch.object(pa.subprocess, "run", side_effect=AssertionError("lanzó un render")):
+            resultado = pa.renderizar()
+        self.assertEqual(resultado, {"ok": False, "motivo": "render_en_curso"})
+
+    def test_estado_espera_a_que_termine_el_render_de_otra_sesion(self):
+        self.lanzar_render_falso(1.5)
+        self.assertTrue(pa.estado()["render_en_curso"])
+
+        inicio = time.monotonic()
+        resultado = pa.estado(esperar_render=True, intervalo=0.1)
+
+        self.assertFalse(resultado["render_en_curso"])
+        self.assertGreater(time.monotonic() - inicio, 1.0)
 
 
 class TestSubir(unittest.TestCase):

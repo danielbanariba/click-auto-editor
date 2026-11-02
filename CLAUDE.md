@@ -50,7 +50,7 @@ env/bin/python pipeline_agente.py renderizar             # next album → Render
 env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/4K checks + screenshot
 env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, then deletes the album folder
 env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → next free hour or +2 years
-env/bin/python pipeline_agente.py estado                 # uploaded videos still waiting to be scheduled
+env/bin/python pipeline_agente.py estado [--esperar-render]  # unscheduled uploads, rendered albums awaiting approval, render running
 ```
 
 Scheduling: one video per hour (24 per day); claimed videos go two years ahead.
