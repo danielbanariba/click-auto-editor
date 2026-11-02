@@ -25,7 +25,10 @@ DIR_AUDIO_SCRIPTS = (
 )  # Carpeta fuente para renderizado
 DIR_UPLOAD = BASE_DIR / "upload_video"
 #DIR_UPLOAD = Path("/mnt/DiscoLocal")
-DIR_RENDERIZANDO = BASE_DIR / "Renderizando"
+# Los álbumes renderizados esperan la subida en el SSD (btrfs): escribir el
+# video de ~17 GB en el disco NTFS casi lleno tardaba horas por álbum.
+RENDER_SSD_DIR = Path("/mnt/Render")
+DIR_RENDERIZANDO = RENDER_SSD_DIR / "Renderizando"
 DIR_VERIFICACION = BASE_DIR / "verificacion"
 
 # Directorio temporal para renderizado rápido
