@@ -541,6 +541,34 @@ def generar_captura(video, duracion, destino):
     return destino if resultado.returncode == 0 and destino.exists() else None
 
 
+# Alto de la ventana de la búsqueda: entran unos ocho resultados. Telegram
+# acepta fotos de hasta 10000 px sumando ancho y alto.
+VENTANA_BUSQUEDA = {"width": 1280, "height": 2560}
+ESPERA_MINIATURAS_MS = 15000
+MINIATURAS_CARGADAS_JS = """() => {
+    const visibles = [...document.images].filter((img) => {
+        const r = img.getBoundingClientRect();
+        return r.width >= 20 && r.bottom > 0 && r.top < window.innerHeight;
+    });
+    return visibles.length > 0 && visibles.every((img) => img.complete && img.naturalWidth > 0);
+}"""
+
+
+def esperar_miniaturas(pagina, timeout_ms=ESPERA_MINIATURAS_MS):
+    """Espera a que carguen las imágenes visibles. Devuelve False si se acaba el tiempo.
+
+    YouTube muestra los resultados y recién después pone la URL de cada
+    miniatura: capturar antes deja los recuadros en blanco.
+    """
+    from playwright.sync_api import Error as PlaywrightError
+
+    try:
+        pagina.wait_for_function(MINIATURAS_CARGADAS_JS, timeout=timeout_ms)
+    except PlaywrightError:
+        return False
+    return True
+
+
 def capturar_busqueda(carpeta, uploader=None):
     """Captura la búsqueda pública del álbum en YouTube, para ver si ya está publicado.
 
@@ -562,7 +590,7 @@ def capturar_busqueda(carpeta, uploader=None):
         with sync_playwright() as playwright:
             navegador = playwright.chromium.launch(headless=True)
             try:
-                pagina = navegador.new_page(viewport={"width": 1280, "height": 1000}, locale="es-419")
+                pagina = navegador.new_page(viewport=VENTANA_BUSQUEDA, locale="es-419")
                 pagina.goto(
                     f"https://www.youtube.com/results?search_query={quote(titulo)}",
                     wait_until="domcontentloaded",
@@ -572,6 +600,8 @@ def capturar_busqueda(carpeta, uploader=None):
                     pagina.wait_for_selector("ytd-video-renderer", timeout=20000)
                 except PlaywrightError:
                     pass  # Sin resultados también sirve: se captura lo que haya.
+                # Si alguna miniatura no carga, se captura igual.
+                esperar_miniaturas(pagina)
                 pagina.screenshot(path=str(destino))
             finally:
                 navegador.close()
