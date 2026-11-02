@@ -15,19 +15,19 @@
 # por bot detection de YouTube, hay que portar los patterns modernos de inpunar_video.py.
 #
 # Uso:
-#   ./apelar.sh                                    # filtro default: fecha 2028-04-30
-#   ./apelar.sh --solo-fecha ""                    # sin filtro fecha (todos los videos)
-#   ./apelar.sh --solo-fecha 2028-05-15            # cambiar fecha marcador
-#   ./apelar.sh --solo-hora 23:45                  # agregar filtro por hora (opcional, suele no estar en el scrape)
-#   ./apelar.sh --filtrar-reclamante "CD Baby"     # agregar filtro por reclamante
-#   ./apelar.sh --max 1                            # solo 1 video
-#   ./apelar.sh --solo-detectar                    # escanea y guarda cola sin enviar
+#   ./scripts/apelar.sh                                    # filtro default: fecha 2028-04-30
+#   ./scripts/apelar.sh --solo-fecha ""                    # sin filtro fecha (todos los videos)
+#   ./scripts/apelar.sh --solo-fecha 2028-05-15            # cambiar fecha marcador
+#   ./scripts/apelar.sh --solo-hora 23:45                  # agregar filtro por hora (opcional, suele no estar en el scrape)
+#   ./scripts/apelar.sh --filtrar-reclamante "CD Baby"     # agregar filtro por reclamante
+#   ./scripts/apelar.sh --max 1                            # solo 1 video
+#   ./scripts/apelar.sh --solo-detectar                    # escanea y guarda cola sin enviar
 #
 # Cualquier flag extra que pases se inyecta al comando.
 
 set -euo pipefail
 
-cd "$(dirname "$(readlink -f "$0")")"
+cd "$(dirname "$(readlink -f "$0")")/.."
 
 PYTHON="./env/bin/python"
 SCRIPT="11. apelacion.py"

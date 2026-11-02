@@ -88,6 +88,7 @@ python "10. inpunar_video.py" --aprender         # record new selectors
 ### Tests
 
 ```bash
+env/bin/python -m pytest tests/ subir_video/ -q  # pipeline, publishing service and helpers
 pytest vhs_effect/test_vhs.py                    # all VHS unit tests
 pytest vhs_effect/test_vhs.py -k color_processor # specific test
 python vhs_effect/test_vhs.py                    # without pytest
@@ -176,4 +177,4 @@ Central config for all scripts. Key settings:
 - Ramdisk requires `sudo` without password for mount (configured via sudoers)
 - CUDA fallback chain: C++/CUDA → FFmpeg NVENC → FFmpeg libx264
 - Playwright sleeps are calibrated; reducing them breaks YouTube Studio automation
-- `12. mapear_playlists.py` runs as a systemd service (`mapear_playlists.service`) with auto-restart
+- `12. mapear_playlists.py` runs as a systemd service (`systemd/mapear_playlists.service`, installed as a copy in `/etc/systemd/system/`) with auto-restart

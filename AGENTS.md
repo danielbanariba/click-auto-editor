@@ -16,6 +16,7 @@ python config.py                                   # Validar entorno y crear car
 pytest vhs_effect/test_vhs.py -k color_processor    # Test específico por nombre
 pytest vhs_effect/test_vhs.py -k position_jitter    # Otro test específico
 pytest vhs_effect/test_vhs.py                       # Todos los tests VHS
+pytest tests/ subir_video/                          # Pipeline y servicio de publicación
 ```
 
 ### Sin pytest
@@ -45,6 +46,9 @@ cmake -S cpp -B cpp/build && cmake --build cpp/build
 - `cpp/`: renderer VHS C++/CUDA
 - `content/`: intro y overlays
 - `selectores/`: JSON de acciones Playwright
+- `scripts/`: wrappers de impugnación y apelación (`impugnar.sh`, `apelar.sh`, `escanear-reclamante.sh`)
+- `systemd/`: unidades de los servicios (`mapear_playlists`, `publicar-albumes`)
+- `tests/`: tests del pipeline y del servicio de publicación
 
 ## Estilo de Código
 

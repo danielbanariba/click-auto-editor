@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-MODULE_PATH = Path(__file__).resolve().parent / "13. filtrar_portadas.py"
+MODULE_PATH = Path(__file__).resolve().parent.parent / "13. filtrar_portadas.py"
 SPEC = importlib.util.spec_from_file_location("filtrar_portadas", MODULE_PATH)
 filtrar_portadas = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None

@@ -16,11 +16,11 @@
 #   - NO clickea "Tomar medidas", NO envia nada. Read-only desde el lado de YT.
 #
 # Uso:
-#   ./escanear-reclamante.sh                                       # usa lista_sello.txt
-#   ./escanear-reclamante.sh --archivo /ruta/otra_lista.txt        # archivo distinto
-#   ./escanear-reclamante.sh "Hostile Media"                       # un solo reclamante
-#   ./escanear-reclamante.sh "Hostile Media,CD Baby CO"            # CSV de nombres
-#   ./escanear-reclamante.sh "Hostile Media" --max 5               # debug: 5 videos
+#   ./scripts/escanear-reclamante.sh                                       # usa lista_sello.txt
+#   ./scripts/escanear-reclamante.sh --archivo /ruta/otra_lista.txt        # archivo distinto
+#   ./scripts/escanear-reclamante.sh "Hostile Media"                       # un solo reclamante
+#   ./scripts/escanear-reclamante.sh "Hostile Media,CD Baby CO"            # CSV de nombres
+#   ./scripts/escanear-reclamante.sh "Hostile Media" --max 5               # debug: 5 videos
 #
 # Output:
 #   - data/escaneo_<slug>_queue.json     -> cola con status + reclamantes por video
@@ -29,7 +29,7 @@
 
 set -euo pipefail
 
-cd "$(dirname "$(readlink -f "$0")")"
+cd "$(dirname "$(readlink -f "$0")")/.."
 
 PYTHON="./env/bin/python"
 SCRIPT="11. apelacion.py"
