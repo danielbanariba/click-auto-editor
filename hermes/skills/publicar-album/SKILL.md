@@ -46,6 +46,22 @@ conversación y no se pueden cortar a la mitad.
 
 Poné siempre la carpeta entre comillas: los nombres tienen espacios y paréntesis.
 
+## Cómo hablarle al usuario
+
+Estás en su chat de Telegram: tu respuesta de texto le llega sola. No hay
+herramienta `send_message`. Para mandarle una foto, corré en primer plano
+`hermes send --to telegram` y pasale el texto por stdin con un heredoc, con
+la ruta de la imagen en una línea `MEDIA:` al final:
+
+```
+hermes send --to telegram <<'FIN'
+<texto>
+MEDIA:<ruta de la imagen>
+FIN
+```
+
+Escribí la ruta tal cual la devolvió el comando, sin comillas.
+
 ## Procedimiento
 
 1. **Al empezar**, corré `estado`. Por cada pendiente, lanzá en segundo plano
@@ -64,10 +80,11 @@ Poné siempre la carpeta entre comillas: los nombres tienen espacios y paréntes
    - `ok: true` → seguí con el paso 4.
 4. **Verificá** con `verificar --carpeta "<carpeta>"`. Si devuelve
    `motivo: sin_video`, avisá que el render no dejó el mp4 y volvé al paso 2.
-5. **Mostrale el video al usuario** con `send_message` a `telegram`:
-   `MEDIA:<captura>` seguido del texto de `resumen`, sin cambiarlo. Si
-   `captura` es `null`, mandá solo el `resumen` y aclará que no hubo captura.
-   Si `ok` es `false`, agregá una línea que diga que hay tests fallidos.
+5. **Mostrale el video al usuario** con `hermes send` (ver "Cómo hablarle
+   al usuario"): el texto de `resumen` sin cambiarlo y `MEDIA:<captura>`.
+   Si `captura` es `null`, mandá solo el `resumen` en tu respuesta y aclará
+   que no hubo captura. Si `ok` es `false`, agregá una línea que diga que
+   hay tests fallidos.
 6. **Preguntale** con `clarify`, una sola pregunta:
    `¿Subo "<album>"?` con `choices: ["subir", "rechazar"]`.
 7. **Según la respuesta:**
@@ -90,8 +107,9 @@ Poné siempre la carpeta entre comillas: los nombres tienen espacios y paréntes
 9. **Cuando termine un `programar`:**
    - `ok: true` → mandá el `resumen` por Telegram.
    - `motivo: reclamo_desconocido` → Studio no dejó claro si hay reclamo.
-     Mandá `MEDIA:<captura_studio>` (si es `null`, mandá el `detalle` y el
-     enlace `https://studio.youtube.com/video/<id>/copyright`) y preguntá
+     Mandá la captura con `hermes send` (`MEDIA:<captura_studio>`); si es
+     `null`, respondé con el `detalle` y el enlace
+     `https://studio.youtube.com/video/<id>/copyright`. Después preguntá
      con `clarify`:
      `¿"<titulo>" tiene reclamo de derechos de autor?` con
      `choices: ["sí", "no"]`. Después corré
