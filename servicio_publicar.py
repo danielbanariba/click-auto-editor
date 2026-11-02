@@ -7,7 +7,8 @@ Corre siempre en segundo plano (systemd/publicar-albumes.service):
 2. Lo verifica y manda UN mensaje con la captura y los botones Subir / Rechazar.
 3. No sube nada ni renderiza otro hasta que el usuario aprieta un botón.
 4. Con Subir: lo sube como privado, borra la carpeta y sigue con el próximo.
-   En paralelo espera el procesado, revisa reclamos y programa la fecha.
+   En paralelo espera el procesado, revisa reclamos, activa la monetización y
+   lo publica en el acto o lo programa (siempre a una hora de otro video).
 
 Cada paso lo hace pipeline_agente.py en un proceso aparte. Las preguntas
 abiertas y los álbumes rechazados viven en data/agente/servicio.json, así un
@@ -443,7 +444,7 @@ class Servicio:
             self.guardar()
             texto = (
                 f"⏫ Subido como privado: {resultado['titulo']}\n"
-                "Espero que YouTube lo procese, reviso reclamos y te aviso la fecha."
+                "Espero que YouTube lo procese, reviso reclamos, activo la monetización y te aviso cuándo sale."
             )
             if not resultado.get("carpeta_borrada"):
                 texto += f"\n⚠️ No pude borrar la carpeta; sigue ocupando espacio: {carpeta}"

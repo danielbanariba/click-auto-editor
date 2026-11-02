@@ -49,8 +49,41 @@ class TestHorarios(unittest.TestCase):
 
     def test_con_reclamo_se_programa_dos_anios_despues(self):
         ahora = momento("2026-11-01 13:20")
-        self.assertEqual(pa.elegir_fecha(ahora, True, set()), momento("2028-11-01 14:00"))
-        self.assertEqual(pa.elegir_fecha(ahora, False, set()), momento("2026-11-01 14:00"))
+        self.assertEqual(pa.elegir_fecha(ahora, True, []), momento("2028-11-01 14:00"))
+
+    def test_con_reclamo_sigue_saltando_las_horas_ya_programadas(self):
+        ahora = momento("2026-11-01 13:20")
+        tomadas = [momento("2028-11-01 14:00"), momento("2028-11-01 15:30")]
+        self.assertEqual(pa.elegir_fecha(ahora, True, tomadas), momento("2028-11-01 16:00"))
+
+    def test_sin_reclamo_y_sin_videos_cerca_se_publica_en_el_acto(self):
+        ahora = momento("2026-11-01 13:20")
+        self.assertEqual(pa.elegir_fecha(ahora, False, []), ahora)
+        # A una hora justa de otro video ya alcanza.
+        lejanos = [ahora - timedelta(hours=1), ahora + timedelta(hours=1)]
+        self.assertEqual(pa.elegir_fecha(ahora, False, lejanos), ahora)
+
+    def test_sin_reclamo_con_un_video_a_menos_de_una_hora_espera_hasta_cumplir_la_hora(self):
+        ahora = momento("2026-11-01 13:20")
+        publicado_hace_20_min = ahora - timedelta(minutes=20)
+        self.assertEqual(
+            pa.elegir_fecha(ahora, False, [publicado_hace_20_min]), momento("2026-11-01 14:00")
+        )
+        programado_en_30_min = ahora + timedelta(minutes=30)
+        self.assertEqual(
+            pa.elegir_fecha(ahora, False, [programado_en_30_min]), momento("2026-11-01 14:50")
+        )
+
+    def test_sin_reclamo_encadena_videos_que_se_solapan_hasta_dejar_una_hora_libre(self):
+        # Esperar a que pase el publicado deja el momento a menos de una hora del programado.
+        ahora = momento("2026-11-01 13:20")
+        tomados = [ahora - timedelta(minutes=10), ahora + timedelta(minutes=50)]
+        self.assertEqual(pa.elegir_fecha(ahora, False, tomados), momento("2026-11-01 15:10"))
+
+    def test_sin_reclamo_nunca_programa_con_menos_de_dos_minutos_de_anticipacion(self):
+        ahora = momento("2026-11-01 13:20")
+        casi_listo = ahora - timedelta(minutes=59, seconds=30)
+        self.assertEqual(pa.elegir_fecha(ahora, False, [casi_listo]), momento("2026-11-01 13:22"))
 
     def test_dos_anios_desde_29_de_febrero(self):
         self.assertEqual(
@@ -553,12 +586,15 @@ class Llamada:
 
 
 class VideosFalsos:
-    def __init__(self, estados, demora_actualizacion):
+    def __init__(self, estados, demora_actualizacion, catalogo=None):
         self.estados = list(estados)
         self.demora_actualizacion = demora_actualizacion
+        self.catalogo = catalogo or {}
         self.actualizaciones = []
 
     def list(self, part, id):
+        if "snippet" in part:  # el escaneo de publicados recientes
+            return Llamada({"items": [self.catalogo[v] for v in id.split(",") if v in self.catalogo]})
         estado = self.estados.pop(0) if len(self.estados) > 1 else self.estados[0]
         status = {
             "privacyStatus": "private",
@@ -573,23 +609,41 @@ class VideosFalsos:
         return Llamada(body)
 
 
+class ListaDeSubidas:
+    def __init__(self, ids):
+        self.ids = ids
+
+    def list(self, part, playlistId, maxResults):
+        return Llamada({"items": [{"snippet": {"resourceId": {"videoId": v}}} for v in self.ids]})
+
+
 class YouTubeFalso:
-    def __init__(self, estados, demora_actualizacion=0.0):
-        self.videos_falsos = VideosFalsos(estados, demora_actualizacion)
+    def __init__(self, estados, demora_actualizacion=0.0, subidas=()):
+        """`subidas`: (id, privacidad, publishedAt) de la lista de subidas del canal."""
+        catalogo = {
+            vid: {"id": vid, "snippet": {"publishedAt": cuando.isoformat()}, "status": {"privacyStatus": privacidad}}
+            for vid, privacidad, cuando in subidas
+        }
+        self.videos_falsos = VideosFalsos(estados, demora_actualizacion, catalogo)
+        self.subidas = ListaDeSubidas([vid for vid, _, _ in subidas])
 
     def videos(self):
         return self.videos_falsos
+
+    def playlistItems(self):
+        return self.subidas
 
 
 def monetizacion_activada(video_id):
     return {"estado": "activada", "captura": "/tmp/monetizacion.png"}
 
 
-def uploader_para_programar(youtube):
+def uploader_para_programar(youtube, programados=()):
     return SimpleNamespace(
         cargar_env=lambda: None,
         probar_credenciales_disponibles=lambda prefix: (youtube, [], [], []),
-        fetch_scheduled_publish_times=lambda cliente, max_items: (set(), {}),
+        get_uploads_playlist_id=lambda cliente: "UU1",
+        fetch_scheduled_publish_times=lambda cliente, max_items: (set(programados), {}),
         is_quota_error=lambda exc: False,
         is_invalid_grant_error=lambda exc: False,
         authenticate_next=lambda prefix: None,
@@ -627,9 +681,7 @@ class TestProgramar(unittest.TestCase):
             )
         self.assertTrue(resultado["ok"], resultado)
         self.assertGreaterEqual(max(esperas), 59 * 60)
-        status = youtube.videos_falsos.actualizaciones[0]["status"]
-        self.assertEqual(status["privacyStatus"], "private")
-        self.assertEqual(status["publishAt"], resultado["publica_en"])
+        self.assertEqual(len(youtube.videos_falsos.actualizaciones), 1)
         self.assertEqual(pa.leer_pendientes(), [])
 
     def test_dos_programar_a_la_vez_no_eligen_la_misma_hora(self):
@@ -694,6 +746,68 @@ class TestProgramar(unittest.TestCase):
         self.assertTrue(resultado["ok"], resultado)
         self.assertEqual(resultado["monetizacion"], fallo)
         self.assertEqual(len(youtube.videos_falsos.actualizaciones), 1)
+
+
+    def programar_sin_reclamo(self, youtube, programados=()):
+        resultado = pa.programar(
+            "V1",
+            reclamo=False,
+            activar=monetizacion_activada,
+            uploader=uploader_para_programar(youtube, programados),
+        )
+        self.assertTrue(resultado["ok"], resultado)
+        return resultado, youtube.videos_falsos.actualizaciones[-1]["status"]
+
+    def test_sin_reclamo_ni_videos_cerca_se_publica_en_el_acto_sin_contarse_a_si_mismo(self):
+        ahora = datetime.now().astimezone()
+        subidas = [
+            ("V1", "private", ahora - timedelta(minutes=5)),  # el propio video, recién subido
+            ("P0", "public", ahora - timedelta(hours=3)),
+        ]
+        resultado, status = self.programar_sin_reclamo(YouTubeFalso(["succeeded"], subidas=subidas))
+        self.assertEqual(status["privacyStatus"], "public")
+        self.assertNotIn("publishAt", status)
+        self.assertTrue(resultado["publicado_ahora"])
+        self.assertIn("publicado ahora", resultado["resumen"])
+
+    def test_publicado_hace_20_minutos_el_video_espera_hasta_cumplir_la_hora(self):
+        publicado = (datetime.now().astimezone() - timedelta(minutes=20)).replace(microsecond=0)
+        youtube = YouTubeFalso(["succeeded"], subidas=[("P1", "public", publicado)])
+        resultado, status = self.programar_sin_reclamo(youtube)
+        self.assertEqual(status["privacyStatus"], "private")
+        self.assertEqual(status["publishAt"], (publicado + timedelta(hours=1)).isoformat())
+        self.assertFalse(resultado["publicado_ahora"])
+        self.assertIn("programado para", resultado["resumen"])
+
+    def test_un_video_programado_a_menos_de_una_hora_empuja_la_fecha(self):
+        programado = (datetime.now().astimezone() + timedelta(minutes=30)).replace(microsecond=0)
+        resultado, status = self.programar_sin_reclamo(YouTubeFalso(["succeeded"]), [programado])
+        self.assertEqual(status["publishAt"], (programado + timedelta(hours=1)).isoformat())
+
+    def test_un_publicado_viejo_o_un_privado_no_frenan_la_publicacion(self):
+        ahora = datetime.now().astimezone()
+        subidas = [
+            ("PRIV", "private", ahora - timedelta(minutes=10)),
+            ("VIEJO", "public", ahora - timedelta(minutes=61)),
+        ]
+        resultado, status = self.programar_sin_reclamo(YouTubeFalso(["succeeded"], subidas=subidas))
+        self.assertTrue(resultado["publicado_ahora"])
+
+    def test_el_segundo_video_espera_una_hora_al_primero_aunque_la_api_aun_no_lo_liste(self):
+        primero, _ = self.programar_sin_reclamo(YouTubeFalso(["succeeded"]))
+        segundo, status = self.programar_sin_reclamo(YouTubeFalso(["succeeded"]))
+        self.assertTrue(primero["publicado_ahora"])
+        publicado_el_primero = datetime.fromisoformat(primero["publica_en"])
+        self.assertEqual(
+            datetime.fromisoformat(status["publishAt"]), publicado_el_primero + timedelta(hours=1)
+        )
+
+    def test_el_resumen_dice_publicado_ahora_o_programado_para(self):
+        cuando = momento("2026-11-02 18:00")
+        ahora = pa.armar_resumen_programado("T", cuando, False, [], publicado_ahora=True)
+        self.assertEqual(ahora, "✓ T\nSin reclamos: publicado ahora.")
+        luego = pa.armar_resumen_programado("T", cuando, False, [], publicado_ahora=False)
+        self.assertEqual(luego, "✓ T\nSin reclamos: programado para 2026-11-02 18:00.")
 
 
 class ServidorKeepAliveQueMuere:
@@ -844,6 +958,7 @@ class VideosConConexionMuerta(VideosFalsos):
 class YouTubeConConexionMuerta(YouTubeFalso):
     def __init__(self, estados):
         self.videos_falsos = VideosConConexionMuerta(estados)
+        self.subidas = ListaDeSubidas([])
         self.cierres = 0
 
     def close(self):

@@ -43,7 +43,7 @@ Scripts are numbered but **not all are sequential**. The active pipeline is:
 render → checks → a YouTube search screenshot, then one Telegram message
 with the video screenshot and the Subir / Rechazar / Eliminar buttons → on
 Subir, private upload and folder deletion (Eliminar deletes without uploading) →
-claim check → schedule. Nothing is uploaded and no other album is rendered
+claim check → monetization → publish or schedule. Nothing is uploaded and no other album is rendered
 until the user presses a button. It needs `PUBLICAR_TELEGRAM_TOKEN` and
 `PUBLICAR_TELEGRAM_CHAT_ID` in `.env` (its own bot: Hermes keeps
 `@banar_precios_bot`). Open questions survive restarts in
@@ -68,13 +68,33 @@ env/bin/python pipeline_agente.py renderizar             # next album (cola, Alb
 env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/4K checks, screenshot + YouTube search screenshot
 env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, then deletes the album folder
 env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the album folder without uploading (already published)
-env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → next free hour or +2 years
+env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → monetization on → public now / first free moment, or +2 years if claimed
 env/bin/python pipeline_agente.py estado [--esperar-render]  # unscheduled uploads, rendered albums awaiting approval, render running
 ```
 
-Scheduling: one video per hour (24 per day); claimed videos go two years ahead.
-Claim detection reads YouTube Studio (`/video/<id>/copyright`); an unclear page
-returns `reclamo_desconocido` and the service asks the user instead of guessing.
+Scheduling: the videos stay at least one hour apart. An unclaimed video is
+made public right away when no other video was published or is scheduled
+less than one hour from now (published times come from the newest page of the
+channel's uploads, scheduled ones from the API and `programados.jsonl`);
+otherwise it is scheduled for the earliest moment that keeps one hour from
+every published or scheduled video. Claimed videos go two years ahead, on the
+first free hour, and monetization is not attempted for them.
+
+Studio (claim check and monetization) runs Brave headless with a copy of the
+signed-in profile (`.runtime_browser_profiles/agente`). It must launch without
+Playwright's `--password-store=basic` / `--use-mock-keychain` flags (so Brave
+can read the cookies from KWallet) and with a normal Chrome user agent; see
+`abrir_contexto_studio`. Claim detection reads `/video/<id>/claims`; an unclear
+page returns `reclamo_desconocido` and the service asks the user instead of
+guessing, and a missing session returns `sin_sesion_en_studio`.
+
+Monetization (`studio_monetizacion.py`) turns ads on at
+`/video/<id>/monetization`. Studio asks for the ad-suitability questionnaire
+when ads are turned on; its answers cannot be changed afterwards, so the step
+does not answer it: it cancels, leaves the video as it was and `programar`
+reports `monetizacion.motivo = cuestionario_de_idoneidad`. Any monetization
+failure never stops the video: the service sends a Telegram notice with the
+`/monetization` link of that video.
 
 ### Common commands
 

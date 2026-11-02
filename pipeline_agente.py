@@ -57,7 +57,10 @@ RAICES_BORRABLES = (DIR_RENDERIZANDO, DIR_UPLOAD)
 TOLERANCIA_DURACION_S = 3.0
 VOLUMEN_MEDIO_MINIMO_DB = -45.0
 SILENCIO_LARGO_S = 20
-ANTICIPACION_MIN = 15
+# Mínimo de anticipación al programar: YouTube rechaza un publishAt que ya pasó.
+ANTICIPACION_MIN = 2
+# Entre un video publicado o programado y otro tiene que haber al menos esto.
+SEPARACION_ENTRE_VIDEOS = timedelta(hours=1)
 MARGEN_RECLAMO_MIN = 60
 ESPERA_ENTRE_CONSULTAS_S = 300
 REINTENTOS_CONEXION = 3
@@ -327,12 +330,24 @@ def sumar_dos_anios(momento):
         return momento.replace(year=momento.year + 2, day=28)
 
 
-def elegir_fecha(ahora, con_reclamo, ocupadas):
+def siguiente_momento_libre(ahora, tomados, separacion=SEPARACION_ENTRE_VIDEOS):
+    """El primer momento desde `ahora` a `separacion` o más de todos los `tomados`."""
+    momento = ahora
+    for tomado in sorted(tomados):
+        # Ordenados: si el siguiente queda cerca, se espera a que cumpla su hora y se sigue.
+        if abs(momento - tomado) < separacion:
+            momento = tomado + separacion
+    return momento
+
+
+def elegir_fecha(ahora, con_reclamo, tomados):
+    """Cuándo sale el video. Sin reclamo puede devolver `ahora`: se publica en el acto."""
     if con_reclamo:
-        desde = sumar_dos_anios(ahora)
-    else:
-        desde = ahora + timedelta(minutes=ANTICIPACION_MIN)
-    return siguiente_hora_libre(desde, ocupadas)
+        return siguiente_hora_libre(sumar_dos_anios(ahora), horas_ocupadas(tomados))
+    momento = siguiente_momento_libre(ahora, tomados)
+    if momento <= ahora:
+        return ahora
+    return max(momento, ahora + timedelta(minutes=ANTICIPACION_MIN))
 
 
 def armar_status_programado(status_actual, publica_en):
@@ -344,6 +359,13 @@ def armar_status_programado(status_actual, publica_en):
     }
     status["privacyStatus"] = "private"
     status["publishAt"] = publica_en.isoformat()
+    return status
+
+
+def armar_status_publicado(status_actual):
+    status = armar_status_programado(status_actual, datetime.now().astimezone())
+    status["privacyStatus"] = "public"
+    del status["publishAt"]
     return status
 
 
@@ -1064,21 +1086,64 @@ def activar_monetizacion_en_studio(video_id):
         return {"estado": "fallo", "motivo": exc.motivo}
 
 
-def horas_tomadas(uploader, yt):
+def publicados_recientes(uploader, cliente, desde):
+    """Cuándo se publicaron los videos públicos del canal desde `desde`.
+
+    Solo mira la primera página de la lista de subidas: va de más nuevo a más viejo
+    según el momento de publicación (o de subida, si sigue privado), así que lo
+    publicado en la última hora está arriba.
+    """
+    lista = uploader.get_uploads_playlist_id(cliente)
+    if not lista:
+        return []
+    items = (
+        cliente.playlistItems().list(part="snippet", playlistId=lista, maxResults=50).execute()
+    ).get("items", [])
+    ids = [
+        item["snippet"]["resourceId"]["videoId"]
+        for item in items
+        if item.get("snippet", {}).get("resourceId", {}).get("videoId")
+    ]
+    if not ids:
+        return []
+    videos = cliente.videos().list(part="snippet,status", id=",".join(ids)).execute()
+    publicados = []
+    for video in videos.get("items", []):
+        if video.get("status", {}).get("privacyStatus") != "public":
+            continue
+        # En videos públicos publishedAt es el momento de publicación (publishAt ya no viene).
+        momento = datetime.fromisoformat(video["snippet"]["publishedAt"]).astimezone()
+        if momento >= desde:
+            publicados.append(momento)
+    return publicados
+
+
+def momentos_tomados(uploader, yt, ahora, con_reclamo):
+    """Momentos de otros videos: programados (API y registro local) y, sin reclamo, los recién publicados."""
     programados, _ = ejecutar_api(
         uploader,
         yt,
         lambda c: uploader.fetch_scheduled_publish_times(c, max_items=ESCANEO_PROGRAMADOS),
     )
-    return horas_ocupadas(programados) | horas_ocupadas(fechas_programadas_localmente())
+    tomados = [*programados, *fechas_programadas_localmente()]
+    if not con_reclamo:
+        tomados += ejecutar_api(
+            uploader,
+            yt,
+            lambda c: publicados_recientes(uploader, c, ahora - SEPARACION_ENTRE_VIDEOS),
+        )
+    return tomados
 
 
-def armar_resumen_programado(titulo, publica_en, con_reclamo, reclamantes, monetizacion=None):
+def armar_resumen_programado(
+    titulo, publica_en, con_reclamo, reclamantes, monetizacion=None, publicado_ahora=False
+):
     fecha = publica_en.strftime("%Y-%m-%d %H:%M")
     if con_reclamo:
         quienes = f" ({', '.join(reclamantes)})" if reclamantes else ""
         return f"⚠️ {titulo}\nTiene reclamo{quienes}: programado para {fecha} para apelar."
-    texto = f"✓ {titulo}\nSin reclamos: programado para {fecha}."
+    cuando = "publicado ahora" if publicado_ahora else f"programado para {fecha}"
+    texto = f"✓ {titulo}\nSin reclamos: {cuando}."
     if (monetizacion or {}).get("estado") in ("activada", "ya_activa"):
         texto += "\nMonetización activada."
     return texto
@@ -1151,15 +1216,21 @@ def programar(
                 else:
                     con_reclamo = reclamo
 
+                ahora = datetime.now().astimezone().replace(microsecond=0)
                 publica_en = elegir_fecha(
-                    datetime.now().astimezone(), con_reclamo, horas_tomadas(uploader, yt)
+                    ahora, con_reclamo, momentos_tomados(uploader, yt, ahora, con_reclamo)
                 )
+                publicado_ahora = publica_en == ahora and not con_reclamo
                 # Con reclamo el video no genera ingresos: no se intenta activar nada.
                 if con_reclamo:
                     monetizacion = {"estado": "omitida", "motivo": "con_reclamo"}
                 else:
                     monetizacion = activar(video_id)
-                cuerpo = {"id": video_id, "status": armar_status_programado(status, publica_en)}
+                if publicado_ahora:
+                    nuevo_status = armar_status_publicado(status)
+                else:
+                    nuevo_status = armar_status_programado(status, publica_en)
+                cuerpo = {"id": video_id, "status": nuevo_status}
                 ejecutar_api(
                     uploader,
                     yt,
@@ -1189,9 +1260,10 @@ def programar(
         "con_reclamo": con_reclamo,
         "reclamantes": reclamantes,
         "publica_en": publica_en.isoformat(),
+        "publicado_ahora": publicado_ahora,
         "monetizacion": monetizacion,
         "resumen": armar_resumen_programado(
-            titulo, publica_en, con_reclamo, reclamantes, monetizacion
+            titulo, publica_en, con_reclamo, reclamantes, monetizacion, publicado_ahora
         ),
         "log": str(log),
     }
