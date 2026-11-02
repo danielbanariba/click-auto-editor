@@ -173,6 +173,13 @@ class TestActivarMonetizacion(unittest.TestCase):
         self.assertEqual(resultado["estado"], "ya_activa", resultado)
         self.assertEqual(studio.guardados, 0)
 
+    def test_anuncios_limitados_cuentan_como_ya_activados(self):
+        # Studio muestra "Limitada" cuando YouTube restringe los anuncios: siguen activos.
+        studio = StudioFalso(estado="Limitada")
+        resultado = self.activar(studio)
+        self.assertEqual(resultado["estado"], "ya_activa", resultado)
+        self.assertEqual(studio.guardados, 0)
+
     def test_cuestionario_se_responde_nada_de_lo_anterior_sin_elegir_radios_y_queda_activada(self):
         studio = StudioFalso(cuestionario=True)
         resultado = self.activar(studio)

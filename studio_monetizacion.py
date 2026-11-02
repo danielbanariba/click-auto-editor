@@ -24,7 +24,10 @@ ESPERA_ESTADO_S = 45  # la página tarda en cargar: se espera por texto, no por 
 ESPERA_PASO_S = 10
 ESPERA_GUARDADO_S = 60  # Studio pasa por "Comprobando" un buen rato tras pulsar Guardar
 
-P_ESTADO_ACTIVADA = re.compile(r"^\s*(activada|on)\s*$", re.IGNORECASE | re.MULTILINE)
+# "Limitada" son anuncios activos que YouTube restringió: para el bot cuentan como activados.
+P_ESTADO_ACTIVADA = re.compile(
+    r"^\s*(activada|on|limitada|limited)\s*$", re.IGNORECASE | re.MULTILINE
+)
 P_COMPROBANDO = re.compile(r"^\s*(comprobando|checking)\s*$", re.IGNORECASE | re.MULTILINE)
 P_ESTADO_DESACTIVADA = re.compile(r"^\s*(desactivada|off)\s*$", re.IGNORECASE | re.MULTILINE)
 P_EDITAR_ESTADO = re.compile(
