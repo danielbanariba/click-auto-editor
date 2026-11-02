@@ -259,7 +259,8 @@ class TestOrigenes(unittest.TestCase):
     def test_renderizar_con_un_nombre_que_no_es_un_album_listado_no_renderiza(self):
         (self.album / "Banda - Disco (2020)").mkdir()
         with mock.patch.object(pa.subprocess, "run", side_effect=AssertionError("lanzó un render")):
-            for nombre in ("..", ".", "notas.txt", "Banda - Otro (2020)"):
+            for nombre in ("..", ".", "notas.txt", "Banda - Otro (2020)", "Album/Banda - Disco (2020)",
+                           str(self.album / "Banda - Disco (2020)")):
                 self.assertEqual(pa.renderizar(nombre)["motivo"], "album_no_encontrado", nombre)
 
     def test_renderizar_le_pasa_al_render_la_ruta_del_album_de_ep(self):
