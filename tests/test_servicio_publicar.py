@@ -381,12 +381,33 @@ class TestAvisos(BaseServicio):
         self.assertEqual(self.lanzador.lanzados("renderizar"), [["renderizar"]])
 
     def test_sin_albumes_avisa_una_sola_vez(self):
-        for _ in range(3):
-            self.servicio.paso()
+        origenes = tuple(self.tmp / nombre for nombre in ("01_limpieza_de_impurezas", "Album", "EP"))
+        with mock.patch.object(pa, "DIRS_ORIGEN_RENDER", origenes):
+            for _ in range(3):
+                self.servicio.paso()
 
         self.assertEqual(len(self.telegram.mensajes), 1)
-        self.assertIn("No quedan álbumes", self.telegram.mensajes[0]["texto"])
+        self.assertIn(
+            "No quedan álbumes en 01_limpieza_de_impurezas/, Album/ ni EP/.",
+            self.telegram.mensajes[0]["texto"],
+        )
         self.assertEqual(self.lanzador.lanzados(), [])
+
+    def test_render_fallido_sin_error404_no_manda_a_una_cola_que_no_existe(self):
+        self.album_en_cola("Banda - Disco")
+        self.servicio.paso()
+        self.lanzador.terminar(
+            "renderizar",
+            {"ok": False, "motivo": "render_fallido", "album": "Banda - Disco",
+             "movido_a_error404": False, "log_final": ""},
+        )
+        self.servicio.paso()
+
+        pregunta = self.ultima_pregunta()
+        self.assertIn("Falló el render de Banda - Disco", pregunta["texto"])
+        self.assertIn("Sigue en su carpeta", pregunta["texto"])
+        self.assertNotIn("la cola", pregunta["texto"])
+        self.assertIn("🔁 Reintentar", dict(pregunta["botones"]))
 
     def test_error_de_red_en_telegram_no_frena_el_servicio(self):
         self.album_en_cola("Banda - Disco")

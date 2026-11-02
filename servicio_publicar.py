@@ -190,6 +190,14 @@ def valor(argumentos, opcion):
     return argumentos[list(argumentos).index(opcion) + 1]
 
 
+def carpetas_de_origen():
+    """Las carpetas de donde toma álbumes el servicio: «a/, b/ ni c/»."""
+    nombres = [f"{origen.name}/" for origen in pa.DIRS_ORIGEN_RENDER]
+    if len(nombres) == 1:
+        return nombres[0]
+    return f"{', '.join(nombres[:-1])} ni {nombres[-1]}"
+
+
 class Servicio:
     def __init__(self, telegram, lanzar, estado_json=ESTADO_JSON, reloj=time.monotonic):
         self.telegram = telegram
@@ -272,7 +280,8 @@ class Servicio:
             self.lanzar_paso("renderizar")
         else:
             self.avisar_una_vez(
-                "sin_albumes", "📭 No quedan álbumes en la cola. Sigo solo cuando aparezca uno."
+                "sin_albumes",
+                f"📭 No quedan álbumes en {carpetas_de_origen()}. Sigo solo cuando aparezca uno.",
             )
 
     # -- resultados de cada paso -------------------------------------------
@@ -298,7 +307,7 @@ class Servicio:
                 self.avisar(f"{texto}\n\nLo moví a Error404; sigo con el próximo.")
             else:
                 self.preguntar(
-                    "reintentar", f"{texto}\n\nSigue en la cola. Arreglalo y apretá Reintentar."
+                    "reintentar", f"{texto}\n\nSigue en su carpeta. Arreglalo y apretá Reintentar."
                 )
         else:
             detalle = resultado.get("detalle") or resultado.get("libre_gb") or ""
