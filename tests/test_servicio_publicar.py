@@ -353,11 +353,11 @@ class TestProgramarFallido(BaseServicio):
         self.ahora = 0.0
         self.servicio.reloj = lambda: self.ahora
 
-    def fallar(self):
+    def fallar(self, motivo="error_api"):
         """Lanza `programar` si no hay uno corriendo y lo termina con un motivo no previsto."""
         if not any(p.salida is None for p in self.lanzador.procesos if p.argumentos[0] == "programar"):
             self.servicio.lanzar_paso(*self.ARGUMENTOS)
-        self.lanzador.terminar("programar", {"ok": False, "motivo": "error_api", "video_id": "VID1"})
+        self.lanzador.terminar("programar", {"ok": False, "motivo": motivo, "video_id": "VID1"})
         self.servicio.paso()
 
     def esperar_reintento(self):
@@ -376,6 +376,18 @@ class TestProgramarFallido(BaseServicio):
         self.fallar()
         self.esperar_reintento()
         self.fallar()
+
+    def test_cortes_por_tiempo_y_conexiones_caidas_cuentan_como_fallos(self):
+        # Un corte por tiempo máximo, una conexión caída y un proceso que muere
+        # sin respuesta son el mismo video sin programar: los tres suman.
+        self.fallar("tiempo_agotado")
+        self.esperar_reintento()
+        self.fallar("sin_conexion")
+        self.esperar_reintento()
+        self.fallar("sin_respuesta")
+
+        self.assertEqual(len(self.preguntas()), 1)
+        self.assertIn("después de 3 intentos", self.preguntas()[0]["texto"])
 
     def test_tercer_fallo_pregunta_en_vez_de_reintentar_otra_vez(self):
         self.fallar()
