@@ -221,6 +221,72 @@ class TestVerificar(unittest.TestCase):
         self.assertLess(rojo, 100, (rojo, verde, azul))
 
 
+class TestOrigenes(unittest.TestCase):
+    """El render toma álbumes de 01_limpieza, Album/ y EP/, en ese orden."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.cola, self.album, self.ep = (self.tmp / n for n in ("cola", "Album", "EP"))
+        for carpeta in (self.cola, self.album, self.ep):
+            carpeta.mkdir()
+        parches = [
+            mock.patch.object(pa, "DIRS_ORIGEN_RENDER", (self.cola, self.album, self.ep)),
+            mock.patch.object(pa, "DIR_RENDERIZANDO", self.tmp / "Renderizando"),
+            mock.patch.object(pa, "DIR_ERROR404", self.tmp / "Error404"),
+            mock.patch.object(pa, "RENDER_SSD_DIR", Path("/")),
+            mock.patch.object(pa, "MIN_FREE_SPACE_GB", 0),
+            mock.patch.object(pa, "render_en_curso", return_value=False),
+        ]
+        for parche in parches:
+            parche.start()
+            self.addCleanup(parche.stop)
+
+    def test_siguiente_album_sigue_el_orden_de_las_carpetas_y_los_mas_nuevos_primero(self):
+        for nombre in ("Banda B - Viejo (2019)", "Banda A - Nuevo (2021)", "Banda C - Sin anio"):
+            (self.album / nombre).mkdir()
+        (self.ep / "Banda Z - Corto (2025) [EP]").mkdir()
+        (self.album / "notas.txt").write_text("no es un álbum", encoding="utf-8")
+
+        self.assertEqual(pa.siguiente_album(), self.album / "Banda A - Nuevo (2021)")
+        (self.cola / "Banda Q - A mano (2001)").mkdir()
+        self.assertEqual(pa.siguiente_album(), self.cola / "Banda Q - A mano (2001)")
+
+    def test_sin_albumes_en_ninguna_carpeta_no_hay_siguiente(self):
+        self.assertIsNone(pa.siguiente_album())
+        self.assertEqual(pa.renderizar()["motivo"], "sin_albumes")
+
+    def test_renderizar_con_un_nombre_que_no_es_un_album_listado_no_renderiza(self):
+        (self.album / "Banda - Disco (2020)").mkdir()
+        with mock.patch.object(pa.subprocess, "run", side_effect=AssertionError("lanzó un render")):
+            for nombre in ("..", ".", "notas.txt", "Banda - Otro (2020)", "Album/Banda - Disco (2020)",
+                           str(self.album / "Banda - Disco (2020)")):
+                self.assertEqual(pa.renderizar(nombre)["motivo"], "album_no_encontrado", nombre)
+
+    def test_renderizar_le_pasa_al_render_la_ruta_del_album_de_ep(self):
+        nombre = "Banda Z - Corto (2025) [EP]"
+        (self.ep / nombre).mkdir()
+        comandos = []
+
+        def render_falso(comando, **kwargs):
+            comandos.append(comando)
+            destino = self.tmp / "Renderizando" / nombre
+            destino.mkdir(parents=True)
+            (destino / f"{nombre}.mp4").write_bytes(b"video")
+            shutil.rmtree(self.ep / nombre)
+
+        uploader = SimpleNamespace(encontrar_video=lambda c: next(c.glob("*.mp4"), None))
+        with mock.patch.object(pa.subprocess, "run", side_effect=render_falso), mock.patch.object(
+            pa, "uploader_real", return_value=uploader
+        ):
+            resultado = pa.renderizar()
+
+        self.assertEqual(comandos[0][-2:], ["--test", str(self.ep / nombre)])
+        self.assertTrue(resultado["ok"])
+        self.assertEqual(resultado["album"], nombre)
+        self.assertEqual(resultado["restantes"], 0)
+
+
 class TestRetomar(unittest.TestCase):
     """Una sesión nueva retoma lo que dejó otra: renders en curso y álbumes sin aprobar."""
 

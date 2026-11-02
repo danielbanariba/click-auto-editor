@@ -769,6 +769,11 @@ def elegir_tipo(type_value):
     return None
 
 
+def tipo_por_carpeta(nombre_carpeta):
+    """Tipo según el sufijo del scraper ("Banda - Disco (2009) [EP]"), para cuando DeathGrind no lo sabe."""
+    return "EP" if re.search(r"\[EP\]", nombre_carpeta, re.IGNORECASE) else None
+
+
 def formatear_tipo_full(tipo):
     if not tipo:
         return "Full Album"
@@ -2457,7 +2462,7 @@ def build_preview_title(folder_path, repertorio):
     release_tipo = None
     if release:
         release_tipo = elegir_tipo(release.get("type") or release.get("type_id"))
-    tipo_full = formatear_tipo_full(release_tipo)
+    tipo_full = formatear_tipo_full(release_tipo or tipo_por_carpeta(folder_path.name))
     return f"{band} - {album} ({tipo_full})"
 
 
@@ -3036,7 +3041,7 @@ def procesar_carpeta(
     if not genre_text:
         genre_text = context["genre"]
 
-    tipo_full = formatear_tipo_full(release_tipo)
+    tipo_full = formatear_tipo_full(release_tipo or tipo_por_carpeta(folder_path.name))
 
     band_data = None
     if session and band_id:

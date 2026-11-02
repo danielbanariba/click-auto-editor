@@ -64,6 +64,11 @@ DIR_CORREGIR_EDICION = BASE_DIR / "corregir_edicion"
 DIR_BANDAS_SUBIDAS = BASE_DIR / "bandas_que_supuestamente_ya_se_subieron"
 DIR_ERROR404 = BASE_DIR / "Error404"
 DIR_METAL_TRACKER = BASE_DIR / "metal-tracker"
+DIR_ALBUM = BASE_DIR / "Album"
+DIR_EP = BASE_DIR / "EP"
+# De dónde toma álbumes el servicio de publicación, en este orden. El
+# render mueve el álbum al SSD y se borra después de publicarlo.
+DIRS_ORIGEN_RENDER = (DIR_AUDIO_SCRIPTS, DIR_ALBUM, DIR_EP)
 
 # ============================================================================
 # ARCHIVOS DEL PROYECTO

@@ -49,6 +49,12 @@ until the user presses a button. It needs `PUBLICAR_TELEGRAM_TOKEN` and
 `@banar_precios_bot`). Open questions survive restarts in
 `data/agente/servicio.json`.
 
+Albums come from `01_limpieza_de_impurezas`, then `Album/`, then `EP/`
+(`DIRS_ORIGEN_RENDER` in `config.py`), newest year first. The render moves
+each one to the SSD and the folder is deleted after publishing. When
+DeathGrind does not know the release type, an `[EP]` suffix in the folder
+name makes the title "Full EP".
+
 ```bash
 journalctl --user -u publicar-albumes -f         # what the service is doing
 systemctl --user restart publicar-albumes        # after changing the code
@@ -58,7 +64,7 @@ Each step is a `pipeline_agente.py` subcommand that prints one JSON line;
 logs, screenshots and state go to `data/agente/` (gitignored).
 
 ```bash
-env/bin/python pipeline_agente.py renderizar             # next album → Renderizando/
+env/bin/python pipeline_agente.py renderizar             # next album (cola, Album/, EP/) → Renderizando/
 env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/4K checks, screenshot + YouTube search screenshot
 env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, then deletes the album folder
 env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the album folder without uploading (already published)
