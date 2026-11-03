@@ -7,6 +7,7 @@ import sys
 import time
 from pathlib import Path
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
@@ -1696,94 +1697,114 @@ def _parse_reclamantes_block(dialog_text):
     return out
 
 
-def extract_claimants_from_video(page, video_id, delay_s=1.0, max_claims_per_video=6):
-    """Abre /video/{id}/copyright, clickea cada 'Ver detalles', lee el bloque
-    'Reclamantes' del modal y devuelve la lista completa de reclamantes
-    encontrados (todos los claims del video, deduplicados).
+# La lista de reclamos llega después de que la página termina de cargar.
+ESPERA_BOTONES_S = 30
+# Tras "Ver detalles" el diálogo abre y el bloque "Reclamantes" carga un momento después.
+ESPERA_DIALOGO_S = 8
+MAX_RECLAMOS_POR_VIDEO = 20
+P_RECLAMANTES_ENCABEZADO = re.compile(r"^(reclamantes|claimants)$", re.IGNORECASE)
+# Solo acorta la espera de un video limpio; la clasificación del reclamo es de pipeline_agente.
+P_SIN_RECLAMOS = re.compile(
+    r"(no se han encontrado reclamaciones|no se encontraron problemas|no claims found|"
+    r"no copyright issues)",
+    re.IGNORECASE,
+)
 
-    NO clickea 'Tomar medidas' ni envia nada. Solo abre y cierra modales informativos."""
+
+def _esperar_botones_ver_detalles(page, timeout_s):
+    """Espera a que la lista de reclamos cargue y devuelve cuántos 'Ver detalles' hay.
+
+    Devuelve 0 si la página dice que no hay reclamos o si pasa `timeout_s` sin botones.
+    El conteo se da por bueno cuando se repite en dos lecturas seguidas. Un error del
+    navegador a mitad de la espera cuenta como «todavía no está»: Studio redirige
+    /copyright a /claims y un `evaluate` que cruza esa navegación pierde su contexto."""
+    limite = time.monotonic() + timeout_s
+    botones = page.get_by_role("button", name=P_VER_DETALLES_BTN)
+    anterior = 0
+    while True:
+        try:
+            total = botones.count()
+            if total == 0 and P_SIN_RECLAMOS.search(
+                page.evaluate("() => (document.body && document.body.innerText) || ''") or ""
+            ):
+                return 0
+        except PlaywrightError as exc:
+            print(f"     [WARN] la página cambió mientras esperaba la lista de reclamos: {exc}")
+            total = 0
+        if total > 0 and total == anterior:
+            return total
+        anterior = total
+        if time.monotonic() >= limite:
+            return total
+        time.sleep(0.5)
+
+
+def _cerrar_dialogo_de_reclamo(page, encabezado, delay_s):
+    page.keyboard.press("Escape")
+    try:
+        encabezado.wait_for(state="hidden", timeout=3000)
+    except PlaywrightTimeoutError:
+        pass
+    if claim_dialog_is_open(page):
+        dismiss_claim_dialog(page, delay_s=delay_s)
+
+
+def _leer_reclamantes_de_un_reclamo(page, boton, delay_s):
+    """Abre 'Ver detalles' de un reclamo, espera el bloque 'Reclamantes' y cierra el diálogo."""
+    boton.scroll_into_view_if_needed(timeout=3000)
+    boton.click(timeout=5000)
+    # Studio deja los diálogos ya cerrados en el DOM, ocultos, y agrega uno nuevo en cada
+    # «Ver detalles»: solo cuenta el encabezado del diálogo que está abierto.
+    encabezado = page.get_by_text(P_RECLAMANTES_ENCABEZADO).filter(visible=True).last
+    try:
+        try:
+            encabezado.wait_for(state="visible", timeout=ESPERA_DIALOGO_S * 1000)
+        except PlaywrightTimeoutError:
+            print("     [WARN] el diálogo del reclamo no mostró el bloque 'Reclamantes'")
+            return []
+        return _parse_reclamantes_block(page.inner_text("body"))
+    finally:
+        _cerrar_dialogo_de_reclamo(page, encabezado, delay_s)
+
+
+def extract_claimants_from_video(page, video_id, delay_s=1.0, max_claims_per_video=MAX_RECLAMOS_POR_VIDEO):
+    """Abre /video/{id}/copyright (Studio lo redirige a /claims), clickea cada
+    'Ver detalles', lee el bloque 'Reclamantes' del diálogo y devuelve la lista completa
+    de reclamantes encontrados (todos los claims del video, deduplicados).
+
+    Las filas de la lista no traen el reclamante: solo el diálogo de cada 'Ver detalles'.
+    NO clickea 'Tomar medidas' ni envia nada. Solo abre y cierra diálogos informativos.
+    Un fallo del navegador al leer un reclamo no lanza: ese reclamo se omite."""
     url = f"https://studio.youtube.com/video/{video_id}/copyright"
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=25000)
-    except Exception as exc:
+    except PlaywrightError as exc:
         print(f"     [WARN] no se pudo cargar /copyright: {exc}")
         return []
     try:
         page.wait_for_load_state("networkidle", timeout=12000)
-    except Exception:
+    except PlaywrightError:
         pass
-    time.sleep(max(1.5, min(delay_s * 1.5, 3.5)))
 
     try:
-        botones = page.get_by_role("button", name=P_VER_DETALLES_BTN)
-        total = botones.count()
-    except Exception:
+        total = min(_esperar_botones_ver_detalles(page, ESPERA_BOTONES_S), max_claims_per_video)
+    except PlaywrightError as exc:
+        print(f"     [WARN] no se pudo leer la lista de reclamos: {exc}")
         return []
 
-    if total == 0:
-        return []
-
-    total = min(total, max_claims_per_video)
+    botones = page.get_by_role("button", name=P_VER_DETALLES_BTN)
     reclamantes = []
     vistos = set()
-
     for i in range(total):
         try:
-            btn = botones.nth(i)
-            if not btn.is_visible():
-                continue
-            try:
-                btn.scroll_into_view_if_needed(timeout=3000)
-            except Exception:
-                pass
-            try:
-                btn.click(timeout=5000)
-            except Exception as exc:
-                print(f"     [WARN] no se pudo clickear 'Ver detalles' #{i+1}: {exc}")
-                continue
-
-            time.sleep(max(1.0, min(delay_s, 2.0)))
-
-            text = ""
-            try:
-                dialog = page.get_by_role("dialog").last
-                if dialog and dialog.count() > 0 and dialog.is_visible():
-                    text = dialog.inner_text(timeout=3000) or ""
-            except Exception:
-                text = ""
-            if not text:
-                try:
-                    text = page.evaluate("() => (document.body && document.body.innerText) || ''") or ""
-                except Exception:
-                    text = ""
-
-            bloque = _parse_reclamantes_block(text)
-            for nombre in bloque:
-                key = nombre.lower()
-                if key in vistos:
-                    continue
-                vistos.add(key)
-                reclamantes.append(nombre)
-
-            try:
-                page.keyboard.press("Escape")
-            except Exception:
-                pass
-            time.sleep(max(0.5, min(delay_s * 0.6, 1.2)))
-
-            try:
-                if claim_dialog_is_open(page):
-                    dismiss_claim_dialog(page, delay_s=delay_s)
-            except Exception:
-                pass
-        except Exception as exc:
-            print(f"     [WARN] error procesando claim #{i+1}: {exc}")
-            try:
-                page.keyboard.press("Escape")
-            except Exception:
-                pass
+            bloque = _leer_reclamantes_de_un_reclamo(page, botones.nth(i), delay_s)
+        except PlaywrightError as exc:
+            print(f"     [WARN] error leyendo el reclamo #{i+1}: {exc}")
             continue
-
+        for nombre in bloque:
+            if nombre.lower() not in vistos:
+                vistos.add(nombre.lower())
+                reclamantes.append(nombre)
     return reclamantes
 
 

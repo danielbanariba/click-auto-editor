@@ -377,6 +377,119 @@ class TestReclamos(BaseServicio):
         )
 
 
+class TestListaNegra(BaseServicio):
+    """Un video con reclamo de un sello de la lista negra: aviso con botón para eliminarlo."""
+
+    ELIMINAR = "🗑️ Eliminar video"
+    CONSERVAR = "Conservar"
+
+    def terminar_programar(self, en_lista_negra=("Believe Music, UMG",)):
+        resultado = {
+            "ok": True,
+            "video_id": "VID1",
+            "titulo": "Banda - Disco",
+            "con_reclamo": True,
+            "reclamantes": ["Believe Music", "Believe Music, UMG"],
+            "captura_studio": str(self.tmp / "studio.png"),
+            "monetizacion": {"estado": "omitida", "motivo": "con_reclamo"},
+            "resumen": "⚠️ Banda - Disco\nTiene reclamo (Believe Music, UMG): programado para 2028-11-02 10:00.",
+        }
+        if en_lista_negra is not None:
+            resultado["reclamantes_en_lista_negra"] = list(en_lista_negra)
+        self.servicio.lanzar_paso("programar", "--video-id", "VID1", "--esperar")
+        self.lanzador.terminar("programar", resultado)
+        self.servicio.paso()
+
+    def preguntas(self):
+        return [m for m in self.telegram.mensajes if m["botones"]]
+
+    def test_pregunta_con_el_video_el_reclamante_el_link_de_studio_y_la_captura(self):
+        # Defecto: avisar sin decir qué video, quién reclama o dónde mirarlo, o sin los botones.
+        self.terminar_programar()
+        pregunta = self.ultima_pregunta()
+
+        self.assertEqual(len(self.preguntas()), 1)
+        self.assertIn("Banda - Disco", pregunta["texto"])
+        self.assertIn("Believe Music, UMG", pregunta["texto"])
+        self.assertIn("https://studio.youtube.com/video/VID1/claims", pregunta["texto"])
+        self.assertEqual(pregunta["foto"], str(self.tmp / "studio.png"))
+        self.assertEqual([etiqueta for etiqueta, _ in pregunta["botones"]], [self.CONSERVAR, self.ELIMINAR])
+
+    def test_el_resumen_de_programado_sigue_llegando_antes_de_la_pregunta(self):
+        # Comportamiento previo: el aviso de que el video quedó programado no se pierde.
+        self.terminar_programar()
+        mensajes = [m for m in self.telegram.mensajes if "Banda - Disco" in m["texto"]]
+        self.assertEqual(len(mensajes), 2, mensajes)
+        self.assertIn("programado para 2028-11-02", mensajes[0]["texto"])
+        self.assertFalse(mensajes[0]["botones"])
+        self.assertTrue(mensajes[1]["botones"])
+
+    def test_eliminar_video_lanza_el_paso_que_lo_borra_y_avisa_que_se_borro(self):
+        # Defecto: apretar el botón sin que se borre nada, o borrar sin decirle al usuario.
+        self.terminar_programar()
+        self.telegram.apretar(self.ultima_pregunta(), self.ELIMINAR)
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("eliminar_video"), [["eliminar_video", "--video-id", "VID1"]])
+
+        self.lanzador.terminar("eliminar_video", {"ok": True, "video_id": "VID1", "titulo": "Banda - Disco"})
+        self.servicio.paso()
+        self.assertIn("Borré", self.telegram.mensajes[-1]["texto"])
+        self.assertIn("Banda - Disco", self.telegram.mensajes[-1]["texto"])
+
+    def test_si_no_se_pudo_borrar_el_aviso_dice_que_el_video_sigue_en_youtube(self):
+        # Defecto: dar por borrado un video que YouTube no borró.
+        self.terminar_programar()
+        self.telegram.apretar(self.ultima_pregunta(), self.ELIMINAR)
+        self.servicio.paso()
+        self.lanzador.terminar("eliminar_video", {"ok": False, "motivo": "error_api", "video_id": "VID1"})
+        self.servicio.paso()
+
+        aviso = self.telegram.mensajes[-1]["texto"]
+        self.assertIn("No pude borrar", aviso)
+        self.assertIn("error_api", aviso)
+        self.assertIn("https://studio.youtube.com/video/VID1/edit", aviso)
+
+    def test_conservar_cierra_la_pregunta_y_un_boton_viejo_ya_no_borra(self):
+        # Defecto: que «Conservar» deje la pregunta abierta y un toque posterior en
+        # «Eliminar video» borre un video que el usuario decidió conservar.
+        self.terminar_programar()
+        pregunta = self.ultima_pregunta()
+
+        self.telegram.apretar(pregunta, self.CONSERVAR)
+        self.servicio.paso()
+        self.telegram.apretar(pregunta, self.ELIMINAR)
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("eliminar_video"), [])
+        self.assertEqual(self.servicio.estado["preguntas"], {})
+
+    def test_el_boton_sigue_valiendo_tras_reiniciar_el_servicio(self):
+        # Defecto: perder la pregunta (o el id del video) en un reinicio.
+        self.terminar_programar()
+        pregunta = self.ultima_pregunta()
+
+        self.lanzador = LanzadorFalso()
+        self.servicio = self.nuevo_servicio()
+        self.servicio.paso()
+        self.assertEqual(len(self.preguntas()), 1)
+        self.telegram.apretar(pregunta, self.ELIMINAR)
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("eliminar_video"), [["eliminar_video", "--video-id", "VID1"]])
+
+    def test_un_video_con_reclamo_fuera_de_la_lista_negra_no_pregunta_nada(self):
+        # Comportamiento previo: sin coincidencia solo llega el resumen (también con el JSON
+        # de antes, que no traía el campo).
+        for en_lista_negra in ([], None):
+            with self.subTest(en_lista_negra=en_lista_negra):
+                self.telegram.mensajes.clear()
+                self.terminar_programar(en_lista_negra)
+                # El mismo paso puede avisar otras cosas (la cola de álbumes vacía).
+                mensajes = [m for m in self.telegram.mensajes if "Banda - Disco" in m["texto"]]
+                self.assertEqual(len(mensajes), 1, mensajes)
+                self.assertEqual(self.preguntas(), [])
+
+
 class TestProgramarFallido(BaseServicio):
     ARGUMENTOS = ["programar", "--video-id", "VID1", "--esperar"]
     REINTENTO = "⚠️ No pude programar VID1 (error_api). Reintento en 30 min."
