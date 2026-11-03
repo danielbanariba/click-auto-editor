@@ -86,7 +86,12 @@ Studio (claim check and monetization) runs Brave headless with a copy of the
 signed-in profile (`.runtime_browser_profiles/agente`). It must launch without
 Playwright's `--password-store=basic` / `--use-mock-keychain` flags (so Brave
 can read the cookies from KWallet) and with a normal Chrome user agent; see
-`abrir_contexto_studio`. Claim detection reads `/video/<id>/claims`; an unclear
+`abrir_contexto_studio`. The account has several channels, and YouTube sometimes
+opens "Selecciona un canal" (`www.youtube.com/signin_prompt`) instead of Studio:
+`pagina_de_studio` opens Studio first and, when that question shows, clicks the
+exact, visible "Daniel Banariba" (`CANAL_DE_STUDIO`; "Daniel Banariba Drummer" is
+another channel). If it is not listed, the step fails with `canal_no_disponible`.
+Claim detection reads `/video/<id>/claims`; an unclear
 page returns `reclamo_desconocido` and the service asks the user instead of
 guessing, and a missing session returns `sin_sesion_en_studio`.
 

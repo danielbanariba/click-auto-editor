@@ -99,6 +99,7 @@ MOTIVOS_MONETIZACION = {
     "calificacion_no_adecuada": "el cuestionario no dio «Adecuado para anuncios», no lo envié",
     "no_se_encontro_nada_de_lo_anterior": "no encontré «Nada de lo anterior» en el cuestionario, no lo envié",
     "sin_sesion_en_studio": "Studio no tiene la sesión iniciada",
+    "canal_no_disponible": "YouTube pidió elegir canal y no pude entrar con «Daniel Banariba»",
     "no_se_guardo": "Studio no guardó el cambio",
     "no_se_pudo_guardar": "Studio no dejó guardar el cambio",
     "estado_desconocido": "la página de monetización no se parece a la esperada",
@@ -111,6 +112,7 @@ MOTIVOS_IMPUGNACION = {
     "no_confirmado": "Studio no mostró el reclamo como impugnado y no sé si salió",
     "lista_de_reclamos_no_disponible": "Studio no mostró la lista de reclamos; no se envió nada",
     "sin_sesion_en_studio": "Studio no tiene la sesión iniciada",
+    "canal_no_disponible": "YouTube pidió elegir canal y no pude entrar con «Daniel Banariba»",
     "error_navegador": "falló el navegador",
 }
 

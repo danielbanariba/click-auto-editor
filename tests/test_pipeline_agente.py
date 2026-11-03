@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+from urllib.parse import parse_qs, quote, urlparse
 
 import httplib2
 import playwright.sync_api as playwright_api
@@ -591,10 +592,27 @@ class TestSesionDeStudio(unittest.TestCase):
         correr.assert_not_called()
 
 
+class PaginaFalsa:
+    url = "https://studio.youtube.com/"
+
+    def __init__(self, falla_al_abrir=False):
+        self.falla_al_abrir = falla_al_abrir
+
+    def goto(self, url, **kwargs):
+        if self.falla_al_abrir:
+            raise playwright_api.Error("net::ERR_INTERNET_DISCONNECTED")
+
+    def wait_for_load_state(self, *args, **kwargs):
+        pass
+
+    def screenshot(self, path):
+        pass
+
+
 class ContextoFalso:
-    def __init__(self, cierra_mal=False):
+    def __init__(self, cierra_mal=False, pagina=None):
         self.cierra_mal = cierra_mal
-        self.pages = [SimpleNamespace(screenshot=lambda path: None)]
+        self.pages = [pagina or PaginaFalsa()]
 
     def close(self):
         if self.cierra_mal:
@@ -641,8 +659,98 @@ class TestActivarMonetizacionNuncaLanza(unittest.TestCase):
         resultado = self.activar(PlaywrightQueNoArranca())
         self.assertEqual((resultado["estado"], resultado["motivo"]), ("fallo", "error_navegador"))
 
+    def test_si_studio_no_carga_devuelve_fallo(self):
+        contexto = ContextoFalso(pagina=PaginaFalsa(falla_al_abrir=True))
+        resultado = self.activar(PlaywrightQueArranca(), contexto)
+        self.assertEqual((resultado["estado"], resultado["motivo"]), ("fallo", "error_navegador"))
+
     def test_sin_ejecutable_del_navegador_se_usa_la_version_por_defecto(self):
         self.assertEqual(pa.version_del_navegador(None), pa.VERSION_STUDIO_POR_DEFECTO)
+
+
+URL_SELECTOR_DE_CANAL = (
+    "https://www.youtube.com/signin_prompt?app=desktop&next=https%3A%2F%2Fstudio.youtube.com%2F"
+)
+
+
+class StudioConVariosCanales:
+    """Studio que, como el de verdad, a veces manda a "Selecciona un canal"."""
+
+    def __init__(self, pide_canal, canales=("Daniel Banariba Drummer", "Daniel Banariba", "Alejandro Banariba")):
+        self.pide_canal = pide_canal
+        self.canales = canales
+        self.elegidos = []
+
+    def studio(self, ruta):
+        if self.pide_canal:
+            # Un 302 no pasa por la ruta del otro dominio: se redirige desde la página.
+            cuerpo = f'<script>location.replace("{URL_SELECTOR_DE_CANAL}")</script>'
+        else:
+            cuerpo = "<h1>Panel del canal</h1>"
+        ruta.fulfill(status=200, body=cuerpo, content_type="text/html; charset=utf-8")
+
+    def youtube(self, ruta):
+        url = urlparse(ruta.request.url)
+        if url.path == "/elegir":
+            self.elegidos.append(parse_qs(url.query)["canal"][0])
+            self.pide_canal = False
+            cuerpo = '<script>location.replace("https://studio.youtube.com/")</script>'
+        else:
+            filas = "".join(
+                f'<div onclick="location.href = \'/elegir?canal={quote(canal)}\'">'
+                f"<img alt=''><div><span>{canal}</span><span>8010 suscriptores</span></div></div>"
+                for canal in self.canales
+            )
+            # Detrás del diálogo queda la página de configuración, con el nombre de la cuenta oculto.
+            cuerpo = (
+                "<nav>Configuración</nav><span hidden>Daniel Banariba</span>"
+                f"<div role='dialog'><h2>Selecciona un canal</h2>{filas}"
+                "<label><input type='checkbox'> No volver a preguntar</label></div>"
+            )
+        ruta.fulfill(status=200, body=cuerpo, content_type="text/html; charset=utf-8")
+
+
+class TestElegirCanalDeStudio(unittest.TestCase):
+    """La cuenta tiene varios canales: los pasos de Studio tienen que entrar con "Daniel Banariba"."""
+
+    def setUp(self):
+        self.playwright = playwright_api.sync_playwright().start()
+        self.addCleanup(self.playwright.stop)
+        try:
+            self.navegador = self.playwright.chromium.launch(headless=True)
+        except playwright_api.Error as exc:
+            self.skipTest(f"sin Chromium: {exc}")
+        self.addCleanup(self.navegador.close)
+
+    def abrir_studio(self, youtube):
+        contexto = self.navegador.new_context()
+        contexto.route("https://studio.youtube.com/**", youtube.studio)
+        contexto.route("https://www.youtube.com/**", youtube.youtube)
+        with mock.patch.object(pa, "preparar_perfil_studio", return_value=("/perfil", None, "Default")), \
+                mock.patch.object(playwright_api, "sync_playwright", return_value=PlaywrightQueArranca()), \
+                mock.patch.object(pa, "abrir_contexto_studio", return_value=contexto), \
+                mock.patch.object(pa, "ESPERA_CANAL_MS", 2000):
+            with pa.pagina_de_studio() as pagina:
+                return pagina.url
+
+    def test_si_youtube_pide_elegir_canal_elige_daniel_banariba_y_sigue_a_studio(self):
+        youtube = StudioConVariosCanales(pide_canal=True)
+        url = self.abrir_studio(youtube)
+        self.assertEqual(youtube.elegidos, ["Daniel Banariba"])
+        self.assertTrue(url.startswith("https://studio.youtube.com/"), url)
+
+    def test_sin_la_pregunta_entra_a_studio_sin_elegir_nada(self):
+        youtube = StudioConVariosCanales(pide_canal=False)
+        url = self.abrir_studio(youtube)
+        self.assertEqual(youtube.elegidos, [])
+        self.assertTrue(url.startswith("https://studio.youtube.com/"), url)
+
+    def test_si_el_canal_no_esta_en_la_lista_falla_sin_elegir_otro(self):
+        youtube = StudioConVariosCanales(pide_canal=True, canales=("Daniel Banariba Drummer", "Alejandro Banariba"))
+        with self.assertRaises(pa.NavegadorNoDisponible) as error:
+            self.abrir_studio(youtube)
+        self.assertEqual(error.exception.motivo, "canal_no_disponible")
+        self.assertEqual(youtube.elegidos, [])
 
 
 class Llamada:
