@@ -405,11 +405,13 @@ def deathgrind_smoke_test(session, generos):
     if post_id:
         links_data = api_get(session, f"/posts/{post_id}/links")
         if links_data is None:
-            print(f"Prueba DeathGrind /posts/{post_id}/links fallo.")
-            return False
-        links = links_data.get("links") if isinstance(links_data, dict) else links_data
-        links = links or []
-        print(f"Prueba DeathGrind links: {len(links)}")
+            # Sin créditos de descarga DeathGrind niega los links (403), pero géneros,
+            # país y sello siguen llegando: no se apaga la API por eso.
+            print(f"Prueba DeathGrind /posts/{post_id}/links fallo; se sigue sin links.")
+        else:
+            links = links_data.get("links") if isinstance(links_data, dict) else links_data
+            links = links or []
+            print(f"Prueba DeathGrind links: {len(links)}")
     else:
         print("Prueba DeathGrind: no se encontro postId en el primer post.")
 
@@ -974,7 +976,8 @@ def extraer_pais_desde_data(data, band_id=None, band_name=None):
     data = unwrap_deathgrind_payload(data)
     if not isinstance(data, dict):
         return None
-    for key in ("country", "pais", "origin", "countryName", "country_name"):
+    # DeathGrind manda `countries` (códigos ISO); `location` trae ciudad y región.
+    for key in ("country", "countries", "pais", "origin", "countryName", "country_name"):
         parsed = extraer_pais_valor(data.get(key))
         if parsed:
             return parsed
