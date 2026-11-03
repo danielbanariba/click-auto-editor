@@ -192,6 +192,7 @@ class StudioFalso:
         self.sin_sesion = sin_sesion
         self.enviados = []  # lo que llegó con "Enviar" (irreversible en Studio)
         self.pasos = []  # los pasos del formulario que se mostraron
+        self.urls = []  # las páginas que se abrieron
 
     def impugnados(self):
         return sum(1 for reclamo in self.reclamos if reclamo["impugnado"])
@@ -209,8 +210,11 @@ class StudioFalso:
             return ruta.fulfill(status=200, body="{}", content_type="application/json")
         if self.sin_sesion:
             return ruta.fulfill(status=302, headers={"location": "https://accounts.google.com/v3/signin"})
-        if url.endswith("/copyright"):  # Studio redirige /copyright a /claims
-            redireccion = '<meta http-equiv="refresh" content="0;url=/video/V1/claims">'
+        self.urls.append(url)
+        if url.endswith("/copyright"):
+            # Studio lleva /copyright a /claims desde el navegador, una vez cargada la página: un
+            # `evaluate` que corre en ese momento falla con "Execution context was destroyed".
+            redireccion = '<script>setTimeout(() => location.replace("/video/V1/claims"), 1500)</script>'
             return ruta.fulfill(status=200, body=redireccion, content_type="text/html; charset=utf-8")
         verificacion = self.verificacion_tras is not None and self.impugnados() >= self.verificacion_tras
         html = (
@@ -220,6 +224,25 @@ class StudioFalso:
             .replace("__VERIFICACION__", json.dumps(verificacion))
         )
         return ruta.fulfill(status=200, body=html, content_type="text/html; charset=utf-8")
+
+
+class PaginaQueNavega:
+    """Una página real cuyos primeros `evaluate` caen en plena navegación (como en Studio)."""
+
+    def __init__(self, pagina, fallos):
+        self.pagina = pagina
+        self.fallos = fallos
+
+    def evaluate(self, *args, **kwargs):
+        if self.fallos:
+            self.fallos -= 1
+            raise PlaywrightError(
+                "Page.evaluate: Execution context was destroyed, most likely because of a navigation"
+            )
+        return self.pagina.evaluate(*args, **kwargs)
+
+    def __getattr__(self, nombre):
+        return getattr(self.pagina, nombre)
 
 
 def reclamo(cancion, impugnado=False):
@@ -255,6 +278,7 @@ class TestImpugnar(unittest.TestCase):
             mock.patch.object(pa, "ESPERA_ENVIO_IMPUGNAR_S", 0.5),
             mock.patch.object(pa, "INTENTOS_CONFIRMAR_IMPUGNACION", 2),
             mock.patch.object(pa, "ESPERA_CONFIRMAR_IMPUGNACION_S", 0.2),
+            mock.patch.object(pa, "PAUSA_REINTENTO_NAVEGACION_S", 0.1),
         ]
         for parche in parches:
             parche.start()
@@ -265,7 +289,7 @@ class TestImpugnar(unittest.TestCase):
             json.dumps(registro, ensure_ascii=False) + "\n", encoding="utf-8"
         )
 
-    def impugnar(self, studio, sin_enviar=False):
+    def impugnar(self, studio, sin_enviar=False, evaluate_que_falla=0):
         self.contexto = self.navegador.new_context()
         self.addCleanup(self.contexto.close)
         self.contexto.route("https://studio.youtube.com/**", studio.atender)
@@ -274,6 +298,8 @@ class TestImpugnar(unittest.TestCase):
             lambda ruta: ruta.fulfill(status=200, body="<h1>Sign in</h1>", content_type="text/html"),
         )
         pagina = self.contexto.new_page()
+        if evaluate_que_falla:
+            pagina = PaginaQueNavega(pagina, evaluate_que_falla)
 
         @contextlib.contextmanager
         def abrir_studio():
@@ -383,12 +409,33 @@ class TestImpugnar(unittest.TestCase):
         self.assertEqual(resultado["reclamos"], 1, resultado)
         self.assertNotIn("motivo", resultado)
 
+    def test_abre_claims_directo_y_no_pasa_por_la_redireccion_de_copyright(self):
+        # Defecto (visto en vivo): abrir /copyright, que Studio lleva a /claims desde el
+        # navegador; un `evaluate` que cae en esa navegación abortaba con "Execution context
+        # was destroyed" antes de contar un solo reclamo. Vale para la pestaña que cuenta y
+        # para la de cada reclamo.
+        studio = StudioFalso([reclamo("Canción A")], verificacion_tras=0)
+        resultado = self.impugnar(studio, sin_enviar=True)
+        self.assertEqual(resultado["reclamos"], 1, resultado)
+        self.assertEqual([url for url in studio.urls if url.endswith("/copyright")], [])
+        self.assertGreaterEqual(len([url for url in studio.urls if url.endswith("/claims")]), 2)
+
+    def test_un_evaluate_que_cae_en_una_navegacion_se_reintenta_y_cuenta_igual(self):
+        # Defecto (visto en vivo): el error de navegación se volvía "error_navegador" y el
+        # video quedaba sin impugnar aunque la página estuviera bien un segundo después.
+        studio = StudioFalso([reclamo("Canción A")], verificacion_tras=0)
+        resultado = self.impugnar(studio, sin_enviar=True, evaluate_que_falla=2)
+        self.assertEqual(resultado["reclamos"], 1, resultado)
+        self.assertNotIn("motivo", resultado)
+
     def test_sin_sesion_en_studio_no_impugna_nada_y_lo_dice(self):
         # Defecto: tomar la página de inicio de sesión por "sin reclamos" y avisar que no
         # había nada que impugnar.
         studio = StudioFalso([reclamo("Canción A")], sin_sesion=True)
         resultado = self.impugnar(studio)
         self.assertEqual((resultado["ok"], resultado["motivo"]), (False, "sin_sesion_en_studio"))
+        # Un fallo en el primer paso igual informa el título que el servicio registró.
+        self.assertEqual(resultado["titulo"], "Banda - Álbum (2026)")
         self.assertEqual(studio.enviados, [])
 
 

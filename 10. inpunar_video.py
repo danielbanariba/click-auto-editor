@@ -4160,7 +4160,9 @@ def preparar_pestana_para_reclamo(context, video_id, claim_index, args, selector
     global _2FA_PASSED_THIS_SESSION
     page = context.new_page()
     try:
-        url = f"https://studio.youtube.com/video/{video_id}/copyright"
+        # Directo a /claims: /copyright lleva allí con una navegación del lado del navegador, y un
+        # `evaluate` que cae en ella falla con "Execution context was destroyed".
+        url = f"https://studio.youtube.com/video/{video_id}/claims"
         print(f"  -> Abriendo tab para video {video_id} reclamo #{claim_index} ({url})")
         page.goto(url, wait_until="domcontentloaded", timeout=25000)
         try:

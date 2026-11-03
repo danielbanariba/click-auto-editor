@@ -1352,8 +1352,11 @@ def programar(
 
 # Impugnar es una declaración legal a nombre del usuario: solo lo lanza el botón de un video.
 DIR_EVIDENCIA_IMPUGNAR = PROJECT_ROOT / "data" / "impugnar_evidencia"
-URL_RECLAMOS = "https://studio.youtube.com/video/{video_id}/copyright"
+URL_RECLAMOS = "https://studio.youtube.com/video/{video_id}/claims"
 ESPERA_NAVEGACION_MS = 30_000
+# Una navegación de Studio puede cortar un `evaluate`: se reintenta tras esta pausa.
+PAUSA_REINTENTO_NAVEGACION_S = 2.0
+INTENTOS_NAVEGACION = 3
 # Las esperas por defecto de 10. inpunar_video.py: están calibradas contra Studio.
 PAUSA_IMPUGNAR_S = 2.0
 ESPERA_ENVIO_IMPUGNAR_S = 6.0
@@ -1382,22 +1385,7 @@ def titulo_conocido(video_id):
     return titulo or (buscar_pendiente(video_id) or {}).get("titulo") or video_id
 
 
-def contar_reclamos_impugnables(pagina, video_id, modulo):
-    """Cuántos "Tomar medidas" visibles y habilitados tiene /claims, tras recargarla.
-
-    Es lo único que se toma por cierto: cada impugnación que Studio registra deja uno menos.
-    """
-    from playwright.sync_api import Error as PlaywrightError
-
-    pagina.goto(
-        URL_RECLAMOS.format(video_id=video_id),
-        wait_until="domcontentloaded",
-        timeout=ESPERA_NAVEGACION_MS,
-    )
-    try:  # Studio redirige /copyright a /claims: se espera a que termine de navegar
-        pagina.wait_for_load_state("networkidle", timeout=12_000)
-    except PlaywrightError:
-        pass
+def contar_en_la_pagina(pagina, modulo):
     if esta_en_login_de_google(pagina):
         raise NavegadorNoDisponible("sin_sesion_en_studio")
     botones, _ = esperar_resultado_de_reclamos(pagina, apelacion_agente().P_VER_DETALLES_BTN)
@@ -1406,6 +1394,35 @@ def contar_reclamos_impugnables(pagina, video_id, modulo):
     modulo._scroll_copyright_page_to_bottom(pagina)  # la lista se dibuja a medida que se baja
     # Un índice fuera de rango no hace clic: solo cuenta los botones visibles y habilitados.
     return modulo._click_nth_take_action_in_page(pagina, 10**6)["total"]
+
+
+def contar_reclamos_impugnables(pagina, video_id, modulo):
+    """Cuántos "Tomar medidas" visibles y habilitados tiene /claims, tras recargarla.
+
+    Es lo único que se toma por cierto: cada impugnación que Studio registra deja uno menos.
+    Va directo a /claims: /copyright lleva allí desde el navegador, y un `evaluate` que cae
+    en esa navegación falla con «Execution context was destroyed».
+    """
+    from playwright.sync_api import Error as PlaywrightError
+
+    pagina.goto(
+        URL_RECLAMOS.format(video_id=video_id),
+        wait_until="domcontentloaded",
+        timeout=ESPERA_NAVEGACION_MS,
+    )
+    try:
+        pagina.wait_for_load_state("networkidle", timeout=12_000)
+    except PlaywrightError:
+        pass
+    for intento in range(1, INTENTOS_NAVEGACION + 1):
+        try:
+            return contar_en_la_pagina(pagina, modulo)
+        except PlaywrightError as exc:
+            # Studio aún puede navegar justo después de cargar: se espera y se vuelve a mirar.
+            if "Execution context was destroyed" not in str(exc) or intento == INTENTOS_NAVEGACION:
+                raise
+            print(f"Studio navegó mientras se contaban los reclamos (intento {intento}): {exc}")
+            time.sleep(PAUSA_REINTENTO_NAVEGACION_S)
 
 
 def contar_hasta_que_baje(pagina, video_id, modulo, antes):

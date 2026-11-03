@@ -126,7 +126,9 @@ press, and a blacklisted video keeps only the delete question.
 Disputing (`impugnar`) reuses the recipe of `10. inpunar_video.py`: for each claim
 whose "Tomar medidas" is visible and enabled it opens the form, picks "Licencia",
 ticks the permission and the three declarations, fills `mensaje` and `firma`, and
-presses "Enviar". It runs inside the `programar` lock (same Studio profile copy)
+presses "Enviar". It opens `/claims` directly (Studio redirects `/copyright` there from the browser, and
+an `evaluate` caught in that navigation fails with "Execution context was destroyed";
+the count also retries when that still happens). It runs inside the `programar` lock (same Studio profile copy)
 and never waits for a 2FA (the service is headless): a verification page, a missing
 form or any unexpected page fails that claim without sending and dumps evidence to
 `data/impugnar_evidencia/`. It never sends more disputes than there were
