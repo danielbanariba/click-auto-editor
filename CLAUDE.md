@@ -155,7 +155,10 @@ JSON reports `reclamos`, `impugnados`, `fallos` and a `captura` of `/claims`. A
 video with no disputable claims returns `motivo = sin_reclamos_impugnables`.
 
 Monetization (`studio_monetizacion.py`) turns ads on at
-`/video/<id>/monetization`. Studio then asks for the ad-suitability
+`/video/<id>/monetization`. After opening it, Studio navigates several times and ends
+on `/monetization/ads`; a read of the ads state caught in one of those navigations
+("Execution context was destroyed") counts as not loaded yet, and any other browser
+error fails the step. Studio then asks for the ad-suitability
 questionnaire; its answers cannot be changed afterwards. The user's decision
 (`RESPUESTA_CUESTIONARIO`) is to always answer "Nada de lo anterior" (his videos
 are art) and select no radios. The step sends it (Enviar, then Guardar, then
