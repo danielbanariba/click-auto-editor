@@ -1323,6 +1323,85 @@ class TestEliminarVideo(unittest.TestCase):
         self.assertEqual(json.loads(salida.getvalue()), {"ok": True, "video_id": "V1"})
 
 
+class TestImpugnarSubcomando(unittest.TestCase):
+    """`impugnar` es una declaración legal a nombre del usuario: el CLI y el candado importan."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.eventos = []
+        parches = [
+            mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "pendientes.json"),
+            mock.patch.object(pa, "PROGRAMADOS_JSONL", self.tmp / "programados.jsonl"),
+            mock.patch.object(pa, "DIR_CAPTURAS", self.tmp / "capturas"),
+            mock.patch.object(pa, "DIR_LOGS", self.tmp / "logs"),
+        ]
+        for parche in parches:
+            parche.start()
+            self.addCleanup(parche.stop)
+
+    def test_el_subcomando_corre_impugnar_con_su_opcion_y_no_otro_paso(self):
+        # Defecto: main manda cualquier subcomando sin rama a `estado` (el servicio recibiría
+        # los pendientes en vez de impugnar), o pierde --sin-enviar y la prueba en seco envía
+        # una impugnación real.
+        for argumentos, sin_enviar in ((["--video-id", "V1"], False), (["--video-id", "V1", "--sin-enviar"], True)):
+            with self.subTest(argumentos=argumentos):
+                salida = io.StringIO()
+                with (
+                    mock.patch.object(pa, "impugnar", return_value={"ok": True, "video_id": "V1"}) as impugnar,
+                    mock.patch.object(pa, "estado", side_effect=AssertionError("corrió estado")),
+                    contextlib.redirect_stdout(salida),
+                ):
+                    codigo = pa.main(["impugnar", *argumentos])
+                impugnar.assert_called_once_with("V1", sin_enviar=sin_enviar)
+                self.assertEqual(codigo, 0)
+                self.assertEqual(json.loads(salida.getvalue()), {"ok": True, "video_id": "V1"})
+
+    def test_trabaja_en_studio_con_el_candado_de_programar_tomado(self):
+        # Defecto: abrir Brave sobre la copia del perfil mientras `programar` la usa; dos
+        # navegadores a la vez sobre el mismo perfil se pisan.
+        @contextlib.contextmanager
+        def candado(nombre):
+            self.eventos.append(f"candado {nombre}")
+            yield
+            self.eventos.append(f"suelta {nombre}")
+
+        @contextlib.contextmanager
+        def abrir_studio():
+            self.eventos.append("abre studio")
+            yield SimpleNamespace(screenshot=lambda path: None)
+            self.eventos.append("cierra studio")
+
+        def impugnar_reclamos(pagina, video_id, sin_enviar, modulo):
+            self.eventos.append("impugna")
+            return {"reclamos": 1, "impugnados": 1, "fallos": []}
+
+        with (
+            mock.patch.object(pa, "bloqueo", candado),
+            mock.patch.object(pa, "impugnar_reclamos", impugnar_reclamos),
+        ):
+            resultado = pa.impugnar("V1", abrir_studio=abrir_studio, modulo=object())
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(
+            self.eventos,
+            ["candado programar", "abre studio", "impugna", "cierra studio", "suelta programar"],
+        )
+
+    def test_sin_navegador_devuelve_el_motivo_en_vez_de_lanzar(self):
+        # Defecto: un traceback sin JSON; el servicio vería «sin_respuesta» y no sabría que
+        # faltaba la sesión de Studio. Sin título registrado, el título es el id.
+        @contextlib.contextmanager
+        def abrir_studio():
+            raise pa.NavegadorNoDisponible("sin_perfil_de_navegador")
+            yield
+
+        resultado = pa.impugnar("V1", abrir_studio=abrir_studio, modulo=object())
+        self.assertEqual(
+            (resultado["ok"], resultado["motivo"], resultado["video_id"], resultado["titulo"]),
+            (False, "sin_perfil_de_navegador", "V1", "V1"),
+        )
+
+
 class TestProgramarSinConexion(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())

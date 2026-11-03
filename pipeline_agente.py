@@ -10,6 +10,7 @@ decida el paso siguiente; el resto de la salida va a data/agente/logs/.
     eliminar     borra la carpeta del álbum sin subirlo (ya estaba publicado)
     programar    espera el procesado, revisa reclamos, activa la monetización y programa
     eliminar_video  borra un video de YouTube (no se puede deshacer; lo pide un botón)
+    impugnar        impugna en Studio los reclamos de un video (declaración legal; lo pide un botón)
     estado       videos sin programar, álbumes sin aprobar y render en curso
 """
 import argparse
@@ -1346,6 +1347,258 @@ def programar(
 
 
 # ---------------------------------------------------------------------------
+# impugnar
+# ---------------------------------------------------------------------------
+
+# Impugnar es una declaración legal a nombre del usuario: solo lo lanza el botón de un video.
+DIR_EVIDENCIA_IMPUGNAR = PROJECT_ROOT / "data" / "impugnar_evidencia"
+URL_RECLAMOS = "https://studio.youtube.com/video/{video_id}/claims"
+ESPERA_NAVEGACION_MS = 30_000
+# Una navegación de Studio puede cortar un `evaluate`: se reintenta tras esta pausa.
+PAUSA_REINTENTO_NAVEGACION_S = 2.0
+INTENTOS_NAVEGACION = 3
+# Las esperas por defecto de 10. inpunar_video.py: están calibradas contra Studio.
+PAUSA_IMPUGNAR_S = 2.0
+ESPERA_ENVIO_IMPUGNAR_S = 6.0
+# Studio tarda en reflejar un envío: antes de darlo por no confirmado se recarga /claims unas veces.
+INTENTOS_CONFIRMAR_IMPUGNACION = 3
+ESPERA_CONFIRMAR_IMPUGNACION_S = 5.0
+
+
+@functools.lru_cache(maxsize=None)
+def impugnador():
+    return cargar_script("10. inpunar_video.py", "inpunar_video")
+
+
+def titulo_conocido(video_id):
+    """El título con que se registró el video al programarlo; el id si no se encuentra."""
+    titulo = None
+    if PROGRAMADOS_JSONL.exists():
+        with open(PROGRAMADOS_JSONL, "r", encoding="utf-8") as f:
+            for linea in f:
+                try:
+                    registro = json.loads(linea)
+                except json.JSONDecodeError:
+                    continue
+                if registro.get("video_id") == video_id:
+                    titulo = registro.get("titulo") or titulo
+    return titulo or (buscar_pendiente(video_id) or {}).get("titulo") or video_id
+
+
+def contar_en_la_pagina(pagina, modulo):
+    """Cuántos reclamos se pueden impugnar en la página abierta; None si no se pudo leer."""
+    if esta_en_login_de_google(pagina):
+        raise NavegadorNoDisponible("sin_sesion_en_studio")
+    botones, texto = esperar_resultado_de_reclamos(
+        pagina, apelacion_agente().P_VER_DETALLES_BTN, ESPERA_RESULTADO_RECLAMOS_S
+    )
+    if botones == 0:
+        # Sin filas, solo el aviso de Studio de que no hay reclamaciones vale como cero. Una
+        # página de error o a medio cargar no dice nada: tomarla por cero daría por hecha una
+        # impugnación que Studio no registró.
+        return 0 if P_SIN_PROBLEMAS.search(texto) else None
+    modulo._scroll_copyright_page_to_bottom(pagina)  # la lista se dibuja a medida que se baja
+    # Un índice fuera de rango no hace clic: solo cuenta los botones visibles y habilitados.
+    return modulo._click_nth_take_action_in_page(pagina, 10**6)["total"]
+
+
+def contar_reclamos_impugnables(pagina, video_id, modulo):
+    """Cuántos "Tomar medidas" visibles y habilitados tiene /claims, tras recargarla.
+
+    Es lo único que se toma por cierto: cada impugnación que Studio registra deja uno menos.
+    Devuelve None si la página no muestra ni la lista ni el aviso de que no hay reclamos.
+    Va directo a /claims: /copyright lleva allí desde el navegador, y un `evaluate` que cae
+    en esa navegación falla con «Execution context was destroyed».
+    """
+    from playwright.sync_api import Error as PlaywrightError
+
+    pagina.goto(
+        URL_RECLAMOS.format(video_id=video_id),
+        wait_until="domcontentloaded",
+        timeout=ESPERA_NAVEGACION_MS,
+    )
+    try:
+        pagina.wait_for_load_state("networkidle", timeout=12_000)
+    except PlaywrightError:
+        pass
+    for intento in range(1, INTENTOS_NAVEGACION + 1):
+        try:
+            return contar_en_la_pagina(pagina, modulo)
+        except PlaywrightError as exc:
+            # Studio aún puede navegar justo después de cargar: se espera y se vuelve a mirar.
+            if "Execution context was destroyed" not in str(exc) or intento == INTENTOS_NAVEGACION:
+                raise
+            print(f"Studio navegó mientras se contaban los reclamos (intento {intento}): {exc}")
+            time.sleep(PAUSA_REINTENTO_NAVEGACION_S)
+
+
+def contar_hasta_que_baje(pagina, video_id, modulo, antes):
+    """Recarga /claims hasta ver menos reclamos impugnables que `antes`; devuelve el último conteo."""
+    ahora = antes
+    for intento in range(INTENTOS_CONFIRMAR_IMPUGNACION):
+        if intento:
+            time.sleep(ESPERA_CONFIRMAR_IMPUGNACION_S)
+        ahora = contar_reclamos_impugnables(pagina, video_id, modulo)
+        if ahora is not None and ahora < antes:
+            break
+    return ahora
+
+
+def motivo_de_preparacion(estado):
+    """El motivo que ve el servicio cuando el formulario de un reclamo no quedó listo para enviar."""
+    if estado.startswith("2fa_no_completado"):
+        return "verificacion_de_identidad"
+    return "formulario_no_disponible"
+
+
+def guardar_evidencia_de_impugnacion(modulo, pagina, video_id, numero, motivo, detalle=None):
+    modulo.dump_dispute_evidence(
+        pagina,
+        {"video_id": f"{video_id}_reclamo{numero}", "detalle": detalle},
+        motivo,
+        str(DIR_EVIDENCIA_IMPUGNAR),
+    )
+
+
+def cerrar_pestana(pestana):
+    """Cierra la pestaña de un reclamo: el servicio no tiene ventana donde dejarla para revisar."""
+    from playwright.sync_api import Error as PlaywrightError
+
+    if pestana is None:
+        return
+    try:
+        if not pestana.is_closed():
+            pestana.close()
+    except PlaywrightError as exc:
+        print(f"No se pudo cerrar la pestaña del reclamo: {exc}")
+
+
+def capturar_pagina(pagina, destino):
+    from playwright.sync_api import Error as PlaywrightError
+
+    try:
+        pagina.screenshot(path=str(destino))
+    except PlaywrightError as exc:
+        print(f"No se pudo capturar Studio: {exc}")
+        return None
+    return str(destino)
+
+
+def impugnar_reclamos(pagina, video_id, sin_enviar, modulo):
+    """Impugna, de a uno, los reclamos que Studio deja impugnar; devuelve el resumen del intento.
+
+    Nunca envía más impugnaciones que reclamos había al empezar. Cada una cuenta como hecha
+    solo si, al recargar /claims, hay exactamente un reclamo impugnable menos; si no, se
+    anota `no_confirmado` y se frena, sin reintentar. Cualquier otro fallo también frena: no
+    se envió nada de ese reclamo y los siguientes fallarían igual (sesión, 2FA, formulario).
+    Con `sin_enviar` llena el formulario del primer reclamo y lo cierra sin enviarlo.
+    """
+    reclamos = contar_reclamos_impugnables(pagina, video_id, modulo)
+    resumen = {"reclamos": reclamos or 0, "impugnados": 0, "fallos": []}
+    if sin_enviar:
+        resumen.update(sin_enviar=True, listos=0)
+    fallos = resumen["fallos"]
+    if reclamos is None:
+        fallos.append(
+            {
+                "motivo": "lista_de_reclamos_no_disponible",
+                "detalle": "Studio no mostró la lista de reclamos ni el aviso de que no hay",
+            }
+        )
+        return resumen
+    total = quedan = resumen["reclamos"]
+    args = SimpleNamespace(
+        delay=PAUSA_IMPUGNAR_S,
+        espera_envio=ESPERA_ENVIO_IMPUGNAR_S,
+        # El servicio corre sin ventana: un 2FA no lo puede pasar, así que no se espera a nadie.
+        pausa_interactiva_s=0.0,
+    )
+    try:
+        # El tope es lo que había al empezar: un reclamo que aparece después no se impugna.
+        for numero in range(1, total + 1):
+            pestana = None
+            try:
+                # Siempre el primero habilitado: el que se acaba de impugnar ya no lo está.
+                preparado = modulo.preparar_pestana_para_reclamo(pagina.context, video_id, 0, args, {})
+                pestana = preparado["page"]
+                if preparado["status"] != "ready_to_send":
+                    guardar_evidencia_de_impugnacion(
+                        modulo, pestana, video_id, numero, "impugnar_formulario", preparado["status"]
+                    )
+                    fallos.append(
+                        {
+                            "motivo": motivo_de_preparacion(preparado["status"]),
+                            "detalle": preparado["status"][:200],
+                        }
+                    )
+                    break
+                if sin_enviar:
+                    resumen["listos"] = 1
+                    break
+                envio = modulo._enviar_una_tab(pestana, args, {}, DIR_EVIDENCIA_IMPUGNAR, numero, total)
+                if not envio["ok"] and not pestana.is_closed():
+                    guardar_evidencia_de_impugnacion(
+                        modulo, pestana, video_id, numero, "impugnar_no_enviado", envio["razon"]
+                    )
+            finally:
+                cerrar_pestana(pestana)
+            # Se mira Studio aunque `envio` diga que falló: Enviar pudo haber salido igual.
+            despues = contar_hasta_que_baje(pagina, video_id, modulo, quedan)
+            if despues != quedan - 1:
+                guardar_evidencia_de_impugnacion(
+                    modulo, pagina, video_id, numero, "impugnar_no_confirmado", envio["razon"]
+                )
+                fallos.append(
+                    {
+                        "motivo": "no_confirmado",
+                        "detalle": f"Studio mostraba {quedan} reclamos impugnables y ahora "
+                        f"{'no se pudo leer la lista' if despues is None else despues} "
+                        f"(envío: {envio['razon']})"[:200],
+                    }
+                )
+                break
+            resumen["impugnados"] += 1
+            quedan = despues
+            if not quedan:
+                break
+    except errores_del_paso_de_studio() as exc:
+        detalle = f"{type(exc).__name__}: {exc}"[:200]
+        print(f"Falló la impugnación en Studio: {detalle}")
+        motivo = exc.motivo if isinstance(exc, NavegadorNoDisponible) else "error_navegador"
+        fallos.append({"motivo": motivo, "detalle": detalle})
+    return resumen
+
+
+def impugnar(video_id, sin_enviar=False, abrir_studio=pagina_de_studio, modulo=None):
+    """Impugna en Studio los reclamos de un video. Es una declaración legal a nombre del usuario.
+
+    Solo lo lanza el botón «Impugnar» de ese video; `sin_enviar` es la prueba en seco.
+    """
+    modulo = modulo or impugnador()
+    titulo = titulo_conocido(video_id)
+    log = ruta_log("impugnar")
+    captura = DIR_CAPTURAS / f"impugnar_{video_id}.png"
+    base = {"video_id": video_id, "titulo": titulo, "log": str(log)}
+    with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
+        try:
+            # El mismo candado que `programar`: los dos usan la copia del perfil de Studio y
+            # dos navegadores a la vez sobre ella se pisarían.
+            with bloqueo("programar"), abrir_studio() as pagina:
+                captura.parent.mkdir(parents=True, exist_ok=True)
+                resumen = impugnar_reclamos(pagina, video_id, sin_enviar, modulo)
+                resumen["captura"] = capturar_pagina(pagina, captura)
+        except errores_del_paso_de_studio() as exc:
+            detalle = f"{type(exc).__name__}: {exc}"[:200]
+            print(f"No se pudo impugnar en Studio: {detalle}")
+            motivo = exc.motivo if isinstance(exc, NavegadorNoDisponible) else "error_navegador"
+            return {"ok": False, "motivo": motivo, "detalle": detalle, **base}
+    if resumen["reclamos"] == 0 and not resumen["fallos"]:
+        return {"ok": False, "motivo": "sin_reclamos_impugnables", **resumen, **base}
+    hecho = resumen["listos"] == 1 if sin_enviar else resumen["impugnados"] == resumen["reclamos"]
+    return {"ok": hecho and not resumen["fallos"], **resumen, **base}
+
+
+# ---------------------------------------------------------------------------
 # eliminar_video
 # ---------------------------------------------------------------------------
 
@@ -1440,6 +1693,17 @@ def parse_args(argv=None):
     p.add_argument("--video-id", required=True)
 
     p = sub.add_parser(
+        "impugnar",
+        help="Impugna en Studio los reclamos de un video (declaración legal a nombre del usuario).",
+    )
+    p.add_argument("--video-id", required=True)
+    p.add_argument(
+        "--sin-enviar",
+        action="store_true",
+        help="Llena el formulario del primer reclamo y lo cierra sin enviarlo (prueba en seco).",
+    )
+
+    p = sub.add_parser(
         "estado", help="Videos sin programar, álbumes sin aprobar y si hay un render corriendo."
     )
     p.add_argument(
@@ -1466,6 +1730,8 @@ def main(argv=None):
         return responder(programar(args.video_id, esperar=args.esperar, reclamo=reclamo))
     if args.comando == "eliminar_video":
         return responder(eliminar_video(args.video_id))
+    if args.comando == "impugnar":
+        return responder(impugnar(args.video_id, sin_enviar=args.sin_enviar))
     return responder(estado(esperar_render=args.esperar_render))
 
 

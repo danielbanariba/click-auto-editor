@@ -3511,7 +3511,10 @@ def _click_nth_take_action_in_page(page, claim_index):
             }
             return true;
           };
-          const usable = ctas.filter(el => {
+          // Studio envuelve cada <button> en un <ytcp-button-shape>: queda solo el de adentro
+          // (el clic sube al envoltorio), así un reclamo no cuenta dos veces y su "disabled" se ve.
+          const innermost = ctas.filter(el => !ctas.some(other => other !== el && el.contains(other)));
+          const usable = innermost.filter(el => {
             const r = el.getBoundingClientRect();
             if (r.width <= 0 || r.height <= 0) return false;
             const s = window.getComputedStyle(el);
@@ -4160,7 +4163,9 @@ def preparar_pestana_para_reclamo(context, video_id, claim_index, args, selector
     global _2FA_PASSED_THIS_SESSION
     page = context.new_page()
     try:
-        url = f"https://studio.youtube.com/video/{video_id}/copyright"
+        # Directo a /claims: /copyright lleva allí con una navegación del lado del navegador, y un
+        # `evaluate` que cae en ella falla con "Execution context was destroyed".
+        url = f"https://studio.youtube.com/video/{video_id}/claims"
         print(f"  -> Abriendo tab para video {video_id} reclamo #{claim_index} ({url})")
         page.goto(url, wait_until="domcontentloaded", timeout=25000)
         try:

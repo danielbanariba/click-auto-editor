@@ -10,6 +10,7 @@ Corre siempre en segundo plano (systemd/publicar-albumes.service):
    En paralelo espera el procesado, revisa reclamos, activa la monetización y
    lo publica en el acto o lo programa (siempre a una hora de otro video).
 5. Si un reclamante está en la lista negra, pregunta si elimina el video de YouTube.
+   Si el video tiene reclamo y ninguno es de la lista negra, pregunta si lo impugna.
 
 Cada paso lo hace pipeline_agente.py en un proceso aparte. Las preguntas
 abiertas y los álbumes rechazados viven en data/agente/servicio.json, así un
@@ -57,6 +58,8 @@ BOTONES = {
     "reprogramar": [[("🔁 Reintentar", "reintentar")]],
     # Borrar el video no se deshace: va en su propia fila, debajo de Conservar.
     "lista_negra": [[("Conservar", "conservar")], [("🗑️ Eliminar video", "eliminar_video")]],
+    # Impugnar es una declaración legal a nombre del usuario: cada botón en su fila.
+    "impugnar": [[("⚖️ Impugnar", "impugnar")], [("No impugnar", "no_impugnar")]],
 }
 AVISO_BOTON = {
     "subir": "Subiendo…",
@@ -67,6 +70,8 @@ AVISO_BOTON = {
     "reintentar": "Reintentando…",
     "conservar": "Lo conservo",
     "eliminar_video": "Borrando el video…",
+    "impugnar": "Impugnando…",
+    "no_impugnar": "No impugno",
 }
 # Mientras haya una de estas preguntas abiertas no se renderiza otro álbum.
 # "reprogramar" no frena: el video ya está subido y no depende del render.
@@ -97,6 +102,15 @@ MOTIVOS_MONETIZACION = {
     "no_se_guardo": "Studio no guardó el cambio",
     "no_se_pudo_guardar": "Studio no dejó guardar el cambio",
     "estado_desconocido": "la página de monetización no se parece a la esperada",
+    "error_navegador": "falló el navegador",
+}
+
+MOTIVOS_IMPUGNACION = {
+    "verificacion_de_identidad": "YouTube pidió verificar tu identidad y el servicio no puede pasar ese paso",
+    "formulario_no_disponible": "el formulario de Studio no se parece al esperado",
+    "no_confirmado": "Studio no mostró el reclamo como impugnado y no sé si salió",
+    "lista_de_reclamos_no_disponible": "Studio no mostró la lista de reclamos; no se envió nada",
+    "sin_sesion_en_studio": "Studio no tiene la sesión iniciada",
     "error_navegador": "falló el navegador",
 }
 
@@ -502,6 +516,7 @@ class Servicio:
                     f"https://studio.youtube.com/video/{video_id}/monetization"
                 )
             self.preguntar_por_lista_negra(resultado, video_id)
+            self.preguntar_por_impugnar(resultado, video_id)
         elif motivo == "reclamo_desconocido":
             titulo = resultado.get("titulo") or video_id
             self.preguntar(
@@ -548,6 +563,55 @@ class Servicio:
             video_id=video_id,
         )
 
+    def preguntar_por_impugnar(self, resultado, video_id):
+        """Un video con reclamo y ninguno de la lista negra: ofrece impugnarlo. Nunca impugna solo."""
+        if not resultado.get("con_reclamo") or resultado.get("reclamantes_en_lista_negra"):
+            return
+        titulo = resultado.get("titulo") or video_id
+        reclamantes = resultado.get("reclamantes") or []
+        quienes = ":\n" + "\n".join(f"• {reclamante}" for reclamante in reclamantes) if reclamantes else "."
+        self.preguntar(
+            "impugnar",
+            f"⚖️ \"{titulo}\" tiene reclamo de derechos de autor{quienes}\n\n"
+            f"https://studio.youtube.com/video/{video_id}/claims\n\n"
+            "El video sigue programado. ¿Impugno los reclamos? Es una declaración legal a tu nombre: "
+            "se envía con el motivo \"Licencia\", el texto de licencia y la firma ya configurados.",
+            foto=resultado.get("captura_studio"),
+            video_id=video_id,
+        )
+
+    def tras_impugnar(self, resultado, argumentos):
+        video_id = valor(argumentos, "--video-id")
+        titulo = resultado.get("titulo") or video_id
+        enlace = f"https://studio.youtube.com/video/{video_id}/claims"
+        foto = resultado.get("captura")
+        if resultado.get("motivo") == "sin_reclamos_impugnables":
+            self.avisar(
+                f"ℹ️ \"{titulo}\" no tiene reclamos que se puedan impugnar ahora "
+                f"(ya estaban impugnados o ya no hay reclamos).\n{enlace}",
+                foto=foto,
+            )
+            return
+        if resultado.get("reclamos"):
+            impugnados = resultado.get("impugnados", 0)
+            texto = f"⚖️ Impugné {impugnados} de {resultado['reclamos']} reclamos de \"{titulo}\"."
+        else:
+            texto = f"❌ No pude impugnar \"{titulo}\"."
+        if resultado.get("ok"):
+            self.avisar(f"{texto}\n{enlace}", foto=foto)
+            return
+        fallos = resultado.get("fallos") or []
+        if not fallos:  # un fallo antes de empezar trae el motivo en la raíz del resultado
+            fallos = [{"motivo": resultado.get("motivo"), "detalle": resultado.get("detalle")}]
+        for fallo in fallos:
+            causa = MOTIVOS_IMPUGNACION.get(fallo.get("motivo")) or fallo.get("motivo")
+            detalle = f" ({fallo['detalle']})" if fallo.get("detalle") else ""
+            texto += f"\n• {causa}{detalle}"
+        texto += f"\nRevisa en Studio cuáles quedaron impugnados y termina a mano lo que falte:\n{enlace}"
+        if resultado.get("log"):
+            texto += f"\nLog: {resultado['log']}"
+        self.avisar(texto, foto=foto)
+
     def tras_eliminar_video(self, resultado, argumentos):
         video_id = valor(argumentos, "--video-id")
         if resultado.get("ok"):
@@ -564,9 +628,9 @@ class Servicio:
 
     # -- Telegram -----------------------------------------------------------
 
-    def avisar(self, texto):
+    def avisar(self, texto, foto=None):
         try:
-            self.telegram.mandar(texto)
+            self.telegram.mandar(texto, foto=foto)
         except ERRORES_TELEGRAM as exc:
             log.warning("No se pudo mandar el aviso (%s): %s", exc, texto)
 
@@ -685,6 +749,11 @@ class Servicio:
         if accion == "eliminar_video":
             self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"])
         # Conservar: la pregunta ya se cerró y el video queda como está.
+
+    def respuesta_impugnar(self, accion, pregunta):
+        if accion == "impugnar":
+            self.lanzar_paso("impugnar", "--video-id", pregunta["video_id"])
+        # No impugnar: la pregunta ya se cerró y el video queda como está.
 
     def respuesta_reprogramar(self, accion, pregunta):
         self.fallos_programar.pop(pregunta["video_id"], None)

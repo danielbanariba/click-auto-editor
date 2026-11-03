@@ -70,6 +70,7 @@ env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload,
 env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the album folder without uploading (already published)
 env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → monetization on → public now / first free moment, or +2 years if claimed
 env/bin/python pipeline_agente.py eliminar_video --video-id ID  # deletes the video from YouTube (irreversible; the service only runs it from a Telegram button)
+env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # disputes every claim of the video in Studio (a legal statement in the user's name); --sin-enviar fills the first form and closes it without sending
 env/bin/python pipeline_agente.py estado [--esperar-render]  # unscheduled uploads, rendered albums awaiting approval, render running
 ```
 
@@ -113,6 +114,29 @@ one JSON line; the service reports the result. A video that is already gone
 (`no_existe`) is reported as already deleted, not as a failure. Deleting cannot be undone, so
 nothing deletes a video without that button press. The question is persisted in
 `data/agente/servicio.json` like the others, so it survives restarts.
+
+A claimed video with no blacklist match gets a different Telegram question: its
+title, the claimants, the `/claims` link, the Studio screenshot and a note that
+the dispute goes out with the reason "Licencia" and the configured text and
+signature. "⚖️ Impugnar" runs `pipeline_agente.py impugnar --video-id <id>` and the
+service reports "Impugné N de M reclamos" with the failures and the `/claims`
+link; "No impugnar" only closes the question. Nothing is disputed without that
+press, and a blacklisted video keeps only the delete question.
+
+Disputing (`impugnar`) reuses the recipe of `10. inpunar_video.py`: for each claim
+whose "Tomar medidas" is visible and enabled it opens the form, picks "Licencia",
+ticks the permission and the three declarations, fills `mensaje` and `firma`, and
+presses "Enviar". It opens `/claims` directly (Studio redirects `/copyright` there from the browser, and
+an `evaluate` caught in that navigation fails with "Execution context was destroyed";
+the count also retries when that still happens). It runs inside the `programar` lock (same Studio profile copy)
+and never waits for a 2FA (the service is headless): a verification page, a missing
+form or any unexpected page fails that claim without sending and dumps evidence to
+`data/impugnar_evidencia/`. It never sends more disputes than there were
+disputable claims at the start. A dispute counts as done only when `/claims`,
+reloaded, shows exactly one enabled "Tomar medidas" fewer; otherwise that claim is
+`no_confirmado` and the run stops, with no retry. Any failure stops the run, and the
+JSON reports `reclamos`, `impugnados`, `fallos` and a `captura` of `/claims`. A
+video with no disputable claims returns `motivo = sin_reclamos_impugnables`.
 
 Monetization (`studio_monetizacion.py`) turns ads on at
 `/video/<id>/monetization`. Studio then asks for the ad-suitability
