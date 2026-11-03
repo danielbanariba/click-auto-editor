@@ -1405,6 +1405,9 @@ ESPERA_ENVIO_IMPUGNAR_S = 6.0
 # Studio tarda en reflejar un envío: antes de darlo por no confirmado se recarga /claims unas veces.
 INTENTOS_CONFIRMAR_IMPUGNACION = 3
 ESPERA_CONFIRMAR_IMPUGNACION_S = 5.0
+# Studio a veces deja el formulario abierto tras "Enviar", sin error, y no registra nada: tras
+# esta pausa se vuelve a mirar /claims y, si nada cambió, ese reclamo se reintenta una sola vez.
+PAUSA_REINTENTO_IMPUGNAR_S = 30.0
 
 
 @functools.lru_cache(maxsize=None)
@@ -1474,6 +1477,11 @@ def contar_reclamos_impugnables(pagina, video_id, modulo):
             time.sleep(PAUSA_REINTENTO_NAVEGACION_S)
 
 
+def contar_filas_de_reclamos(pagina):
+    """Cuántos reclamos lista la página ya contada, impugnados o no (un "Ver detalles" por fila)."""
+    return pagina.get_by_role("button", name=apelacion_agente().P_VER_DETALLES_BTN).count()
+
+
 def contar_hasta_que_baje(pagina, video_id, modulo, antes):
     """Recarga /claims hasta ver menos reclamos impugnables que `antes`; devuelve el último conteo."""
     ahora = antes
@@ -1529,10 +1537,15 @@ def capturar_pagina(pagina, destino):
 def impugnar_reclamos(pagina, video_id, sin_enviar, modulo):
     """Impugna, de a uno, los reclamos que Studio deja impugnar; devuelve el resumen del intento.
 
-    Nunca envía más impugnaciones que reclamos había al empezar. Cada una cuenta como hecha
-    solo si, al recargar /claims, hay exactamente un reclamo impugnable menos; si no, se
-    anota `no_confirmado` y se frena, sin reintentar. Cualquier otro fallo también frena: no
-    se envió nada de ese reclamo y los siguientes fallarían igual (sesión, 2FA, formulario).
+    Nunca impugna más reclamos que los que había al empezar. Cada uno cuenta como hecho solo
+    si, al recargar /claims, hay exactamente un reclamo impugnable menos. Si el formulario
+    quedó abierto tras "Enviar" (`form_persistente`) y /claims no cambió, Studio no lo tomó:
+    tras una pausa se vuelve a mirar /claims y, si sigue igual (los mismos impugnables y las
+    mismas filas), ese reclamo se reintenta una sola vez; con el formulario del reintento listo
+    se mira una última vez, y si algo cambió no se envía. En cualquier otro caso (el reintento
+    tampoco sale, la lista no se puede leer, la cuenta no es la esperada) se anota
+    `no_confirmado` y se frena. Cualquier otro fallo también frena: no se envió nada de ese
+    reclamo y los siguientes fallarían igual (sesión, 2FA, formulario).
     Con `sin_enviar` llena el formulario del primer reclamo y lo cierra sin enviarlo.
     """
     reclamos = contar_reclamos_impugnables(pagina, video_id, modulo)
@@ -1556,8 +1569,10 @@ def impugnar_reclamos(pagina, video_id, sin_enviar, modulo):
         pausa_interactiva_s=0.0,
     )
     try:
+        filas = contar_filas_de_reclamos(pagina)
         # El tope es lo que había al empezar: un reclamo que aparece después no se impugna.
-        for numero in range(1, total + 1):
+        numero, reintento = 1, False
+        while numero <= total:
             pestana = None
             try:
                 # Siempre el primero habilitado: el que se acaba de impugnar ya no lo está.
@@ -1577,25 +1592,51 @@ def impugnar_reclamos(pagina, video_id, sin_enviar, modulo):
                 if sin_enviar:
                     resumen["listos"] = 1
                     break
-                envio = modulo._enviar_una_tab(pestana, args, {}, DIR_EVIDENCIA_IMPUGNAR, numero, total)
-                if not envio["ok"] and not pestana.is_closed():
-                    guardar_evidencia_de_impugnacion(
-                        modulo, pestana, video_id, numero, "impugnar_no_enviado", envio["razon"]
-                    )
+                if reintento and (
+                    contar_reclamos_impugnables(pagina, video_id, modulo) != quedan
+                    or contar_filas_de_reclamos(pagina) != filas
+                ):
+                    # Studio cambió mientras se abría el reintento (pudo mostrar el primer envío
+                    # y esta pestaña tener abierto otro reclamo): no se envía, decide la cuenta.
+                    envio = {"ok": False, "razon": "reintento_no_enviado"}
+                else:
+                    envio = modulo._enviar_una_tab(pestana, args, {}, DIR_EVIDENCIA_IMPUGNAR, numero, total)
+                    if not envio["ok"] and not pestana.is_closed():
+                        guardar_evidencia_de_impugnacion(
+                            modulo, pestana, video_id, numero, "impugnar_no_enviado", envio["razon"]
+                        )
             finally:
                 cerrar_pestana(pestana)
             # Se mira Studio aunque `envio` diga que falló: Enviar pudo haber salido igual.
             despues = contar_hasta_que_baje(pagina, video_id, modulo, quedan)
+            if not reintento and envio["razon"] == "form_persistente" and despues == quedan:
+                # El formulario quedó abierto y /claims no cambió: Studio no tomó el envío.
+                guardar_evidencia_de_impugnacion(
+                    modulo, pagina, video_id, numero, "impugnar_no_registrado", envio["razon"]
+                )
+                print(
+                    f"Studio no registró el reclamo {numero}; "
+                    f"miro de nuevo en {PAUSA_REINTENTO_IMPUGNAR_S:.0f} s y lo reintento."
+                )
+                time.sleep(PAUSA_REINTENTO_IMPUGNAR_S)
+                # Antes de reenviar se vuelve a mirar: Studio pudo mostrarlo tarde (uno menos
+                # cuenta como hecho), o un reclamo nuevo pudo compensar la cuenta (otra fila).
+                despues = contar_reclamos_impugnables(pagina, video_id, modulo)
+                if despues == quedan and contar_filas_de_reclamos(pagina) == filas:
+                    reintento = True
+                    continue
             if despues != quedan - 1:
                 guardar_evidencia_de_impugnacion(
                     modulo, pagina, video_id, numero, "impugnar_no_confirmado", envio["razon"]
                 )
+                reenviado = reintento and envio["razon"] != "reintento_no_enviado"
+                tambien = ", también al reintentar" if reenviado else ""
                 fallos.append(
                     {
                         "motivo": "no_confirmado",
                         "detalle": f"Studio mostraba {quedan} reclamos impugnables y ahora "
                         f"{'no se pudo leer la lista' if despues is None else despues} "
-                        f"(envío: {envio['razon']})"[:200],
+                        f"(envío: {envio['razon']}{tambien})"[:200],
                     }
                 )
                 break
@@ -1603,6 +1644,8 @@ def impugnar_reclamos(pagina, video_id, sin_enviar, modulo):
             quedan = despues
             if not quedan:
                 break
+            filas = contar_filas_de_reclamos(pagina)
+            numero, reintento = numero + 1, False
     except errores_del_paso_de_studio() as exc:
         detalle = f"{type(exc).__name__}: {exc}"[:200]
         print(f"Falló la impugnación en Studio: {detalle}")

@@ -137,10 +137,20 @@ an `evaluate` caught in that navigation fails with "Execution context was destro
 the count also retries when that still happens). It runs inside the `programar` lock (same Studio profile copy)
 and never waits for a 2FA (the service is headless): a verification page, a missing
 form or any unexpected page fails that claim without sending and dumps evidence to
-`data/impugnar_evidencia/`. It never sends more disputes than there were
+`data/impugnar_evidencia/`. It never disputes more claims than there were
 disputable claims at the start. A dispute counts as done only when `/claims`,
-reloaded, shows exactly one enabled "Tomar medidas" fewer; otherwise that claim is
-`no_confirmado` and the run stops, with no retry. Any failure stops the run, and the
+reloaded, shows exactly one enabled "Tomar medidas" fewer. Studio sometimes leaves
+the form open after "Enviar" (`form_persistente`), with no error, and registers
+nothing. Only in that case, and only when `/claims` still shows the same count, the
+step waits `PAUSA_REINTENTO_IMPUGNAR_S` (30 s) and looks again: one fewer counts as
+done (Studio was just slow), and the claim is sent once more only if both the
+disputable count and the number of claim rows are unchanged (a new claim would
+otherwise be disputed in its place). With the retry form ready, it checks `/claims`
+once more and does not press "Enviar" if anything changed (that tab may have opened
+the next claim). A form that closed is never resent. If the retry
+is not registered either, the list cannot be read (no proof that nothing went out)
+or the count is anything else, the claim is `no_confirmado` and the run stops. Any
+failure stops the run, and the
 JSON reports `reclamos`, `impugnados`, `fallos` and a `captura` of `/claims`. A
 video with no disputable claims returns `motivo = sin_reclamos_impugnables`.
 
