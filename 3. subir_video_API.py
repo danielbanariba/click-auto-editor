@@ -974,7 +974,8 @@ def extraer_pais_desde_data(data, band_id=None, band_name=None):
     data = unwrap_deathgrind_payload(data)
     if not isinstance(data, dict):
         return None
-    for key in ("country", "pais", "origin", "countryName", "country_name"):
+    # DeathGrind manda `countries` (códigos ISO); `location` trae ciudad y región.
+    for key in ("country", "countries", "pais", "origin", "countryName", "country_name"):
         parsed = extraer_pais_valor(data.get(key))
         if parsed:
             return parsed
