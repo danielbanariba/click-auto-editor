@@ -91,11 +91,26 @@ def _estado_en_pantalla(pagina):
     return None
 
 
+def _estado_mientras_carga(pagina):
+    """El estado, o None si Studio todavía está navegando.
+
+    Tras abrir /monetization, Studio navega varias veces hasta /monetization/ads, y un
+    `evaluate` que cae en una de esas navegaciones falla con "Execution context was
+    destroyed": eso cuenta como «todavía no está». Cualquier otro error se propaga.
+    """
+    try:
+        return _estado_en_pantalla(pagina)
+    except PlaywrightError as exc:
+        if "Execution context was destroyed" not in str(exc):
+            raise
+        return None
+
+
 def _abrir_y_leer_estado(pagina, video_id, espera_estado_s):
     pagina.goto(
         URL_MONETIZACION.format(video_id=video_id), wait_until="domcontentloaded", timeout=60000
     )
-    return _esperar(lambda: _estado_en_pantalla(pagina), espera_estado_s)
+    return _esperar(lambda: _estado_mientras_carga(pagina), espera_estado_s)
 
 
 def _boton_habilitado(pagina, nombre):

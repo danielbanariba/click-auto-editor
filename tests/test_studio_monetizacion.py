@@ -139,6 +139,32 @@ class StudioFalso:
         return ruta.fulfill(status=200, body=html, content_type="text/html; charset=utf-8")
 
 
+class LecturaCortada:
+    """La página real, pero las primeras `veces` lecturas del control fallan con `error`.
+
+    Studio, al abrir /monetization, navega varias veces hasta /monetization/ads: un
+    `evaluate` que cae en una de esas navegaciones falla con "Execution context was
+    destroyed". Con Chromium local esa carrera no se puede provocar a voluntad.
+    """
+
+    def __init__(self, pagina, veces, error):
+        self._pagina = pagina
+        self.veces = veces
+        self.error = error
+
+    def evaluate(self, expresion, *args):
+        if expresion == sm.JS_TEXTO_DEL_CONTROL and self.veces:
+            self.veces -= 1
+            raise PlaywrightError(self.error)
+        return self._pagina.evaluate(expresion, *args)
+
+    def __getattr__(self, nombre):
+        return getattr(self._pagina, nombre)
+
+
+NAVEGACION = "Page.evaluate: Execution context was destroyed, most likely because of a navigation"
+
+
 class TestActivarMonetizacion(unittest.TestCase):
     def setUp(self):
         if sync_playwright is None:
@@ -153,12 +179,26 @@ class TestActivarMonetizacion(unittest.TestCase):
             self.skipTest(f"sin Chromium: {exc}")
         self.addCleanup(self.navegador.close)
 
-    def activar(self, studio, espera_estado_s=5):
+    def activar(self, studio, espera_estado_s=5, envolver=lambda pagina: pagina):
         pagina = self.navegador.new_page()
         pagina.route("https://studio.youtube.com/**", studio.atender)
         return sm.activar_monetizacion(
-            pagina, "V1", self.tmp / "captura.png", espera_estado_s=espera_estado_s
+            envolver(pagina), "V1", self.tmp / "captura.png", espera_estado_s=espera_estado_s
         )
+
+    def test_si_studio_navega_mientras_se_lee_el_estado_espera_y_activa(self):
+        studio = StudioFalso()
+        resultado = self.activar(studio, envolver=lambda p: LecturaCortada(p, 2, NAVEGACION))
+        self.assertEqual(resultado["estado"], "activada", resultado)
+        self.assertEqual((studio.guardados, studio.estado), (1, "Activada"))
+
+    def test_otro_error_del_navegador_al_leer_el_estado_sigue_siendo_error_navegador(self):
+        cerrado = "Page.evaluate: Target page, context or browser has been closed"
+        studio = StudioFalso()
+        resultado = self.activar(studio, envolver=lambda p: LecturaCortada(p, 1, cerrado))
+        self.assertEqual(resultado["motivo"], "error_navegador", resultado)
+        self.assertIn("has been closed", resultado["detalle"])
+        self.assertEqual(studio.guardados, 0)
 
     def test_activa_y_comprueba_recargando_que_quedo_guardado(self):
         studio = StudioFalso()
