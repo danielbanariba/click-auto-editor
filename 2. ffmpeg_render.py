@@ -1443,6 +1443,15 @@ def cargar_env(env_path=".env"):
                 os.environ[key] = val
 
 
+P_CSRF_DE_LA_PAGINA = re.compile(r'"csrfToken"\s*:\s*"([^"]+)"')
+
+
+def token_csrf_de_la_pagina(session, html):
+    """El login valida el token del HTML (window.__USER_DATA__), no el de la cookie."""
+    coincidencia = P_CSRF_DE_LA_PAGINA.search(html or "")
+    return coincidencia.group(1) if coincidencia else session.cookies.get("csrfToken", "")
+
+
 def crear_sesion_autenticada():
     global DEATHGRIND_SESSION
     if DEATHGRIND_SESSION is not None:
@@ -1465,8 +1474,8 @@ def crear_sesion_autenticada():
     )
 
     try:
-        session.get(f"{BASE_URL}/auth/sign-in", timeout=30)
-        csrf_token = session.cookies.get("csrfToken", "")
+        pagina = session.get(f"{BASE_URL}/auth/sign-in", timeout=30)
+        csrf_token = token_csrf_de_la_pagina(session, pagina.text)
         headers = {"x-csrf-token": csrf_token, "x-uuid": uuid.uuid4().hex}
         response = session.post(
             f"{API_URL}/auth/login",
