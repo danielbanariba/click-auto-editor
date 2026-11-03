@@ -86,7 +86,12 @@ Studio (claim check and monetization) runs Brave headless with a copy of the
 signed-in profile (`.runtime_browser_profiles/agente`). It must launch without
 Playwright's `--password-store=basic` / `--use-mock-keychain` flags (so Brave
 can read the cookies from KWallet) and with a normal Chrome user agent; see
-`abrir_contexto_studio`. Claim detection reads `/video/<id>/claims`; an unclear
+`abrir_contexto_studio`. The account has several channels, and YouTube sometimes
+opens "Selecciona un canal" (`www.youtube.com/signin_prompt`) instead of Studio:
+`pagina_de_studio` opens Studio first and, when that question shows, clicks the
+exact, visible "Daniel Banariba" (`CANAL_DE_STUDIO`; "Daniel Banariba Drummer" is
+another channel). If it is not listed, the step fails with `canal_no_disponible`.
+Claim detection reads `/video/<id>/claims`; an unclear
 page returns `reclamo_desconocido` and the service asks the user instead of
 guessing, and a missing session returns `sin_sesion_en_studio`.
 
@@ -120,8 +125,9 @@ title, the claimants, the `/claims` link, the Studio screenshot and a note that
 the dispute goes out with the reason "Licencia" and the configured text and
 signature. "⚖️ Impugnar" runs `pipeline_agente.py impugnar --video-id <id>` and the
 service reports "Impugné N de M reclamos" with the failures and the `/claims`
-link; "No impugnar" only closes the question. Nothing is disputed without that
-press, and a blacklisted video keeps only the delete question.
+link; "🗑️ Eliminar video" runs `pipeline_agente.py eliminar_video`, as in the
+blacklist question. Nothing is disputed or deleted without that press, and a
+blacklisted video keeps only the delete question.
 
 Disputing (`impugnar`) reuses the recipe of `10. inpunar_video.py`: for each claim
 whose "Tomar medidas" is visible and enabled it opens the form, picks "Licencia",

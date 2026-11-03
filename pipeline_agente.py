@@ -1030,12 +1030,52 @@ def esperar_resultado_de_reclamos(pagina, ver_detalles, timeout_s=ESPERA_RESULTA
         time.sleep(1)
 
 
+URL_STUDIO = "https://studio.youtube.com/"
+# La cuenta tiene varios canales y a veces YouTube abre "Selecciona un canal"
+# (www.youtube.com/signin_prompt) en vez de Studio: los pasos entran con este.
+CANAL_DE_STUDIO = "Daniel Banariba"
+ESPERA_CANAL_MS = 30_000
+# La pregunta del canal puede llegar con una redirección del navegador, después de cargar.
+ESPERA_PREGUNTA_DE_CANAL_MS = 10_000
+
+
+def es_pregunta_de_canal(url):
+    return "youtube.com/signin_prompt" in url
+
+
+def entrar_a_studio(pagina):
+    """Abre Studio y, si YouTube pide elegir canal, elige CANAL_DE_STUDIO.
+
+    Lanza NavegadorNoDisponible: "canal_no_disponible" si el canal no está en la lista o
+    elegirlo no lleva a Studio; "error_navegador" si Studio no carga.
+    """
+    from playwright.sync_api import Error as PlaywrightError
+
+    try:
+        pagina.goto(URL_STUDIO, wait_until="domcontentloaded", timeout=ESPERA_NAVEGACION_MS)
+        try:
+            pagina.wait_for_load_state("networkidle", timeout=ESPERA_PREGUNTA_DE_CANAL_MS)
+        except PlaywrightError:
+            pass
+        if not es_pregunta_de_canal(pagina.url):
+            return
+        print(f"YouTube pidió elegir canal: elijo «{CANAL_DE_STUDIO}».")
+        # Texto exacto: "Daniel Banariba Drummer" es otro canal de la misma cuenta.
+        canal = pagina.get_by_text(CANAL_DE_STUDIO, exact=True).filter(visible=True).first
+        canal.click(timeout=ESPERA_CANAL_MS)
+        pagina.wait_for_url(lambda url: url.startswith(URL_STUDIO), timeout=ESPERA_CANAL_MS)
+    except PlaywrightError as exc:
+        motivo = "canal_no_disponible" if es_pregunta_de_canal(pagina.url) else "error_navegador"
+        print(f"No se pudo entrar a Studio ({motivo}): {exc}")
+        raise NavegadorNoDisponible(motivo) from exc
+
+
 @contextlib.contextmanager
 def pagina_de_studio():
     """Entrega una página del navegador con la sesión de Studio y lo cierra al salir.
 
-    Lanza NavegadorNoDisponible (con el motivo) si no hay perfil o no abre el navegador.
-    Un error al cerrar no se propaga: el trabajo ya está hecho y descartaría su resultado.
+    Lanza NavegadorNoDisponible (con el motivo) si no hay perfil, no abre el navegador o
+    no puede entrar a Studio con el canal. Un error al cerrar no se propaga: el trabajo ya está hecho y descartaría su resultado.
     """
     from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
@@ -1061,7 +1101,9 @@ def pagina_de_studio():
             print(f"No se pudo abrir el navegador: {exc}")
             raise NavegadorNoDisponible("error_navegador") from exc
         try:
-            yield contexto.pages[0] if contexto.pages else contexto.new_page()
+            pagina = contexto.pages[0] if contexto.pages else contexto.new_page()
+            entrar_a_studio(pagina)
+            yield pagina
         finally:
             cerrar("el navegador", contexto.close)
     finally:

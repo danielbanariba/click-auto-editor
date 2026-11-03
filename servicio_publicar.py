@@ -58,8 +58,9 @@ BOTONES = {
     "reprogramar": [[("🔁 Reintentar", "reintentar")]],
     # Borrar el video no se deshace: va en su propia fila, debajo de Conservar.
     "lista_negra": [[("Conservar", "conservar")], [("🗑️ Eliminar video", "eliminar_video")]],
-    # Impugnar es una declaración legal a nombre del usuario: cada botón en su fila.
-    "impugnar": [[("⚖️ Impugnar", "impugnar")], [("No impugnar", "no_impugnar")]],
+    # Impugnar es una declaración legal a nombre del usuario y borrar no se deshace: cada
+    # botón en su fila.
+    "impugnar": [[("⚖️ Impugnar", "impugnar")], [("🗑️ Eliminar video", "eliminar_video")]],
 }
 AVISO_BOTON = {
     "subir": "Subiendo…",
@@ -71,7 +72,6 @@ AVISO_BOTON = {
     "conservar": "Lo conservo",
     "eliminar_video": "Borrando el video…",
     "impugnar": "Impugnando…",
-    "no_impugnar": "No impugno",
 }
 # Mientras haya una de estas preguntas abiertas no se renderiza otro álbum.
 # "reprogramar" no frena: el video ya está subido y no depende del render.
@@ -99,6 +99,7 @@ MOTIVOS_MONETIZACION = {
     "calificacion_no_adecuada": "el cuestionario no dio «Adecuado para anuncios», no lo envié",
     "no_se_encontro_nada_de_lo_anterior": "no encontré «Nada de lo anterior» en el cuestionario, no lo envié",
     "sin_sesion_en_studio": "Studio no tiene la sesión iniciada",
+    "canal_no_disponible": "YouTube pidió elegir canal y no pude entrar con «Daniel Banariba»",
     "no_se_guardo": "Studio no guardó el cambio",
     "no_se_pudo_guardar": "Studio no dejó guardar el cambio",
     "estado_desconocido": "la página de monetización no se parece a la esperada",
@@ -111,6 +112,7 @@ MOTIVOS_IMPUGNACION = {
     "no_confirmado": "Studio no mostró el reclamo como impugnado y no sé si salió",
     "lista_de_reclamos_no_disponible": "Studio no mostró la lista de reclamos; no se envió nada",
     "sin_sesion_en_studio": "Studio no tiene la sesión iniciada",
+    "canal_no_disponible": "YouTube pidió elegir canal y no pude entrar con «Daniel Banariba»",
     "error_navegador": "falló el navegador",
 }
 
@@ -574,8 +576,9 @@ class Servicio:
             "impugnar",
             f"⚖️ \"{titulo}\" tiene reclamo de derechos de autor{quienes}\n\n"
             f"https://studio.youtube.com/video/{video_id}/claims\n\n"
-            "El video sigue programado. ¿Impugno los reclamos? Es una declaración legal a tu nombre: "
-            "se envía con el motivo \"Licencia\", el texto de licencia y la firma ya configurados.",
+            "El video sigue programado. ¿Impugno los reclamos o elimino el video? Impugnar es una "
+            "declaración legal a tu nombre: se envía con el motivo \"Licencia\", el texto de licencia "
+            "y la firma ya configurados. Eliminar el video no se puede deshacer.",
             foto=resultado.get("captura_studio"),
             video_id=video_id,
         )
@@ -753,7 +756,8 @@ class Servicio:
     def respuesta_impugnar(self, accion, pregunta):
         if accion == "impugnar":
             self.lanzar_paso("impugnar", "--video-id", pregunta["video_id"])
-        # No impugnar: la pregunta ya se cerró y el video queda como está.
+        elif accion == "eliminar_video":
+            self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"])
 
     def respuesta_reprogramar(self, accion, pregunta):
         self.fallos_programar.pop(pregunta["video_id"], None)
