@@ -3511,7 +3511,10 @@ def _click_nth_take_action_in_page(page, claim_index):
             }
             return true;
           };
-          const usable = ctas.filter(el => {
+          // Studio envuelve cada <button> en un <ytcp-button-shape>: queda solo el de adentro
+          // (el clic sube al envoltorio), así un reclamo no cuenta dos veces y su "disabled" se ve.
+          const innermost = ctas.filter(el => !ctas.some(other => other !== el && el.contains(other)));
+          const usable = innermost.filter(el => {
             const r = el.getBoundingClientRect();
             if (r.width <= 0 || r.height <= 0) return false;
             const s = window.getComputedStyle(el);

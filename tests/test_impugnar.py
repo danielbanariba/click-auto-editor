@@ -159,8 +159,13 @@ setTimeout(() => {
     const fila = document.createElement("div");
     fila.className = "fila";
     fila.innerHTML = `<div>${reclamo.cancion}</div><div>Derechos de autor</div><div>Audio</div>`
-      + `<button>Ver detalles</button><button class="tomar" ${reclamo.impugnado ? "disabled" : ""}>Tomar medidas</button>`;
-    fila.querySelector(".tomar").onclick = () => {
+      // Como en Studio: cada "Tomar medidas" es un <button> dentro de un <ytcp-button-shape>.
+      + `<button>Ver detalles</button>`
+      + `<ytcp-button-shape><button class="tomar" ${reclamo.impugnado ? "disabled" : ""}>Tomar medidas</button></ytcp-button-shape>`;
+    // El clic lo atiende el envoltorio (también el que llega desde el <button> de adentro),
+    // y un reclamo ya impugnado no abre nada.
+    fila.querySelector("ytcp-button-shape").onclick = () => {
+      if (fila.querySelector(".tomar").disabled) return;
       est = {indice, paso: 0, motivo: null, permiso: false};
       dlg.hidden = false;
       pintar();
