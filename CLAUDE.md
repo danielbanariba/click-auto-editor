@@ -88,6 +88,12 @@ can read the cookies from KWallet) and with a normal Chrome user agent; see
 page returns `reclamo_desconocido` and the service asks the user instead of
 guessing, and a missing session returns `sin_sesion_en_studio`.
 
+The claim rows carry no claimant name. `extract_claimants_from_video`
+(`11. apelacion.py`) waits up to 30 s for the "Ver detalles" buttons, opens each
+one (up to 20 claims), waits for the "Reclamantes" header of its dialog and
+reads the block under it. It is read-only (it never clicks "Tomar medidas") and
+a browser error leaves that claim out instead of stopping the scheduling.
+
 Monetization (`studio_monetizacion.py`) turns ads on at
 `/video/<id>/monetization`. Studio then asks for the ad-suitability
 questionnaire; its answers cannot be changed afterwards. The user's decision
