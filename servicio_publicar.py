@@ -109,6 +109,7 @@ MOTIVOS_IMPUGNACION = {
     "verificacion_de_identidad": "YouTube pidió verificar tu identidad y el servicio no puede pasar ese paso",
     "formulario_no_disponible": "el formulario de Studio no se parece al esperado",
     "no_confirmado": "Studio no mostró el reclamo como impugnado y no sé si salió",
+    "lista_de_reclamos_no_disponible": "Studio no mostró la lista de reclamos; no se envió nada",
     "sin_sesion_en_studio": "Studio no tiene la sesión iniciada",
     "error_navegador": "falló el navegador",
 }

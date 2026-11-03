@@ -1386,11 +1386,17 @@ def titulo_conocido(video_id):
 
 
 def contar_en_la_pagina(pagina, modulo):
+    """Cuántos reclamos se pueden impugnar en la página abierta; None si no se pudo leer."""
     if esta_en_login_de_google(pagina):
         raise NavegadorNoDisponible("sin_sesion_en_studio")
-    botones, _ = esperar_resultado_de_reclamos(pagina, apelacion_agente().P_VER_DETALLES_BTN)
+    botones, texto = esperar_resultado_de_reclamos(
+        pagina, apelacion_agente().P_VER_DETALLES_BTN, ESPERA_RESULTADO_RECLAMOS_S
+    )
     if botones == 0:
-        return 0
+        # Sin filas, solo el aviso de Studio de que no hay reclamaciones vale como cero. Una
+        # página de error o a medio cargar no dice nada: tomarla por cero daría por hecha una
+        # impugnación que Studio no registró.
+        return 0 if P_SIN_PROBLEMAS.search(texto) else None
     modulo._scroll_copyright_page_to_bottom(pagina)  # la lista se dibuja a medida que se baja
     # Un índice fuera de rango no hace clic: solo cuenta los botones visibles y habilitados.
     return modulo._click_nth_take_action_in_page(pagina, 10**6)["total"]
@@ -1400,6 +1406,7 @@ def contar_reclamos_impugnables(pagina, video_id, modulo):
     """Cuántos "Tomar medidas" visibles y habilitados tiene /claims, tras recargarla.
 
     Es lo único que se toma por cierto: cada impugnación que Studio registra deja uno menos.
+    Devuelve None si la página no muestra ni la lista ni el aviso de que no hay reclamos.
     Va directo a /claims: /copyright lleva allí desde el navegador, y un `evaluate` que cae
     en esa navegación falla con «Execution context was destroyed».
     """
@@ -1432,7 +1439,7 @@ def contar_hasta_que_baje(pagina, video_id, modulo, antes):
         if intento:
             time.sleep(ESPERA_CONFIRMAR_IMPUGNACION_S)
         ahora = contar_reclamos_impugnables(pagina, video_id, modulo)
-        if ahora < antes:
+        if ahora is not None and ahora < antes:
             break
     return ahora
 
@@ -1486,10 +1493,19 @@ def impugnar_reclamos(pagina, video_id, sin_enviar, modulo):
     se envió nada de ese reclamo y los siguientes fallarían igual (sesión, 2FA, formulario).
     Con `sin_enviar` llena el formulario del primer reclamo y lo cierra sin enviarlo.
     """
-    resumen = {"reclamos": contar_reclamos_impugnables(pagina, video_id, modulo), "impugnados": 0, "fallos": []}
+    reclamos = contar_reclamos_impugnables(pagina, video_id, modulo)
+    resumen = {"reclamos": reclamos or 0, "impugnados": 0, "fallos": []}
     if sin_enviar:
         resumen.update(sin_enviar=True, listos=0)
     fallos = resumen["fallos"]
+    if reclamos is None:
+        fallos.append(
+            {
+                "motivo": "lista_de_reclamos_no_disponible",
+                "detalle": "Studio no mostró la lista de reclamos ni el aviso de que no hay",
+            }
+        )
+        return resumen
     total = quedan = resumen["reclamos"]
     args = SimpleNamespace(
         delay=PAUSA_IMPUGNAR_S,
@@ -1535,7 +1551,8 @@ def impugnar_reclamos(pagina, video_id, sin_enviar, modulo):
                 fallos.append(
                     {
                         "motivo": "no_confirmado",
-                        "detalle": f"Studio mostraba {quedan} reclamos impugnables y ahora {despues} "
+                        "detalle": f"Studio mostraba {quedan} reclamos impugnables y ahora "
+                        f"{'no se pudo leer la lista' if despues is None else despues} "
                         f"(envío: {envio['razon']})"[:200],
                     }
                 )
@@ -1575,7 +1592,7 @@ def impugnar(video_id, sin_enviar=False, abrir_studio=pagina_de_studio, modulo=N
             print(f"No se pudo impugnar en Studio: {detalle}")
             motivo = exc.motivo if isinstance(exc, NavegadorNoDisponible) else "error_navegador"
             return {"ok": False, "motivo": motivo, "detalle": detalle, **base}
-    if resumen["reclamos"] == 0:
+    if resumen["reclamos"] == 0 and not resumen["fallos"]:
         return {"ok": False, "motivo": "sin_reclamos_impugnables", **resumen, **base}
     hecho = resumen["listos"] == 1 if sin_enviar else resumen["impugnados"] == resumen["reclamos"]
     return {"ok": hecho and not resumen["fallos"], **resumen, **base}

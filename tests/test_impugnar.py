@@ -176,6 +176,9 @@ setTimeout(() => {
 </script></body></html>"""
 
 
+PAGINA_DE_ERROR = "<!doctype html><html><body><h1>Algo salió mal</h1></body></html>"
+
+
 class StudioFalso:
     """La página de reclamos de un video y todo lo que la automatización mandó con "Enviar"."""
 
@@ -187,6 +190,7 @@ class StudioFalso:
         acepta_envios=True,
         verificacion_tras=None,
         sin_sesion=False,
+        pagina_de_error=None,
     ):
         self.reclamos = reclamos  # [{"cancion": ..., "impugnado": bool}]
         self.titulo = titulo
@@ -195,6 +199,9 @@ class StudioFalso:
         # Con N impugnaciones ya aceptadas, el siguiente "Continuar" pide "Verifica que eres tú".
         self.verificacion_tras = verificacion_tras
         self.sin_sesion = sin_sesion
+        # "siempre" o "tras_enviar": /claims responde una página de error, sin la lista ni el
+        # aviso de que no hay reclamaciones.
+        self.pagina_de_error = pagina_de_error
         self.enviados = []  # lo que llegó con "Enviar" (irreversible en Studio)
         self.pasos = []  # los pasos del formulario que se mostraron
         self.urls = []  # las páginas que se abrieron
@@ -221,6 +228,8 @@ class StudioFalso:
             # `evaluate` que corre en ese momento falla con "Execution context was destroyed".
             redireccion = '<script>setTimeout(() => location.replace("/video/V1/claims"), 1500)</script>'
             return ruta.fulfill(status=200, body=redireccion, content_type="text/html; charset=utf-8")
+        if self.pagina_de_error == "siempre" or (self.pagina_de_error == "tras_enviar" and self.enviados):
+            return ruta.fulfill(status=200, body=PAGINA_DE_ERROR, content_type="text/html; charset=utf-8")
         verificacion = self.verificacion_tras is not None and self.impugnados() >= self.verificacion_tras
         html = (
             PAGINA.replace("__RECLAMOS__", json.dumps(self.reclamos))
@@ -365,6 +374,28 @@ class TestImpugnar(unittest.TestCase):
         (fallo,) = resultado["fallos"]
         self.assertEqual(fallo["motivo"], "no_confirmado")
         self.assertEqual(len(studio.enviados), 1)  # ni reintento ni segundo reclamo
+
+    def test_si_tras_enviar_la_lista_no_carga_no_se_da_por_impugnado(self):
+        # Defecto: con un solo reclamo, una página de error sin filas se leía como "0 reclamos
+        # impugnables" y la impugnación se daba por hecha aunque Studio no la registró.
+        studio = StudioFalso([reclamo("Canción A")], acepta_envios=False, pagina_de_error="tras_enviar")
+        with mock.patch.object(pa, "ESPERA_RESULTADO_RECLAMOS_S", 1):
+            resultado = self.impugnar(studio)
+        self.assertFalse(resultado["ok"])
+        self.assertEqual((resultado["reclamos"], resultado["impugnados"]), (1, 0))
+        self.assertEqual([fallo["motivo"] for fallo in resultado["fallos"]], ["no_confirmado"])
+        self.assertEqual(len(studio.enviados), 1)
+
+    def test_si_la_lista_no_carga_al_empezar_no_dice_que_no_hay_nada_que_impugnar(self):
+        # Defecto: una página de error al empezar se informaba como "no tiene reclamos que se
+        # puedan impugnar", y el usuario daba por cerrado un video que sigue con reclamos.
+        studio = StudioFalso([reclamo("Canción A")], pagina_de_error="siempre")
+        with mock.patch.object(pa, "ESPERA_RESULTADO_RECLAMOS_S", 1):
+            resultado = self.impugnar(studio)
+        self.assertFalse(resultado["ok"])
+        self.assertNotEqual(resultado.get("motivo"), "sin_reclamos_impugnables")
+        self.assertEqual([fallo["motivo"] for fallo in resultado["fallos"]], ["lista_de_reclamos_no_disponible"])
+        self.assertEqual((studio.pasos, studio.enviados), ([], []))
 
     def test_una_verificacion_de_identidad_falla_sin_enviar_y_deja_evidencia(self):
         # Defecto: esperar 10 minutos un 2FA que el servicio no puede pasar, o seguir al
