@@ -9,6 +9,7 @@ Corre siempre en segundo plano (systemd/publicar-albumes.service):
 4. Con Subir: lo sube como privado, borra la carpeta y sigue con el próximo.
    En paralelo espera el procesado, revisa reclamos, activa la monetización y
    lo publica en el acto o lo programa (siempre a una hora de otro video).
+5. Si un reclamante está en la lista negra, pregunta si elimina el video de YouTube.
 
 Cada paso lo hace pipeline_agente.py en un proceso aparte. Las preguntas
 abiertas y los álbumes rechazados viven en data/agente/servicio.json, así un
@@ -54,6 +55,8 @@ BOTONES = {
     "reclamo": [[("Sí, tiene reclamo", "si"), ("No tiene", "no")]],
     "reintentar": [[("🔁 Reintentar", "reintentar")]],
     "reprogramar": [[("🔁 Reintentar", "reintentar")]],
+    # Borrar el video no se deshace: va en su propia fila, debajo de Conservar.
+    "lista_negra": [[("Conservar", "conservar")], [("🗑️ Eliminar video", "eliminar_video")]],
 }
 AVISO_BOTON = {
     "subir": "Subiendo…",
@@ -62,6 +65,8 @@ AVISO_BOTON = {
     "si": "Programando…",
     "no": "Programando…",
     "reintentar": "Reintentando…",
+    "conservar": "Lo conservo",
+    "eliminar_video": "Borrando el video…",
 }
 # Mientras haya una de estas preguntas abiertas no se renderiza otro álbum.
 # "reprogramar" no frena: el video ya está subido y no depende del render.
@@ -496,6 +501,7 @@ class Servicio:
                     "No frené el video por esto; actívala a mano:\n"
                     f"https://studio.youtube.com/video/{video_id}/monetization"
                 )
+            self.preguntar_por_lista_negra(resultado, video_id)
         elif motivo == "reclamo_desconocido":
             titulo = resultado.get("titulo") or video_id
             self.preguntar(
@@ -525,6 +531,32 @@ class Servicio:
                     # El mismo comando que falló: si traía --reclamo, se respeta.
                     argumentos=list(argumentos),
                 )
+
+    def preguntar_por_lista_negra(self, resultado, video_id):
+        """Un reclamante de la lista negra: avisa y ofrece borrar el video. Nunca lo borra solo."""
+        reclamantes = resultado.get("reclamantes_en_lista_negra") or []
+        if not reclamantes:
+            return
+        titulo = resultado.get("titulo") or video_id
+        lista = "\n".join(f"• {reclamante}" for reclamante in reclamantes)
+        self.preguntar(
+            "lista_negra",
+            f"🚩 \"{titulo}\" tiene reclamo de la lista negra de reclamantes:\n{lista}\n\n"
+            f"https://studio.youtube.com/video/{video_id}/claims\n\n"
+            "El video sigue programado. ¿Lo elimino de YouTube? No se puede deshacer.",
+            foto=resultado.get("captura_studio"),
+            video_id=video_id,
+        )
+
+    def tras_eliminar_video(self, resultado, argumentos):
+        video_id = valor(argumentos, "--video-id")
+        if resultado.get("ok"):
+            self.avisar(f"🗑 Borré el video \"{resultado.get('titulo') or video_id}\" de YouTube.")
+            return
+        self.avisar(
+            f"❌ No pude borrar el video {video_id} ({resultado.get('motivo')}). Sigue en YouTube; "
+            f"se puede borrar a mano en Studio:\nhttps://studio.youtube.com/video/{video_id}/edit"
+        )
 
     # -- Telegram -----------------------------------------------------------
 
@@ -644,6 +676,11 @@ class Servicio:
 
     def respuesta_reclamo(self, accion, pregunta):
         self.lanzar_paso("programar", "--video-id", pregunta["video_id"], "--reclamo", accion)
+
+    def respuesta_lista_negra(self, accion, pregunta):
+        if accion == "eliminar_video":
+            self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"])
+        # Conservar: la pregunta ya se cerró y el video queda como está.
 
     def respuesta_reprogramar(self, accion, pregunta):
         self.fallos_programar.pop(pregunta["video_id"], None)

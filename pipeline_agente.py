@@ -9,6 +9,7 @@ decida el paso siguiente; el resto de la salida va a data/agente/logs/.
     subir        sube el video como privado y borra la carpeta del álbum
     eliminar     borra la carpeta del álbum sin subirlo (ya estaba publicado)
     programar    espera el procesado, revisa reclamos, activa la monetización y programa
+    eliminar_video  borra un video de YouTube (no se puede deshacer; lo pide un botón)
     estado       videos sin programar, álbumes sin aprobar y render en curso
 """
 import argparse
@@ -1264,6 +1265,7 @@ def programar(
             # del navegador, y dos procesos a la vez elegirían la misma hora libre.
             with bloqueo("programar"):
                 reclamantes = []
+                captura_studio = None
                 if reclamo is None:
                     revision = revisar(video_id)
                     if revision["estado"] == "desconocido":
@@ -1278,6 +1280,7 @@ def programar(
                         }
                     con_reclamo = revision["estado"] == "con_reclamo"
                     reclamantes = revision.get("reclamantes", [])
+                    captura_studio = revision.get("captura_studio")
                 else:
                     con_reclamo = reclamo
                 # Solo avisa: la fecha no cambia, borrar el video lo decide el usuario.
@@ -1331,6 +1334,7 @@ def programar(
         "con_reclamo": con_reclamo,
         "reclamantes": reclamantes,
         "reclamantes_en_lista_negra": en_lista_negra,
+        "captura_studio": captura_studio,
         "publica_en": publica_en.isoformat(),
         "publicado_ahora": publicado_ahora,
         "monetizacion": monetizacion,
@@ -1339,6 +1343,58 @@ def programar(
         ),
         "log": str(log),
     }
+
+
+# ---------------------------------------------------------------------------
+# eliminar_video
+# ---------------------------------------------------------------------------
+
+
+def eliminar_video(video_id, uploader=None):
+    """Borra el video de YouTube. No se puede deshacer: solo lo lanza un botón del usuario.
+
+    Antes de borrar consulta el video: confirma que existe en el canal y devuelve su
+    título, que es lo que se informa como borrado.
+    """
+    uploader = uploader or uploader_real()
+    log = ruta_log("eliminar_video")
+    with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
+        uploader.cargar_env()
+        youtube, *_ = uploader.probar_credenciales_disponibles(prefix="upload")
+        if not youtube:
+            return {"ok": False, "motivo": "sin_credenciales", "video_id": video_id, "log": str(log)}
+        yt = {"cliente": youtube}
+        try:
+            respuesta = ejecutar_api(
+                uploader, yt, lambda c: c.videos().list(part="snippet", id=video_id).execute()
+            )
+            items = respuesta.get("items", [])
+            if not items:
+                return {"ok": False, "motivo": "no_existe", "video_id": video_id, "log": str(log)}
+            titulo = items[0].get("snippet", {}).get("title") or video_id
+            ejecutar_api(uploader, yt, lambda c: c.videos().delete(id=video_id).execute())
+        except SinCredenciales:
+            return {"ok": False, "motivo": "sin_credenciales", "video_id": video_id, "log": str(log)}
+        except HttpError as exc:
+            print(f"Error YouTube API: {exc}")
+            return {
+                "ok": False,
+                "motivo": "error_api",
+                "video_id": video_id,
+                "detalle": str(exc)[:200],
+                "log": str(log),
+            }
+        except ERRORES_DE_CONEXION as exc:
+            detalle = f"{type(exc).__name__}: {exc}"[:200]
+            print(f"Sin conexion con YouTube tras {REINTENTOS_CONEXION} reintentos: {detalle}")
+            return {
+                "ok": False,
+                "motivo": "sin_conexion",
+                "video_id": video_id,
+                "detalle": detalle,
+                "log": str(log),
+            }
+    return {"ok": True, "video_id": video_id, "titulo": titulo, "log": str(log)}
 
 
 # ---------------------------------------------------------------------------
@@ -1379,6 +1435,11 @@ def parse_args(argv=None):
     )
 
     p = sub.add_parser(
+        "eliminar_video", help="Borra un video de YouTube (no se puede deshacer)."
+    )
+    p.add_argument("--video-id", required=True)
+
+    p = sub.add_parser(
         "estado", help="Videos sin programar, álbumes sin aprobar y si hay un render corriendo."
     )
     p.add_argument(
@@ -1403,6 +1464,8 @@ def main(argv=None):
     if args.comando == "programar":
         reclamo = None if args.reclamo is None else args.reclamo == "si"
         return responder(programar(args.video_id, esperar=args.esperar, reclamo=reclamo))
+    if args.comando == "eliminar_video":
+        return responder(eliminar_video(args.video_id))
     return responder(estado(esperar_render=args.esperar_render))
 
 

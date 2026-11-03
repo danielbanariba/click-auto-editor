@@ -1,4 +1,6 @@
+import contextlib
 import http.client
+import io
 import json
 import multiprocessing
 import select
@@ -874,7 +876,11 @@ class TestProgramar(unittest.TestCase):
             resultado = pa.programar(
                 "V1",
                 esperar=True,
-                revisar=lambda video_id: {"estado": "con_reclamo", "reclamantes": reclamantes},
+                revisar=lambda video_id: {
+                    "estado": "con_reclamo",
+                    "reclamantes": reclamantes,
+                    "captura_studio": "/tmp/studio_V1.png",
+                },
                 activar=monetizacion_activada,
                 uploader=uploader_para_programar(youtube),
             )
@@ -894,6 +900,8 @@ class TestProgramar(unittest.TestCase):
             ["Believe Music", "Believe Music, UMG", "en nombre de Church Road Records"]
         )
         self.assertEqual(resultado["reclamantes_en_lista_negra"], ["Believe Music, UMG"])
+        # El aviso de Telegram lleva la captura de Studio: tiene que viajar en el resultado.
+        self.assertEqual(resultado["captura_studio"], "/tmp/studio_V1.png")
         self.assertEqual(
             resultado["reclamantes"],
             ["Believe Music", "Believe Music, UMG", "en nombre de Church Road Records"],
@@ -1223,6 +1231,96 @@ class TestEjecutarApi(unittest.TestCase):
         with self.assertRaises(HttpError):
             pa.ejecutar_api(self.uploader(), {"cliente": cliente}, lambda c: c.videos().list().execute())
         self.assertEqual((cliente.llamadas, cliente.cierres, self.esperas), (1, 0, []))
+
+
+class VideosParaBorrar:
+    """`videos()` de un canal: lo que `eliminar_video` consulta y borra."""
+
+    def __init__(self, titulos, errores_al_borrar=()):
+        self.titulos = titulos  # id -> título
+        self.errores_al_borrar = list(errores_al_borrar)
+        self.borrados = []
+
+    def list(self, part, id):
+        items = [{"id": id, "snippet": {"title": self.titulos[id]}}] if id in self.titulos else []
+        return Llamada({"items": items})
+
+    def delete(self, id):
+        videos = self
+
+        class Borrado:
+            def execute(self):
+                if videos.errores_al_borrar:
+                    raise videos.errores_al_borrar.pop(0)
+                videos.borrados.append(id)
+
+        return Borrado()
+
+
+class CanalParaBorrar:
+    def __init__(self, titulos, errores_al_borrar=()):
+        self.videos_falsos = VideosParaBorrar(titulos, errores_al_borrar)
+
+    def videos(self):
+        return self.videos_falsos
+
+
+class TestEliminarVideo(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        parche = mock.patch.object(pa, "DIR_LOGS", self.tmp / "logs")
+        parche.start()
+        self.addCleanup(parche.stop)
+
+    def test_borra_el_video_pedido_y_devuelve_su_titulo(self):
+        # Defecto: borrar otro id, o no borrar y responder ok.
+        canal = CanalParaBorrar({"V1": "Banda - Disco", "V2": "Otra - Cosa"})
+        resultado = pa.eliminar_video("V1", uploader=uploader_para_programar(canal))
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual((resultado["video_id"], resultado["titulo"]), ("V1", "Banda - Disco"))
+        self.assertEqual(canal.videos_falsos.borrados, ["V1"])
+
+    def test_un_video_que_no_existe_no_se_borra_a_ciegas(self):
+        # Defecto: dar por borrado, o llamar a delete, con un id que el canal no tiene.
+        canal = CanalParaBorrar({"V2": "Otra - Cosa"})
+        resultado = pa.eliminar_video("V1", uploader=uploader_para_programar(canal))
+        self.assertEqual((resultado["ok"], resultado["motivo"]), (False, "no_existe"))
+        self.assertEqual(canal.videos_falsos.borrados, [])
+
+    def test_con_la_cuota_agotada_borra_con_la_credencial_siguiente(self):
+        # Defecto: llamar a la API sin pasar por ejecutar_api y quedar sin borrar por cuota.
+        cuota = HttpError(httplib2.Response({"status": 403}), b"{}")
+        agotada = CanalParaBorrar({"V1": "Banda - Disco"}, errores_al_borrar=[cuota])
+        siguiente = CanalParaBorrar({"V1": "Banda - Disco"})
+        uploader = uploader_para_programar(agotada)
+        uploader.is_quota_error = lambda exc: True
+        uploader.authenticate_next = lambda prefix: siguiente
+        resultado = pa.eliminar_video("V1", uploader=uploader)
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual((agotada.videos_falsos.borrados, siguiente.videos_falsos.borrados), ([], ["V1"]))
+
+    def test_un_error_de_la_api_se_responde_como_json_sin_lanzar(self):
+        # Defecto: dejar escapar la excepción; el servicio solo ve «sin_respuesta» y no sabe si se borró.
+        prohibido = HttpError(httplib2.Response({"status": 403}), b"{}")
+        canal = CanalParaBorrar({"V1": "Banda - Disco"}, errores_al_borrar=[prohibido])
+        resultado = pa.eliminar_video("V1", uploader=uploader_para_programar(canal))
+        self.assertEqual((resultado["ok"], resultado["motivo"]), (False, "error_api"))
+        self.assertEqual(canal.videos_falsos.borrados, [])
+
+    def test_el_subcomando_corre_eliminar_video_y_no_otro_paso(self):
+        # Defecto: main manda cualquier subcomando desconocido a `estado`; sin su rama,
+        # el servicio recibiría el estado de los pendientes en vez de borrar el video.
+        salida = io.StringIO()
+        with (
+            mock.patch.object(pa, "eliminar_video", return_value={"ok": True, "video_id": "V1"}) as borrar,
+            mock.patch.object(pa, "estado", side_effect=AssertionError("corrió estado")),
+            contextlib.redirect_stdout(salida),
+        ):
+            codigo = pa.main(["eliminar_video", "--video-id", "V1"])
+        borrar.assert_called_once_with("V1")
+        self.assertEqual(codigo, 0)
+        self.assertEqual(json.loads(salida.getvalue()), {"ok": True, "video_id": "V1"})
 
 
 class TestProgramarSinConexion(unittest.TestCase):

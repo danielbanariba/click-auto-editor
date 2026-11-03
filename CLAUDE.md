@@ -69,6 +69,7 @@ env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/
 env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, then deletes the album folder
 env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the album folder without uploading (already published)
 env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → monetization on → public now / first free moment, or +2 years if claimed
+env/bin/python pipeline_agente.py eliminar_video --video-id ID  # deletes the video from YouTube (irreversible; the service only runs it from a Telegram button)
 env/bin/python pipeline_agente.py estado [--esperar-render]  # unscheduled uploads, rendered albums awaiting approval, render running
 ```
 
@@ -100,6 +101,15 @@ claimant line against it, case-insensitively and by containment ("umg" matches
 "Believe Music, UMG"), and returns the matches in `reclamantes_en_lista_negra`.
 The match never changes the schedule: the video still goes two years ahead. A
 missing or unreadable file means no matches.
+
+When `programar` returns matches, the service sends one Telegram question for
+that video with its title, the matching claimants, the `/video/<id>/claims` link
+and the Studio screenshot (`captura_studio`). "Conservar" only closes the
+question. "🗑️ Eliminar video" runs `pipeline_agente.py eliminar_video`, which
+checks the video exists, calls `videos.delete` through `ejecutar_api` and prints
+one JSON line; the service reports the result. Deleting cannot be undone, so
+nothing deletes a video without that button press. The question is persisted in
+`data/agente/servicio.json` like the others, so it survives restarts.
 
 Monetization (`studio_monetizacion.py`) turns ads on at
 `/video/<id>/monetization`. Studio then asks for the ad-suitability
