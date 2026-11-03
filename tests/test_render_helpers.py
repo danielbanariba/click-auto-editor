@@ -195,3 +195,51 @@ def test_si_falla_pasar_al_ssd_el_album_vuelve_a_la_cola_y_el_video_se_rescata(
     assert sorted(p.name for p in cola.iterdir()) == ["01 - Tema.mp3", "cover.jpg"]
     assert not (renderizando / "Banda - Disco").exists()
     assert [p.name for p in (temporal.parent / "_rescate").iterdir()] == ["Banda - Disco.mp4"]
+
+
+@pytest.fixture
+def render_con_cpp_que_falla(render_mod, monkeypatch, tmp_path, wav_file):
+    """Renderiza en modo prueba (el del servicio) con un vhs_render que falla con `mensaje`."""
+
+    def renderizar(mensaje):
+        binario = tmp_path / "vhs_render"
+        binario.write_text(f"#!/bin/sh\necho '[Config] GPU: enabled'\necho '{mensaje}' >&2\nexit 1\n")
+        binario.chmod(0o755)
+        monkeypatch.setattr(render_mod, "VHS_CPP_BIN", binario)
+        monkeypatch.setattr(render_mod, "USE_CPP_VHS", True)
+        carpeta = tmp_path / "Banda - Disco"
+        carpeta.mkdir()
+        job = render_mod.RenderJob(
+            original_folder_path=carpeta,
+            folder_name=carpeta.name,
+            folder_path=carpeta,
+            audio_files=[wav_file],
+            cover_main=tmp_path / "cover.jpg",
+            audio_duration=2.0,
+            total_duration=9.0,
+        )
+        return render_mod.render_video(carpeta, carpeta.name, show_progress=True, prepared_job=job)
+
+    return renderizar
+
+
+def test_sin_memoria_en_la_gpu_el_album_no_va_a_error404_y_el_lote_se_frena(
+    render_mod, render_con_cpp_que_falla, capsys
+):
+    # Lo que imprime vhs_render cuando otro programa ocupa la VRAM (visto el 2026-11-03).
+    resultado = render_con_cpp_que_falla(
+        "CUDA error at cpp/src/pipeline/cover_pipeline.cpp:46: out of memory"
+    )
+    assert (resultado.success, resultado.reason) == (False, "gpu_sin_memoria")
+    assert resultado.move_to_error is False
+    assert resultado.stop_requested is True
+    assert "la GPU no tiene memoria libre" in capsys.readouterr().out
+
+
+def test_otra_falla_del_render_cpp_sigue_mandando_el_album_a_error404(
+    render_mod, render_con_cpp_que_falla
+):
+    resultado = render_con_cpp_que_falla("[Error] Caught exception: invalid cover image")
+    assert (resultado.success, resultado.reason) == (False, "cpp")
+    assert resultado.move_to_error is True
+    assert resultado.stop_requested is False

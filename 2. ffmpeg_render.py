@@ -23,6 +23,7 @@ import time
 import sys
 import re
 import shutil
+import tempfile
 import unicodedata
 from mutagen import File as MutagenFile
 from effects.sombra import add_shadow
@@ -198,6 +199,20 @@ def build_storage_stop_result(folder_name: str, reason: str, details: str | None
     return RenderResult(
         success=False,
         reason=reason,
+        stop_requested=True,
+        move_to_error=False,
+    )
+
+
+def build_gpu_stop_result(folder_name: str):
+    # El álbum no tiene la culpa: queda en su carpeta y no se renderiza otro hasta liberar la GPU.
+    print(
+        f"[FATAL] {folder_name}: la GPU no tiene memoria libre (otro programa la está usando). "
+        "El álbum queda en su carpeta y se detiene el lote."
+    )
+    return RenderResult(
+        success=False,
+        reason="gpu_sin_memoria",
         stop_requested=True,
         move_to_error=False,
     )
@@ -2557,33 +2572,38 @@ def run_cpp_command(
         env.update(extra_env)
     if show_progress:
         start_time = time.time()
-        process = subprocess.Popen(
-            cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
         speed_factor = CPP_SPEED_FACTOR or CPP_SPEED_FALLBACK
-        try:
-            while True:
-                if process.poll() is not None:
-                    break
-                if total_duration and folder_name:
-                    elapsed = time.time() - start_time
-                    current_time = min(total_duration * 0.99, elapsed * speed_factor)
-                    print_progress_bar(
-                        current_time, total_duration, elapsed, folder_name
-                    )
-                time.sleep(0.5)
-        except KeyboardInterrupt:
-            process.terminate()
-            raise
+        # El stderr va a un archivo y no a DEVNULL: sin él, un "out of memory" de CUDA
+        # parecía una falla del álbum y lo mandaba a Error404.
+        with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as errores:
+            process = subprocess.Popen(
+                cmd, env=env, stdout=subprocess.DEVNULL, stderr=errores
+            )
+            try:
+                while True:
+                    if process.poll() is not None:
+                        break
+                    if total_duration and folder_name:
+                        elapsed = time.time() - start_time
+                        current_time = min(total_duration * 0.99, elapsed * speed_factor)
+                        print_progress_bar(
+                            current_time, total_duration, elapsed, folder_name
+                        )
+                    time.sleep(0.5)
+            except KeyboardInterrupt:
+                process.terminate()
+                raise
 
-        returncode = process.wait()
+            returncode = process.wait()
+            errores.seek(0)
+            stderr_text = errores.read()
         elapsed = time.time() - start_time
         if total_duration and folder_name:
             print_progress_bar(total_duration, total_duration, elapsed, folder_name)
             print()
         if returncode == 0 and total_duration and elapsed > 0:
             update_cpp_speed(total_duration, elapsed)
-        return returncode, ""
+        return returncode, stderr_text
 
     result = subprocess.run(
         cmd,
@@ -2594,6 +2614,11 @@ def run_cpp_command(
         env=env,
     )
     return result.returncode, result.stderr
+
+
+def is_gpu_out_of_memory(stderr_text: str) -> bool:
+    """La GPU no tenía memoria libre (otro programa la ocupa): no es culpa del álbum."""
+    return bool(stderr_text) and "out of memory" in stderr_text.lower()
 
 
 def is_cuda_failure(stderr_text: str) -> bool:
@@ -2912,6 +2937,10 @@ def render_video_with_cpp(
             print(f"[ERROR] VHS GPU falló en {folder_name}")
             if cpp_stderr:
                 log_verbose(f"STDERR: {cpp_stderr[-500:]}")
+
+        # Sin VRAM libre, los reintentos y el fallback a FFmpeg (NVENC) fallan igual.
+        if is_gpu_out_of_memory(cpp_stderr):
+            return fail_cpp("gpu_sin_memoria")
 
         # Reintento sin overlay si hay error CUDA
         if is_cuda_failure(cpp_stderr) and CUDA_FAIL_FAST:
@@ -3456,6 +3485,8 @@ def render_video(folder_path, folder_name, show_progress=False, prepared_job=Non
                     return RenderResult(success=True)
                 if cpp_error in {"read_only", "no_space"}:
                     return build_storage_stop_result(folder_name, cpp_error)
+                if cpp_error == "gpu_sin_memoria":
+                    return build_gpu_stop_result(folder_name)
                 if cpp_error == "cuda" and DISABLE_CPP_ON_CUDA:
                     try:
                         CUDA_ERROR_FLAG.touch()
