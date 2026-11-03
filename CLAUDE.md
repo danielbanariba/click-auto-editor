@@ -120,8 +120,9 @@ title, the claimants, the `/claims` link, the Studio screenshot and a note that
 the dispute goes out with the reason "Licencia" and the configured text and
 signature. "⚖️ Impugnar" runs `pipeline_agente.py impugnar --video-id <id>` and the
 service reports "Impugné N de M reclamos" with the failures and the `/claims`
-link; "No impugnar" only closes the question. Nothing is disputed without that
-press, and a blacklisted video keeps only the delete question.
+link; "🗑️ Eliminar video" runs `pipeline_agente.py eliminar_video`, as in the
+blacklist question. Nothing is disputed or deleted without that press, and a
+blacklisted video keeps only the delete question.
 
 Disputing (`impugnar`) reuses the recipe of `10. inpunar_video.py`: for each claim
 whose "Tomar medidas" is visible and enabled it opens the form, picks "Licencia",

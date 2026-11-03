@@ -491,16 +491,15 @@ class TestListaNegra(BaseServicio):
 
         self.assertEqual(self.lanzador.lanzados("eliminar_video"), [["eliminar_video", "--video-id", "VID1"]])
 
-    def test_un_video_con_reclamo_fuera_de_la_lista_negra_no_ofrece_eliminarlo(self):
-        # Comportamiento previo: sin coincidencia no se pregunta por borrar el video (también
-        # con el JSON de antes, que no traía el campo). Lo único que se le ofrece es impugnar.
+    def test_un_video_con_reclamo_fuera_de_la_lista_negra_solo_recibe_la_pregunta_de_impugnar(self):
+        # Sin coincidencia (también con el JSON de antes, que no traía el campo) no llega la
+        # pregunta de la lista negra: llega una sola, la de impugnar o eliminar el video.
         for en_lista_negra in ([], None):
             with self.subTest(en_lista_negra=en_lista_negra):
                 self.telegram.mensajes.clear()
                 self.terminar_programar(en_lista_negra)
-                etiquetas = [etiqueta for pregunta in self.preguntas() for etiqueta, _ in pregunta["botones"]]
-                self.assertNotIn(self.ELIMINAR, etiquetas)
-                self.assertNotIn(self.CONSERVAR, etiquetas)
+                botones = [[etiqueta for etiqueta, _ in pregunta["botones"]] for pregunta in self.preguntas()]
+                self.assertEqual(botones, [["⚖️ Impugnar", self.ELIMINAR]])
                 # El resumen de programado sigue llegando una sola vez.
                 resumenes = [m for m in self.telegram.mensajes if "programado para" in m["texto"]]
                 self.assertEqual(len(resumenes), 1, resumenes)
@@ -515,7 +514,7 @@ class TestImpugnarDesdeTelegram(BaseServicio):
     """
 
     IMPUGNAR = "⚖️ Impugnar"
-    NO_IMPUGNAR = "No impugnar"
+    ELIMINAR = "🗑️ Eliminar video"
     ENLACE = "https://studio.youtube.com/video/VID1/claims"
 
     def terminar_programar(self, con_reclamo=True, en_lista_negra=(), reclamantes=("Believe Music", "UMG")):
@@ -546,11 +545,12 @@ class TestImpugnarDesdeTelegram(BaseServicio):
         self.servicio.paso()
 
     def test_pregunta_con_el_video_los_reclamantes_el_link_y_la_captura(self):
-        # Defecto: preguntar sin decir qué video, quién reclama ni dónde mirarlo, o sin
-        # advertir que es una declaración con la licencia y la firma ya configuradas.
+        # Defecto: preguntar sin decir qué video, quién reclama ni dónde mirarlo, sin
+        # advertir que es una declaración con la licencia y la firma ya configuradas, o sin
+        # la opción de borrar el video.
         self.terminar_programar()
         (pregunta,) = self.preguntas()
-        self.assertEqual(self.etiquetas(pregunta), [self.IMPUGNAR, self.NO_IMPUGNAR])
+        self.assertEqual(self.etiquetas(pregunta), [self.IMPUGNAR, self.ELIMINAR])
         self.assertIn("Banda - Disco", pregunta["texto"])
         self.assertIn("Believe Music", pregunta["texto"])
         self.assertIn("UMG", pregunta["texto"])
@@ -574,17 +574,19 @@ class TestImpugnarDesdeTelegram(BaseServicio):
         self.assertEqual(self.lanzador.lanzados("eliminar_video"), [])
         self.assertEqual(self.servicio.estado["preguntas"], {})
 
-    def test_no_impugnar_no_lanza_nada_y_un_impugnar_tardio_se_rechaza(self):
-        # Defecto: que «No impugnar» deje la pregunta abierta y un toque posterior en
-        # «Impugnar» envíe una declaración legal que el usuario decidió no enviar.
+    def test_eliminar_video_borra_ese_video_y_un_impugnar_tardio_se_rechaza(self):
+        # Defecto: que «Eliminar video» no borre nada, borre otro video o además impugne, o
+        # que deje la pregunta abierta y un toque posterior en «Impugnar» envíe una
+        # declaración legal sobre el video que el usuario decidió borrar.
         self.terminar_programar()
         pregunta = self.ultima_pregunta()
 
-        self.telegram.apretar(pregunta, self.NO_IMPUGNAR)
+        self.telegram.apretar(pregunta, self.ELIMINAR)
         self.servicio.paso()
         self.telegram.apretar(pregunta, self.IMPUGNAR)
         self.servicio.paso()
 
+        self.assertEqual(self.lanzador.lanzados("eliminar_video"), [["eliminar_video", "--video-id", "VID1"]])
         self.assertEqual(self.lanzador.lanzados("impugnar"), [])
         self.assertEqual(self.servicio.estado["preguntas"], {})
         self.assertIn("ya no está vigente", self.telegram.respuestas[-1])
