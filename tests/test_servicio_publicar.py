@@ -491,17 +491,209 @@ class TestListaNegra(BaseServicio):
 
         self.assertEqual(self.lanzador.lanzados("eliminar_video"), [["eliminar_video", "--video-id", "VID1"]])
 
-    def test_un_video_con_reclamo_fuera_de_la_lista_negra_no_pregunta_nada(self):
-        # Comportamiento previo: sin coincidencia solo llega el resumen (también con el JSON
-        # de antes, que no traía el campo).
+    def test_un_video_con_reclamo_fuera_de_la_lista_negra_no_ofrece_eliminarlo(self):
+        # Comportamiento previo: sin coincidencia no se pregunta por borrar el video (también
+        # con el JSON de antes, que no traía el campo). Lo único que se le ofrece es impugnar.
         for en_lista_negra in ([], None):
             with self.subTest(en_lista_negra=en_lista_negra):
                 self.telegram.mensajes.clear()
                 self.terminar_programar(en_lista_negra)
-                # El mismo paso puede avisar otras cosas (la cola de álbumes vacía).
-                mensajes = [m for m in self.telegram.mensajes if "Banda - Disco" in m["texto"]]
-                self.assertEqual(len(mensajes), 1, mensajes)
-                self.assertEqual(self.preguntas(), [])
+                etiquetas = [etiqueta for pregunta in self.preguntas() for etiqueta, _ in pregunta["botones"]]
+                self.assertNotIn(self.ELIMINAR, etiquetas)
+                self.assertNotIn(self.CONSERVAR, etiquetas)
+                # El resumen de programado sigue llegando una sola vez.
+                resumenes = [m for m in self.telegram.mensajes if "programado para" in m["texto"]]
+                self.assertEqual(len(resumenes), 1, resumenes)
+                self.lanzador.procesos.clear()
+
+
+class TestImpugnarDesdeTelegram(BaseServicio):
+    """Un video con reclamo fuera de la lista negra: pregunta con botón para impugnarlo.
+
+    Impugnar es una declaración legal a nombre del usuario: nada se impugna sin que apriete
+    el «⚖️ Impugnar» de ese video.
+    """
+
+    IMPUGNAR = "⚖️ Impugnar"
+    NO_IMPUGNAR = "No impugnar"
+    ENLACE = "https://studio.youtube.com/video/VID1/claims"
+
+    def terminar_programar(self, con_reclamo=True, en_lista_negra=(), reclamantes=("Believe Music", "UMG")):
+        resultado = {
+            "ok": True,
+            "video_id": "VID1",
+            "titulo": "Banda - Disco",
+            "con_reclamo": con_reclamo,
+            "reclamantes": list(reclamantes) if con_reclamo else [],
+            "reclamantes_en_lista_negra": list(en_lista_negra),
+            "captura_studio": str(self.tmp / "studio.png"),
+            "monetizacion": {"estado": "omitida", "motivo": "con_reclamo"},
+            "resumen": "⚠️ Banda - Disco\nTiene reclamo: programado para 2028-11-02 10:00.",
+        }
+        self.servicio.lanzar_paso("programar", "--video-id", "VID1", "--esperar")
+        self.lanzador.terminar("programar", resultado)
+        self.servicio.paso()
+
+    def preguntas(self):
+        return [m for m in self.telegram.mensajes if m["botones"]]
+
+    def etiquetas(self, mensaje):
+        return [etiqueta for etiqueta, _ in mensaje["botones"]]
+
+    def lanzar_impugnar(self):
+        self.terminar_programar()
+        self.telegram.apretar(self.ultima_pregunta(), self.IMPUGNAR)
+        self.servicio.paso()
+
+    def test_pregunta_con_el_video_los_reclamantes_el_link_y_la_captura(self):
+        # Defecto: preguntar sin decir qué video, quién reclama ni dónde mirarlo, o sin
+        # advertir que es una declaración con la licencia y la firma ya configuradas.
+        self.terminar_programar()
+        (pregunta,) = self.preguntas()
+        self.assertEqual(self.etiquetas(pregunta), [self.IMPUGNAR, self.NO_IMPUGNAR])
+        self.assertIn("Banda - Disco", pregunta["texto"])
+        self.assertIn("Believe Music", pregunta["texto"])
+        self.assertIn("UMG", pregunta["texto"])
+        self.assertIn(self.ENLACE, pregunta["texto"])
+        self.assertIn("Licencia", pregunta["texto"])
+        self.assertEqual(pregunta["foto"], str(self.tmp / "studio.png"))
+
+    def test_sin_reclamantes_conocidos_pregunta_igual_y_no_deja_una_lista_vacia(self):
+        # Defecto: el usuario contestó «Sí, tiene reclamo» a mano y no hay nombres que mostrar;
+        # no preguntar dejaría ese video sin la opción, y una lista vacía confunde.
+        self.terminar_programar(reclamantes=())
+        (pregunta,) = self.preguntas()
+        self.assertIn("Banda - Disco", pregunta["texto"])
+        self.assertNotIn("•", pregunta["texto"])
+        self.assertIn(self.ENLACE, pregunta["texto"])
+
+    def test_impugnar_lanza_el_paso_de_ese_video_y_nada_mas(self):
+        # Defecto: apretar el botón sin que se impugne nada, o impugnar otro video o borrarlo.
+        self.lanzar_impugnar()
+        self.assertEqual(self.lanzador.lanzados("impugnar"), [["impugnar", "--video-id", "VID1"]])
+        self.assertEqual(self.lanzador.lanzados("eliminar_video"), [])
+        self.assertEqual(self.servicio.estado["preguntas"], {})
+
+    def test_no_impugnar_no_lanza_nada_y_un_impugnar_tardio_se_rechaza(self):
+        # Defecto: que «No impugnar» deje la pregunta abierta y un toque posterior en
+        # «Impugnar» envíe una declaración legal que el usuario decidió no enviar.
+        self.terminar_programar()
+        pregunta = self.ultima_pregunta()
+
+        self.telegram.apretar(pregunta, self.NO_IMPUGNAR)
+        self.servicio.paso()
+        self.telegram.apretar(pregunta, self.IMPUGNAR)
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("impugnar"), [])
+        self.assertEqual(self.servicio.estado["preguntas"], {})
+        self.assertIn("ya no está vigente", self.telegram.respuestas[-1])
+
+    def test_impugnar_dos_veces_seguidas_lanza_un_solo_paso(self):
+        # Defecto: un doble toque en el botón enviaría dos veces la misma declaración legal.
+        self.terminar_programar()
+        pregunta = self.ultima_pregunta()
+        self.telegram.apretar(pregunta, self.IMPUGNAR)
+        self.telegram.apretar(pregunta, self.IMPUGNAR)
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("impugnar"), [["impugnar", "--video-id", "VID1"]])
+
+    def test_un_video_de_la_lista_negra_solo_pregunta_por_eliminarlo(self):
+        # Defecto: sumar la pregunta de impugnar a la de la lista negra: el usuario ya decidió
+        # que ese reclamante no se discute y se le pediría una segunda decisión.
+        self.terminar_programar(en_lista_negra=("Believe Music",))
+        (pregunta,) = self.preguntas()
+        self.assertEqual(self.etiquetas(pregunta), ["Conservar", "🗑️ Eliminar video"])
+        self.assertNotIn(self.IMPUGNAR, self.etiquetas(pregunta))
+
+    def test_un_video_sin_reclamo_no_pregunta_nada(self):
+        # Defecto: ofrecer impugnar un video sin reclamos.
+        self.terminar_programar(con_reclamo=False)
+        self.assertEqual(self.preguntas(), [])
+
+    def test_la_pregunta_sigue_valiendo_tras_reiniciar_el_servicio(self):
+        # Defecto: perder la pregunta (o el id del video) en un reinicio.
+        self.terminar_programar()
+        pregunta = self.ultima_pregunta()
+
+        self.lanzador = LanzadorFalso()
+        self.servicio = self.nuevo_servicio()
+        self.servicio.paso()
+        self.assertEqual(len(self.preguntas()), 1)
+        self.telegram.apretar(pregunta, self.IMPUGNAR)
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("impugnar"), [["impugnar", "--video-id", "VID1"]])
+
+    def test_el_resumen_de_programado_sigue_llegando_antes_de_la_pregunta(self):
+        # Comportamiento previo: el aviso de que el video quedó programado no se pierde.
+        self.terminar_programar()
+        mensajes = [m for m in self.telegram.mensajes if "programado para" in m["texto"]]
+        self.assertEqual(len(mensajes), 1)
+        self.assertFalse(mensajes[0]["botones"])
+        self.assertLess(self.telegram.mensajes.index(mensajes[0]), self.telegram.mensajes.index(self.ultima_pregunta()))
+
+    def terminar_impugnar(self, resultado):
+        self.lanzar_impugnar()
+        self.lanzador.terminar("impugnar", {"video_id": "VID1", "titulo": "Banda - Disco", **resultado})
+        self.servicio.paso()
+        return self.telegram.mensajes[-1]
+
+    def test_informa_cuantos_reclamos_se_impugnaron(self):
+        # Defecto: no decirle al usuario cómo salió, o no mostrar la captura de /claims.
+        aviso = self.terminar_impugnar(
+            {"ok": True, "reclamos": 5, "impugnados": 5, "fallos": [], "captura": str(self.tmp / "claims.png")}
+        )
+        self.assertIn("Impugné 5 de 5", aviso["texto"])
+        self.assertIn("Banda - Disco", aviso["texto"])
+        self.assertEqual(aviso["foto"], str(self.tmp / "claims.png"))
+        self.assertFalse(aviso["botones"])
+
+    def test_un_resultado_parcial_dice_cuantos_salieron_por_que_fallo_y_donde_terminar(self):
+        # Defecto: dar por impugnado todo el video, o callar la causa y el link para terminar
+        # a mano los reclamos que quedaron.
+        aviso = self.terminar_impugnar(
+            {
+                "ok": False,
+                "reclamos": 5,
+                "impugnados": 4,
+                "fallos": [{"motivo": "verificacion_de_identidad", "detalle": "2fa_no_completado (timeout)"}],
+            }
+        )
+        self.assertIn("Impugné 4 de 5", aviso["texto"])
+        self.assertIn("verific", aviso["texto"].lower())
+        self.assertIn(self.ENLACE, aviso["texto"])
+
+    def test_un_envio_no_confirmado_pide_revisar_studio(self):
+        # Defecto: avisar «Impugné» cuando Studio no mostró el reclamo como impugnado.
+        aviso = self.terminar_impugnar(
+            {"ok": False, "reclamos": 2, "impugnados": 0, "fallos": [{"motivo": "no_confirmado", "detalle": "x"}]}
+        )
+        self.assertIn("Impugné 0 de 2", aviso["texto"])
+        self.assertIn("no sé si salió", aviso["texto"])
+        self.assertIn(self.ENLACE, aviso["texto"])
+
+    def test_sin_reclamos_impugnables_dice_que_no_habia_nada_que_impugnar(self):
+        # Defecto: reportar un fallo (o «Impugné 0 de 0») cuando simplemente no había nada.
+        aviso = self.terminar_impugnar({"ok": False, "motivo": "sin_reclamos_impugnables", "reclamos": 0})
+        self.assertIn("no tiene reclamos que se puedan impugnar", aviso["texto"])
+        self.assertNotIn("Impugné", aviso["texto"])
+
+    def test_un_fallo_antes_de_empezar_no_dice_que_se_impugno_algo(self):
+        # Defecto: sin sesión de Studio (o sin respuesta del paso) no hay conteos: el aviso no
+        # debe inventar «Impugné 0 de 0» y sí decir qué pasó y dónde revisar.
+        for resultado, causa in (
+            ({"ok": False, "motivo": "sin_sesion_en_studio"}, "sesión"),
+            ({"ok": False, "motivo": "sin_respuesta", "codigo": -9, "log": "/tmp/x.out"}, "sin_respuesta"),
+        ):
+            with self.subTest(motivo=resultado["motivo"]):
+                aviso = self.terminar_impugnar(resultado)
+                self.assertIn("No pude impugnar", aviso["texto"])
+                self.assertIn(causa, aviso["texto"])
+                self.assertIn(self.ENLACE, aviso["texto"])
+                self.assertNotIn("Impugné", aviso["texto"])
+                self.lanzador.procesos.clear()
+                self.telegram.mensajes.clear()
 
 
 class TestProgramarFallido(BaseServicio):
