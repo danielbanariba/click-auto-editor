@@ -91,8 +91,10 @@ guessing, and a missing session returns `sin_sesion_en_studio`.
 
 The claim rows carry no claimant name. `extract_claimants_from_video`
 (`11. apelacion.py`) waits up to 30 s for the "Ver detalles" buttons, opens each
-one (up to 20 claims), waits for the "Reclamantes" header of its dialog and
-reads the block under it. It is read-only (it never clicks "Tomar medidas") and
+one (up to 20 claims), waits for the visible "Reclamantes" header and reads the
+block under it. Studio keeps every closed dialog in the DOM, hidden, and appends a
+new one per click, so only the visible header counts; a navigation during the wait
+(`/copyright` redirects to `/claims`) is treated as "not ready yet". It is read-only (it never clicks "Tomar medidas") and
 a browser error leaves that claim out instead of stopping the scheduling.
 
 `lista_negra_reclamantes.txt` (project root, one label per line, `#` lines are

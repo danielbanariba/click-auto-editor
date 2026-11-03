@@ -1715,19 +1715,25 @@ def _esperar_botones_ver_detalles(page, timeout_s):
     """Espera a que la lista de reclamos cargue y devuelve cuántos 'Ver detalles' hay.
 
     Devuelve 0 si la página dice que no hay reclamos o si pasa `timeout_s` sin botones.
-    El conteo se da por bueno cuando se repite en dos lecturas seguidas."""
+    El conteo se da por bueno cuando se repite en dos lecturas seguidas. Un error del
+    navegador a mitad de la espera cuenta como «todavía no está»: Studio redirige
+    /copyright a /claims y un `evaluate` que cruza esa navegación pierde su contexto."""
     limite = time.monotonic() + timeout_s
     botones = page.get_by_role("button", name=P_VER_DETALLES_BTN)
     anterior = 0
     while True:
-        total = botones.count()
+        try:
+            total = botones.count()
+            if total == 0 and P_SIN_RECLAMOS.search(
+                page.evaluate("() => (document.body && document.body.innerText) || ''") or ""
+            ):
+                return 0
+        except PlaywrightError as exc:
+            print(f"     [WARN] la página cambió mientras esperaba la lista de reclamos: {exc}")
+            total = 0
         if total > 0 and total == anterior:
             return total
         anterior = total
-        if total == 0:
-            texto = page.evaluate("() => (document.body && document.body.innerText) || ''")
-            if P_SIN_RECLAMOS.search(texto or ""):
-                return 0
         if time.monotonic() >= limite:
             return total
         time.sleep(0.5)
@@ -1747,7 +1753,9 @@ def _leer_reclamantes_de_un_reclamo(page, boton, delay_s):
     """Abre 'Ver detalles' de un reclamo, espera el bloque 'Reclamantes' y cierra el diálogo."""
     boton.scroll_into_view_if_needed(timeout=3000)
     boton.click(timeout=5000)
-    encabezado = page.get_by_text(P_RECLAMANTES_ENCABEZADO).first
+    # Studio deja los diálogos ya cerrados en el DOM, ocultos, y agrega uno nuevo en cada
+    # «Ver detalles»: solo cuenta el encabezado del diálogo que está abierto.
+    encabezado = page.get_by_text(P_RECLAMANTES_ENCABEZADO).filter(visible=True).last
     try:
         try:
             encabezado.wait_for(state="visible", timeout=ESPERA_DIALOGO_S * 1000)
