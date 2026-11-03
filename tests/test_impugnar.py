@@ -147,8 +147,10 @@ async function enviar() {
   const texto = $("texto").value, firma = $("firma").value;
   if (marcadas < 3) { $("aviso").textContent = "Marca todas las casillas anteriores para enviar"; return; }
   if (!texto.trim() || !firma.trim()) { $("aviso").textContent = "Faltan campos obligatorios"; return; }
-  await fetch("/_enviar", {method: "POST", body: JSON.stringify({
+  const respuesta = await fetch("/_enviar", {method: "POST", body: JSON.stringify({
     indice: est.indice, motivo: est.motivo, permiso: !!est.permiso, texto, firma, declaraciones: marcadas})});
+  // Como en vivo: a veces Studio deja el formulario abierto tras "Enviar", sin ningún error.
+  if ((await respuesta.json()).queda_abierto) return;
   dlg.hidden = true;
   dlg.innerHTML = "";
 }
@@ -191,11 +193,17 @@ class StudioFalso:
         verificacion_tras=None,
         sin_sesion=False,
         pagina_de_error=None,
+        envios=None,
     ):
         self.reclamos = reclamos  # [{"cancion": ..., "impugnado": bool}]
         self.titulo = titulo
         self.carga_ms = carga_ms
         self.acepta_envios = acepta_envios  # False: Studio cierra el formulario pero no lo registra
+        # Lo que hace Studio con el envío n (contado desde 1), si no es lo de siempre (cerrar el
+        # formulario y registrarlo): "queda_abierto", "registra", "cargas_sin_mostrar" (cuántas
+        # cargas de /claims siguen sin mostrarlo) y "reclamo_nuevo" (uno que llega con el envío).
+        self.envios = envios or {}
+        self.por_mostrar = []  # [índice, cargas de /claims que faltan para mostrarlo impugnado]
         # Con N impugnaciones ya aceptadas, el siguiente "Continuar" pide "Verifica que eres tú".
         self.verificacion_tras = verificacion_tras
         self.sin_sesion = sin_sesion
@@ -209,6 +217,16 @@ class StudioFalso:
     def impugnados(self):
         return sum(1 for reclamo in self.reclamos if reclamo["impugnado"])
 
+    def mostrar_lo_registrado(self):
+        """Una carga de /claims: muestra lo registrado cuya demora pasó y descuenta la del resto."""
+        pendientes = []
+        for indice, cargas in self.por_mostrar:
+            if cargas:
+                pendientes.append([indice, cargas - 1])
+            else:
+                self.reclamos[indice]["impugnado"] = True
+        self.por_mostrar = pendientes
+
     def atender(self, ruta):
         url = ruta.request.url
         if url.endswith("/_paso"):
@@ -217,9 +235,16 @@ class StudioFalso:
         if url.endswith("/_enviar"):
             datos = json.loads(ruta.request.post_data)
             self.enviados.append(datos)
-            if self.acepta_envios:
-                self.reclamos[datos["indice"]]["impugnado"] = True
-            return ruta.fulfill(status=200, body="{}", content_type="application/json")
+            envio = {"registra": self.acepta_envios, **self.envios.get(len(self.enviados), {})}
+            if envio["registra"]:
+                if envio.get("cargas_sin_mostrar"):
+                    self.por_mostrar.append([datos["indice"], envio["cargas_sin_mostrar"]])
+                else:
+                    self.reclamos[datos["indice"]]["impugnado"] = True
+            if "reclamo_nuevo" in envio:
+                self.reclamos.append(envio["reclamo_nuevo"])
+            respuesta = json.dumps({"queda_abierto": envio.get("queda_abierto", False)})
+            return ruta.fulfill(status=200, body=respuesta, content_type="application/json")
         if self.sin_sesion:
             return ruta.fulfill(status=302, headers={"location": "https://accounts.google.com/v3/signin"})
         self.urls.append(url)
@@ -230,6 +255,8 @@ class StudioFalso:
             return ruta.fulfill(status=200, body=redireccion, content_type="text/html; charset=utf-8")
         if self.pagina_de_error == "siempre" or (self.pagina_de_error == "tras_enviar" and self.enviados):
             return ruta.fulfill(status=200, body=PAGINA_DE_ERROR, content_type="text/html; charset=utf-8")
+        if url.endswith("/claims"):
+            self.mostrar_lo_registrado()
         verificacion = self.verificacion_tras is not None and self.impugnados() >= self.verificacion_tras
         html = (
             PAGINA.replace("__RECLAMOS__", json.dumps(self.reclamos))
@@ -263,6 +290,10 @@ def reclamo(cancion, impugnado=False):
     return {"cancion": cancion, "impugnado": impugnado}
 
 
+# Lo visto en vivo: tras "Enviar" el formulario queda abierto, sin error, y Studio no registra nada.
+FORMULARIO_ABIERTO = {"queda_abierto": True, "registra": False}
+
+
 class TestImpugnar(unittest.TestCase):
     def setUp(self):
         if sync_playwright is None:
@@ -293,6 +324,7 @@ class TestImpugnar(unittest.TestCase):
             mock.patch.object(pa, "INTENTOS_CONFIRMAR_IMPUGNACION", 2),
             mock.patch.object(pa, "ESPERA_CONFIRMAR_IMPUGNACION_S", 0.2),
             mock.patch.object(pa, "PAUSA_REINTENTO_NAVEGACION_S", 0.1),
+            mock.patch.object(pa, "PAUSA_REINTENTO_IMPUGNAR_S", 0.1),
         ]
         for parche in parches:
             parche.start()
@@ -364,9 +396,10 @@ class TestImpugnar(unittest.TestCase):
         # Sin pestañas olvidadas con un formulario a medio llenar.
         self.assertEqual(len(self.contexto.pages), 1)
 
-    def test_si_studio_no_registra_el_envio_es_no_confirmado_y_no_se_reintenta(self):
-        # Defecto: dar la impugnación por hecha sin mirar Studio, o reintentar: la declaración
-        # legal saldría dos veces o por reclamos que Studio nunca marcó.
+    def test_si_studio_cierra_el_formulario_pero_no_lo_muestra_no_se_reintenta(self):
+        # Defecto: dar la impugnación por hecha sin mirar Studio, o reintentar un envío que
+        # Studio tomó (cerró el formulario) y quizá solo tarda en mostrar: la declaración legal
+        # saldría dos veces.
         studio = StudioFalso([reclamo("Canción A"), reclamo("Canción B")], acepta_envios=False)
         resultado = self.impugnar(studio)
         self.assertFalse(resultado["ok"])
@@ -375,10 +408,86 @@ class TestImpugnar(unittest.TestCase):
         self.assertEqual(fallo["motivo"], "no_confirmado")
         self.assertEqual(len(studio.enviados), 1)  # ni reintento ni segundo reclamo
 
+    def test_si_el_formulario_queda_abierto_se_reintenta_y_sigue_con_los_demas(self):
+        # Defecto (visto en vivo): Studio a veces deja el formulario abierto tras "Enviar", sin
+        # error y sin registrar nada; el paso frenaba ahí y el video quedaba a medio impugnar
+        # (Mormon Mincers, 2 de 22). Reintentar ese reclamo tras una pausa lo registra.
+        studio = StudioFalso(
+            [reclamo("Canción A"), reclamo("Canción B"), reclamo("Canción C")],
+            envios={2: FORMULARIO_ABIERTO},
+        )
+        resultado = self.impugnar(studio)
+        self.assertEqual(
+            (resultado["ok"], resultado["reclamos"], resultado["impugnados"], resultado["fallos"]),
+            (True, 3, 3, []),
+        )
+        # Solo B sale dos veces: A, ya registrado, no se vuelve a impugnar.
+        self.assertEqual([enviado["indice"] for enviado in studio.enviados], [0, 1, 1, 2])
+        self.assertEqual(studio.impugnados(), 3)
+
+    def test_si_el_reintento_tampoco_sale_frena_sin_otro_intento(self):
+        # Defecto: reintentar sin tope, o pasar al reclamo siguiente con uno sin impugnar.
+        studio = StudioFalso(
+            [reclamo("Canción A"), reclamo("Canción B")],
+            envios={1: FORMULARIO_ABIERTO, 2: FORMULARIO_ABIERTO},
+        )
+        resultado = self.impugnar(studio)
+        self.assertFalse(resultado["ok"])
+        self.assertEqual((resultado["reclamos"], resultado["impugnados"]), (2, 0))
+        self.assertEqual([fallo["motivo"] for fallo in resultado["fallos"]], ["no_confirmado"])
+        self.assertEqual([enviado["indice"] for enviado in studio.enviados], [0, 0])
+
+    def test_si_studio_lo_registra_durante_la_pausa_no_lo_reenvia(self):
+        # Defecto: reenviar sin volver a mirar /claims tras la pausa. Si Studio mostró tarde el
+        # primer envío, el reintento salía para el reclamo siguiente y desde ahí cada envío
+        # repetía un reclamo ya impugnado.
+        demorado = {"queda_abierto": True, "registra": True, "cargas_sin_mostrar": 2}
+        studio = StudioFalso(
+            [reclamo("Canción A"), reclamo("Canción B"), reclamo("Canción C")], envios={1: demorado}
+        )
+        resultado = self.impugnar(studio)
+        self.assertEqual(
+            (resultado["ok"], resultado["reclamos"], resultado["impugnados"], resultado["fallos"]),
+            (True, 3, 3, []),
+        )
+        self.assertEqual([enviado["indice"] for enviado in studio.enviados], [0, 1, 2])
+
+    def test_si_studio_lo_muestra_mientras_se_abre_el_reintento_no_lo_reenvia(self):
+        # Defecto: mirar /claims solo tras la pausa. Si Studio mostraba el primer envío justo
+        # después, la pestaña del reintento abría el reclamo siguiente y lo enviaba como si
+        # fuera el mismo; con ese también demorado, salía dos veces.
+        demorado = {"queda_abierto": True, "registra": True, "cargas_sin_mostrar": 3}
+        studio = StudioFalso(
+            [reclamo("Canción A"), reclamo("Canción B"), reclamo("Canción C")], envios={1: demorado}
+        )
+        resultado = self.impugnar(studio)
+        self.assertEqual(
+            (resultado["ok"], resultado["reclamos"], resultado["impugnados"], resultado["fallos"]),
+            (True, 3, 3, []),
+        )
+        self.assertEqual([enviado["indice"] for enviado in studio.enviados], [0, 1, 2])
+
+    def test_si_llega_un_reclamo_nuevo_con_el_envio_no_se_reintenta(self):
+        # Defecto: con el envío registrado y un reclamo nuevo, /claims muestra la misma cantidad
+        # de reclamos impugnables. Un reintento impugnaba otro reclamo y, al final, también el
+        # nuevo, que no estaba al empezar.
+        studio = StudioFalso(
+            [reclamo("Canción A"), reclamo("Canción B"), reclamo("Canción C")],
+            envios={1: {"queda_abierto": True, "registra": True, "reclamo_nuevo": reclamo("Canción D")}},
+        )
+        resultado = self.impugnar(studio)
+        self.assertFalse(resultado["ok"])
+        self.assertEqual([fallo["motivo"] for fallo in resultado["fallos"]], ["no_confirmado"])
+        self.assertEqual([enviado["indice"] for enviado in studio.enviados], [0])
+
     def test_si_tras_enviar_la_lista_no_carga_no_se_da_por_impugnado(self):
         # Defecto: con un solo reclamo, una página de error sin filas se leía como "0 reclamos
         # impugnables" y la impugnación se daba por hecha aunque Studio no la registró.
-        studio = StudioFalso([reclamo("Canción A")], acepta_envios=False, pagina_de_error="tras_enviar")
+        # El formulario queda abierto, como cuando sí se reintenta: sin la lista no hay prueba
+        # de que el envío no salió, así que tampoco se reintenta.
+        studio = StudioFalso(
+            [reclamo("Canción A")], envios={1: FORMULARIO_ABIERTO}, pagina_de_error="tras_enviar"
+        )
         with mock.patch.object(pa, "ESPERA_RESULTADO_RECLAMOS_S", 1):
             resultado = self.impugnar(studio)
         self.assertFalse(resultado["ok"])
