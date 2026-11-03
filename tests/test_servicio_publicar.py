@@ -449,6 +449,20 @@ class TestListaNegra(BaseServicio):
         self.assertIn("error_api", aviso)
         self.assertIn("https://studio.youtube.com/video/VID1/edit", aviso)
 
+    def test_si_el_video_ya_no_existe_el_aviso_no_dice_que_sigue_en_youtube(self):
+        # Defecto: decir «Sigue en YouTube» de un video que YouTube ya no tiene
+        # (borrado a mano, o borrado en un intento cuya respuesta se perdió).
+        self.terminar_programar()
+        self.telegram.apretar(self.ultima_pregunta(), self.ELIMINAR)
+        self.servicio.paso()
+        self.lanzador.terminar("eliminar_video", {"ok": False, "motivo": "no_existe", "video_id": "VID1"})
+        self.servicio.paso()
+
+        aviso = self.telegram.mensajes[-1]["texto"]
+        self.assertIn("VID1", aviso)
+        self.assertIn("ya no está en YouTube", aviso)
+        self.assertNotIn("Sigue en YouTube", aviso)
+
     def test_conservar_cierra_la_pregunta_y_un_boton_viejo_ya_no_borra(self):
         # Defecto: que «Conservar» deje la pregunta abierta y un toque posterior en
         # «Eliminar video» borre un video que el usuario decidió conservar.
