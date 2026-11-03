@@ -94,6 +94,13 @@ one (up to 20 claims), waits for the "Reclamantes" header of its dialog and
 reads the block under it. It is read-only (it never clicks "Tomar medidas") and
 a browser error leaves that claim out instead of stopping the scheduling.
 
+`lista_negra_reclamantes.txt` (project root, one label per line, `#` lines are
+ignored) is the claimant blacklist. For a claimed video, `programar` checks each
+claimant line against it, case-insensitively and by containment ("umg" matches
+"Believe Music, UMG"), and returns the matches in `reclamantes_en_lista_negra`.
+The match never changes the schedule: the video still goes two years ahead. A
+missing or unreadable file means no matches.
+
 Monetization (`studio_monetizacion.py`) turns ads on at
 `/video/<id>/monetization`. Studio then asks for the ad-suitability
 questionnaire; its answers cannot be changed afterwards. The user's decision

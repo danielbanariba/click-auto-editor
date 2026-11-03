@@ -859,6 +859,61 @@ class TestProgramar(unittest.TestCase):
         self.assertEqual(status["privacyStatus"], "public", status)
         self.assertLessEqual(datetime.fromisoformat(resultado["publica_en"]), ahora_al_enviar)
 
+    def programar_con_reclamantes(self, reclamantes, lista_negra="umg\n"):
+        """`programar` revisando Studio: el video tiene reclamo de `reclamantes`."""
+        archivo = self.tmp / "lista_negra_reclamantes.txt"
+        if lista_negra is not None:
+            archivo.write_text(lista_negra, encoding="utf-8")
+        subido = datetime.now().astimezone() - timedelta(hours=3)
+        pa.registrar_pendiente("V1", "Banda - Album", "Banda - Album", subido)
+        youtube = YouTubeFalso(["succeeded"])
+        with (
+            mock.patch.object(pa, "LISTA_NEGRA_RECLAMANTES", archivo),
+            mock.patch.object(pa.time, "sleep"),
+        ):
+            resultado = pa.programar(
+                "V1",
+                esperar=True,
+                revisar=lambda video_id: {"estado": "con_reclamo", "reclamantes": reclamantes},
+                activar=monetizacion_activada,
+                uploader=uploader_para_programar(youtube),
+            )
+        self.assertTrue(resultado["ok"], resultado)
+        return resultado, youtube
+
+    def assertProgramadoDosAniosAdelante(self, resultado, youtube):
+        publica_en = datetime.fromisoformat(resultado["publica_en"])
+        self.assertEqual(publica_en.year, datetime.now().astimezone().year + 2)
+        status = youtube.videos_falsos.actualizaciones[0]["status"]
+        self.assertEqual((status["privacyStatus"], status["publishAt"]), ("private", resultado["publica_en"]))
+
+    def test_un_reclamante_de_la_lista_negra_viaja_en_el_resultado_y_el_video_sigue_dos_anios_adelante(self):
+        # Defecto: no cruzar a los reclamantes con la lista negra (el servicio no se enteraría),
+        # o dejar que la coincidencia cambie la fecha: borrar el video es decisión del usuario.
+        resultado, youtube = self.programar_con_reclamantes(
+            ["Believe Music", "Believe Music, UMG", "en nombre de Church Road Records"]
+        )
+        self.assertEqual(resultado["reclamantes_en_lista_negra"], ["Believe Music, UMG"])
+        self.assertEqual(
+            resultado["reclamantes"],
+            ["Believe Music", "Believe Music, UMG", "en nombre de Church Road Records"],
+        )
+        self.assertProgramadoDosAniosAdelante(resultado, youtube)
+
+    def test_reclamantes_fuera_de_la_lista_negra_no_se_marcan_y_el_video_sigue_dos_anios_adelante(self):
+        # Comportamiento previo: un video con reclamo de un sello que no está en la lista
+        # se programa igual que siempre y no genera ningún aviso nuevo.
+        resultado, youtube = self.programar_con_reclamantes(["Believe Music"])
+        self.assertEqual(resultado["reclamantes_en_lista_negra"], [])
+        self.assertEqual(resultado["reclamantes"], ["Believe Music"])
+        self.assertProgramadoDosAniosAdelante(resultado, youtube)
+
+    def test_sin_el_archivo_de_la_lista_negra_el_video_se_programa_igual(self):
+        # Defecto: que un archivo borrado o ilegible frene la programación del video.
+        resultado, youtube = self.programar_con_reclamantes(["Believe Music, UMG"], lista_negra=None)
+        self.assertEqual(resultado["reclamantes_en_lista_negra"], [])
+        self.assertProgramadoDosAniosAdelante(resultado, youtube)
+
     def programar_sin_reclamo(self, youtube, programados=()):
         resultado = pa.programar(
             "V1",

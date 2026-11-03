@@ -51,6 +51,7 @@ DIR_AGENTE = PROJECT_ROOT / "data" / "agente"
 PENDIENTES_JSON = DIR_AGENTE / "pendientes.json"
 PROGRAMADOS_JSONL = DIR_AGENTE / "programados.jsonl"
 DIR_CAPTURAS = DIR_AGENTE / "capturas"
+LISTA_NEGRA_RECLAMANTES = PROJECT_ROOT / "lista_negra_reclamantes.txt"
 DIR_LOGS = DIR_AGENTE / "logs"
 RAICES_BORRABLES = (DIR_RENDERIZANDO, DIR_UPLOAD)
 
@@ -1181,6 +1182,24 @@ def momentos_tomados(uploader, yt, ahora, con_reclamo):
     return tomados
 
 
+def cargar_lista_negra():
+    """Las entradas de la lista negra en minúscula; [] si el archivo falta o no se puede leer."""
+    return apelacion_agente().parse_filtros_reclamante_archivo(LISTA_NEGRA_RECLAMANTES)
+
+
+def reclamantes_en_lista_negra(reclamantes, lista_negra):
+    """Los reclamantes cuyo texto contiene alguna entrada de la lista, sin distinguir mayúsculas.
+
+    Studio los muestra como «Believe Music, UMG» o «UMG | en nombre de X»: por eso es
+    «contiene» y no igualdad. Las entradas ya vienen en minúscula y sin vacías.
+    """
+    return [
+        reclamante
+        for reclamante in reclamantes
+        if any(entrada in reclamante.lower() for entrada in lista_negra)
+    ]
+
+
 def armar_resumen_programado(
     titulo, publica_en, con_reclamo, reclamantes, monetizacion=None, publicado_ahora=False
 ):
@@ -1261,6 +1280,10 @@ def programar(
                     reclamantes = revision.get("reclamantes", [])
                 else:
                     con_reclamo = reclamo
+                # Solo avisa: la fecha no cambia, borrar el video lo decide el usuario.
+                en_lista_negra = []
+                if con_reclamo and reclamantes:
+                    en_lista_negra = reclamantes_en_lista_negra(reclamantes, cargar_lista_negra())
 
                 # Con reclamo el video no genera ingresos: no se intenta activar nada.
                 if con_reclamo:
@@ -1307,6 +1330,7 @@ def programar(
         "titulo": titulo,
         "con_reclamo": con_reclamo,
         "reclamantes": reclamantes,
+        "reclamantes_en_lista_negra": en_lista_negra,
         "publica_en": publica_en.isoformat(),
         "publicado_ahora": publicado_ahora,
         "monetizacion": monetizacion,

@@ -1,0 +1,166 @@
+# Lista negra de reclamantes: si un reclamo de Content ID coincide con alguna
+# entrada (sin distinguir mayúsculas, como parte del nombre), el servicio de
+# publicación avisa por Telegram con un botón para eliminar el video.
+# Una entrada por línea; las líneas con # se ignoran.
+# Copiada de scrapper-deathgrind/lista_sello.txt (31ffe46, 160 sellos).
+2024 Wormholedeath Records
+AFM Records
+Aftermath Music
+Agonia Records
+Agonia
+Albergue Estudio
+Altafonte Network S.L.
+Apocalyptic Salvation
+Apocalyptic Witchcraft
+Apostasy Records
+Apostasy
+Artistfy Music
+Baphomet Records
+Bizarre Leprous Productions
+Blood Harvest
+Brutal West Coast
+CCP Records
+CMA Digital Music
+Candlelight
+Carnage BRA Records
+Carnage BRA
+Casket Music
+Century Media Records
+Century Media
+Cesspit Records 
+Cesspit
+Clavis Secretorvm
+Comatose Music 
+Coyote Records
+Coyote
+Copro Records
+Copro
+Crash Music
+Criminal Attack Records
+Criminal Attack
+Christian Metal Underground
+DIY PROD
+Darkspell
+Dark Descent Records
+Deathgasm Records
+Deciphering the Luciferian
+Deepsend Records
+Deer Head Family
+Demonhood Productions
+Detest
+Discos Fuentes
+Dissident Records
+Dissonance Productions
+Downfall Records
+El Santo Asesino
+Elegy Records
+Entire album
+Emanzipation Producitons
+Everlasting Spew Records
+Firebox Music
+Gate of Horror
+Gore House Productions
+Grindethic Records
+Harvest the Murdered
+HateWorks
+Hellsign
+Heavy Metal Rock
+Housecore Records
+Hostile Media
+Horror Pain Gore Death Productions
+Ibex Moon Records
+Jakob Sture Winnem Larsen
+Karisma
+Karmageddon Media
+Lifeforce Records
+Listenable records
+Long Branch Records
+M-Theory Audio
+MMD Records
+Markus Bugert
+Metal Age Productions 
+Metal Blade Records
+Metal Blade Records Records
+Misanthropik Records Promotion And More LLC
+More Hate Productions
+Moribund Records
+Musgo Distro
+Muggeseggel
+Musikorama Music Records
+My Fate Music
+My Kingdom Music
+Napalm Records
+Napalm Records Handels GmbH
+Nemoris
+Night Shift & Barbaric Brutality
+Nocturnal Bleed
+NoiseArt Records
+Nooirax Producciones
+Nuclear Blast
+Nuclear War Now
+Pagan Records
+Pain Patterns
+Pathologically Explicit Recordings
+Pathos Productions
+Peaceville Records
+Prc Music
+Problematic
+Problematic Records
+Pulverised Records
+Punishment 18 Records
+RUMF ProductionsRe-Armed
+Red Stream Records
+Relapse Records
+Resist Records
+Rising Records
+Roadie Metal
+Rottenpyosis Records 膿膿唱片
+Sadistic Christ
+Saidon
+SOM DE PESO
+Soulcide
+Scarlet Records
+Scumfusion
+Season of Mist
+Sevared Records
+Sevared
+Sliptrick Records
+SoNo Recording Group LLC
+Solemn Vision
+Sosound Records
+Soulflesh Collector Records
+Spinefarm FI
+Suburban Music Group
+Transcending Obscurity Records
+Translation Loss Records
+Tribunal Records
+Time To Kill Records
+UMG
+Underworld Records
+Ungodly Ruins Productions 
+Unique Leader Records
+Victory Records
+Victory
+ViciSolum Productions
+Violent Journey Records
+Violent Journey
+Vision of God Records
+War March Records
+Willowtip Records 
+Woodcut Records
+Wormholedeath Japan
+Wvmb Eviction Records
+Xtreem Music
+eOne Music
+earMUSIC
+Rakamarow Records
+Rakamarow
+Reality Fade
+Respective band / label
+Dead Carnage
+Helevorn 
+Ophis
+Evadne
+Meuse Music Records
+Yusuke Sumita
+Outliar
