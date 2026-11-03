@@ -109,7 +109,8 @@ that video with its title, the matching claimants, the `/video/<id>/claims` link
 and the Studio screenshot (`captura_studio`). "Conservar" only closes the
 question. "🗑️ Eliminar video" runs `pipeline_agente.py eliminar_video`, which
 checks the video exists, calls `videos.delete` through `ejecutar_api` and prints
-one JSON line; the service reports the result. Deleting cannot be undone, so
+one JSON line; the service reports the result. A video that is already gone
+(`no_existe`) is reported as already deleted, not as a failure. Deleting cannot be undone, so
 nothing deletes a video without that button press. The question is persisted in
 `data/agente/servicio.json` like the others, so it survives restarts.
 

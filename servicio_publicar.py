@@ -553,6 +553,10 @@ class Servicio:
         if resultado.get("ok"):
             self.avisar(f"🗑 Borré el video \"{resultado.get('titulo') or video_id}\" de YouTube.")
             return
+        if resultado.get("motivo") == "no_existe":
+            # Ya lo habían borrado (a mano, o un intento cuya respuesta se perdió).
+            self.avisar(f"ℹ️ El video {video_id} ya no está en YouTube: ya estaba borrado.")
+            return
         self.avisar(
             f"❌ No pude borrar el video {video_id} ({resultado.get('motivo')}). Sigue en YouTube; "
             f"se puede borrar a mano en Studio:\nhttps://studio.youtube.com/video/{video_id}/edit"
