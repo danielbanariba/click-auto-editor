@@ -57,6 +57,13 @@
    - `10. inpunar_video.py` y `11. apelacion.py`: automatizan reclamos en YouTube Studio con Playwright.
    - `analisis_canal/`: extrae datos y genera reportes del canal.
 
+## Publicación con aprobación por Telegram
+`servicio_publicar.py` corre como servicio de systemd (`publicar-albumes`) y publica un álbum por vez. No sube nada hasta que se aprieta **Subir** en Telegram. Después decide solo:
+- Con reclamo de copyright, programa el video para dentro de dos años.
+- Sin reclamo, activa la monetización en Studio y lo publica en el momento, o una hora después del último video si otro salió o está programado a menos de una hora.
+
+![Publicación con aprobación por Telegram](docs/publicacion.svg)
+
 ## Instalacion rapida
 ```sh
 pip install -r requirements.txt
