@@ -680,10 +680,27 @@ class Servicio:
         self.avisar(texto, foto=foto)
 
     def tras_apelar(self, resultado, argumentos):
-        """Avisa qué se mandó; si no hubo nada que apelar, no manda nada."""
+        """Avisa qué se mandó y qué resolvió YouTube; si no hubo nada, no manda nada."""
         videos = resultado.get("videos") or []
+        resueltos = resultado.get("resultados") or []
         fallos = resultado.get("fallos") or []
+
+        def renglones(lista):
+            return [
+                f"• {v.get('titulo') or v['video_id']} ({TIPOS_APELACION[v['tipo']]})\n"
+                f"  https://studio.youtube.com/video/{v['video_id']}/edit"
+                for v in lista
+            ]
+
         lineas = []
+        for estado, encabezado in (
+            ("rechazada", "❌ YouTube rechazó la apelación:"),
+            ("aceptada", "🎉 YouTube aceptó la apelación (el video salió de la lista de Studio):"),
+        ):
+            hechos = [r for r in resueltos if r.get("resultado") == estado]
+            if hechos:
+                lineas.append(encabezado)
+                lineas += renglones(hechos)
         for estado, encabezado in (
             ("enviado", "✅ Apelé en hebreo:"),
             ("no_confirmado", "⚠️ Lo envié pero Studio no mostró que llegó (revísalo):"),
@@ -696,11 +713,7 @@ class Servicio:
             hechos = [v for v in videos if v.get("estado") == estado]
             if hechos:
                 lineas.append(encabezado)
-                lineas += [
-                    f"• {v.get('titulo') or v['video_id']} ({TIPOS_APELACION[v['tipo']]})\n"
-                    f"  https://studio.youtube.com/video/{v['video_id']}/edit"
-                    for v in hechos
-                ]
+                lineas += renglones(hechos)
         ya_apelados = sum(1 for v in videos if v.get("estado") == "ya_apelado")
         if ya_apelados:
             lineas.append(f"ℹ️ {ya_apelados} ya tenían una apelación y Studio no deja otra: no les mandé nada.")
@@ -710,11 +723,16 @@ class Servicio:
                 f"ℹ️ {sin_opcion} con anuncios limitados no tienen «Ver comentarios» (sin revisión manual): "
                 "no les mandé nada."
             )
-        if fallos:
-            lineas.append("❌ No pude apelar (no envié nada; lo intento de nuevo mañana):")
-            for fallo in fallos:
-                causa = MOTIVOS_APELACION.get(fallo.get("motivo")) or fallo.get("motivo")
-                lineas.append(f"• {fallo.get('titulo') or fallo.get('video_id')}: {causa}")
+        for revision, encabezado in (
+            (False, "❌ No pude apelar (no envié nada; lo intento de nuevo mañana):"),
+            (True, "❌ No pude ver cómo va la apelación (lo miro de nuevo mañana):"),
+        ):
+            de_este_tipo = [f for f in fallos if bool(f.get("revision")) == revision]
+            if de_este_tipo:
+                lineas.append(encabezado)
+                for fallo in de_este_tipo:
+                    causa = MOTIVOS_APELACION.get(fallo.get("motivo")) or fallo.get("motivo")
+                    lineas.append(f"• {fallo.get('titulo') or fallo.get('video_id')}: {causa}")
         motivo = resultado.get("motivo")
         if motivo:
             causa = MOTIVOS_APELACION.get(motivo) or motivo

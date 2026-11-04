@@ -1764,7 +1764,8 @@ def apelar(sin_enviar=False, limite=LIMITE_APELACIONES, abrir_studio=pagina_de_s
     """Apela en hebreo la restricción de edad y los anuncios limitados de los videos del canal.
 
     Lo lanza el servicio una vez por día. Cada video queda en APELACIONES_JSON antes de
-    pulsar el envío y no se vuelve a tocar; `sin_enviar` es la prueba en seco.
+    pulsar el envío y nunca se le manda nada otra vez; lo enviado solo se vuelve a mirar para
+    anotar qué resolvió YouTube. `sin_enviar` es la prueba en seco.
     """
     import studio_apelaciones
 

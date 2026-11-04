@@ -210,12 +210,24 @@ characters):
 
 `data/agente/apelaciones.json` keeps one entry per `<tipo>:<video_id>`. Each one is
 written before the send button is pressed (`enviando`), so a cut or crash never sends
-twice, and a video in that file is never touched again. A send whose form does not
-close is `no_confirmado`. It sends at most `LIMITE_APELACIONES` (10) per run, age
+twice, and nothing is ever sent twice to a video in that file. A send whose form does
+not close is `no_confirmado`. It sends at most `LIMITE_APELACIONES` (10) per run, age
 first. It runs under the `programar` lock and stops after 3 failures in a row. The
 "Revisar un problema" dialog does not close with Escape: it is closed with its X and
 then "Salir". The service reports what was sent, what was not confirmed and what failed
 in one Telegram message, and stays silent when there was nothing to appeal.
+
+The same daily walk follows up what was sent (`enviando`, `enviado`, `no_confirmado`
+with no `resultado`), also after the send limit is reached. For age, it opens the
+problem dialog and only reads it: a first line "Apelación rechazada" is `rechazada`.
+Limited ads have no formal rejection. A followed-up video that is no longer in a list
+walked to its last page is `aceptada` (an empty list proves nothing, so nothing is
+accepted from it). The result is written to the entry (`resultado`, `detalle_resultado`,
+`fecha_resultado`) and reported once in the same Telegram message, with the Studio link.
+A follow-up that cannot be read is listed apart ("No pude ver cómo va la apelación") and
+does not count toward the 3 failures that stop the run. The follow-up opens the tooltip's
+cause or "Revisar y tomar medidas", which only opens the problem dialog (not the "Tomar
+medidas" of `/claims`), and presses nothing in it.
 
 ### Common commands
 
