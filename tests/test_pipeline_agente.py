@@ -1,4 +1,5 @@
 import contextlib
+import fcntl
 import http.client
 import io
 import json
@@ -1086,6 +1087,71 @@ class TestProgramar(unittest.TestCase):
         self.assertEqual(len(horas), 2, horas)
 
 
+    def programar_un_video_que_la_api_no_ve(self, retiro):
+        """`programar` de un video que `videos.list` no devuelve; `retiro` es lo que lee Studio."""
+        registro = self.tmp / "ya_publicados.tsv"
+        pa.registrar_pendiente("V1", "🇩🇪 Banda - Disco (2025)", "Banda - Disco (2025)", datetime.now().astimezone())
+        bloqueado_al_leer = []
+
+        def leer_retiro(video_id):
+            # El perfil de Studio se comparte: la lectura va dentro del candado de `programar`.
+            with open(self.tmp / "programar.lock", "w", encoding="utf-8") as candado:
+                try:
+                    fcntl.flock(candado, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    bloqueado_al_leer.append(False)
+                except BlockingIOError:
+                    bloqueado_al_leer.append(True)
+            return retiro
+
+        youtube = SimpleNamespace(videos=lambda: SimpleNamespace(list=lambda part, id: Llamada({"items": []})))
+        with mock.patch.object(pa, "REGISTRO_PUBLICADOS", registro):
+            resultado = pa.programar(
+                "V1", esperar=True, leer_retiro=leer_retiro, uploader=uploader_para_programar(youtube)
+            )
+        return resultado, registro, bloqueado_al_leer
+
+    def test_una_copia_de_un_video_retirado_sale_de_pendientes_y_su_album_queda_registrado(self):
+        # Defecto: dejarlo en pendientes (se relanza en cada reinicio y nunca se publica), no
+        # anotar el álbum (se vuelve a renderizar y a subir) o perder lo que dijo Studio.
+        retiro = {
+            "estado": "copia_retirada",
+            "detalle": ["De: Naked Whipper Official"],
+            "captura_studio": "/tmp/retiro_V1.png",
+        }
+        resultado, registro, bloqueado = self.programar_un_video_que_la_api_no_ve(retiro)
+        self.assertEqual(
+            {k: resultado.get(k) for k in ("ok", "motivo", "video_id", "titulo", "detalle", "captura_studio")},
+            {
+                "ok": False,
+                "motivo": "copia_retirada",
+                "video_id": "V1",
+                "titulo": "🇩🇪 Banda - Disco (2025)",
+                "detalle": ["De: Naked Whipper Official"],
+                "captura_studio": "/tmp/retiro_V1.png",
+            },
+        )
+        self.assertEqual(bloqueado, [True])
+        self.assertEqual(pa.leer_pendientes(), [])
+        filas = pa.registro_publicados.leer(registro).filas
+        self.assertEqual([(f["nombre"], f["origen"], f["video_id"]) for f in filas], [("Banda - Disco (2025)", "subir", "V1")])
+
+    def test_una_copia_de_un_album_ya_registrado_no_repite_la_fila(self):
+        # Defecto: una fila por cada vez que se mira el video (el subir ya lo había anotado).
+        registro = self.tmp / "ya_publicados.tsv"
+        pa.registro_publicados.anotar(registro, [("Banda - Disco (2025)", "subir", "V1")])
+        resultado, registro, _ = self.programar_un_video_que_la_api_no_ve(
+            {"estado": "copia_retirada", "detalle": [], "captura_studio": None}
+        )
+        self.assertEqual(resultado["motivo"], "copia_retirada")
+        self.assertEqual(len(pa.registro_publicados.leer(registro).filas), 1)
+
+    def test_un_video_que_no_existe_y_no_es_una_copia_sigue_como_antes(self):
+        # Comportamiento previo: `no_existe`, el video sigue en pendientes y no se anota nada.
+        resultado, registro, _ = self.programar_un_video_que_la_api_no_ve({"estado": "otro"})
+        self.assertEqual((resultado["ok"], resultado["motivo"]), (False, "no_existe"))
+        self.assertEqual([p["video_id"] for p in pa.leer_pendientes()], ["V1"])
+        self.assertFalse(registro.exists())
+
     def programar_con(self, youtube, reclamo, activar):
         return pa.programar(
             "V1", reclamo=reclamo, activar=activar, uploader=uploader_para_programar(youtube)
@@ -1602,6 +1668,14 @@ class TestEliminarVideo(unittest.TestCase):
         self.assertEqual((resultado["ok"], resultado["motivo"]), (False, "no_existe"))
         self.assertEqual(canal.videos_falsos.borrados, [])
 
+    def test_un_video_retirado_se_borra_aunque_la_api_no_lo_liste(self):
+        # Defecto: la API no lista un video retirado por copia ni a su dueño; con la comprobación
+        # de siempre, "Eliminar" respondería "ya estaba borrado" sin borrar nada.
+        canal = CanalParaBorrar({})
+        resultado = pa.eliminar_video("V1", retirado=True, uploader=uploader_para_programar(canal))
+        self.assertEqual((resultado["ok"], resultado["video_id"]), (True, "V1"), resultado)
+        self.assertEqual(canal.videos_falsos.borrados, ["V1"])
+
     def test_con_la_cuota_agotada_borra_con_la_credencial_siguiente(self):
         # Defecto: llamar a la API sin pasar por ejecutar_api y quedar sin borrar por cuota.
         cuota = HttpError(httplib2.Response({"status": 403}), b"{}")
@@ -1625,16 +1699,18 @@ class TestEliminarVideo(unittest.TestCase):
     def test_el_subcomando_corre_eliminar_video_y_no_otro_paso(self):
         # Defecto: main manda cualquier subcomando desconocido a `estado`; sin su rama,
         # el servicio recibiría el estado de los pendientes en vez de borrar el video.
-        salida = io.StringIO()
-        with (
-            mock.patch.object(pa, "eliminar_video", return_value={"ok": True, "video_id": "V1"}) as borrar,
-            mock.patch.object(pa, "estado", side_effect=AssertionError("corrió estado")),
-            contextlib.redirect_stdout(salida),
-        ):
-            codigo = pa.main(["eliminar_video", "--video-id", "V1"])
-        borrar.assert_called_once_with("V1")
-        self.assertEqual(codigo, 0)
-        self.assertEqual(json.loads(salida.getvalue()), {"ok": True, "video_id": "V1"})
+        for extra, retirado in (([], False), (["--retirado"], True)):
+            with self.subTest(extra=extra):
+                salida = io.StringIO()
+                with (
+                    mock.patch.object(pa, "eliminar_video", return_value={"ok": True, "video_id": "V1"}) as borrar,
+                    mock.patch.object(pa, "estado", side_effect=AssertionError("corrió estado")),
+                    contextlib.redirect_stdout(salida),
+                ):
+                    codigo = pa.main(["eliminar_video", "--video-id", "V1", *extra])
+                borrar.assert_called_once_with("V1", retirado=retirado)
+                self.assertEqual(codigo, 0)
+                self.assertEqual(json.loads(salida.getvalue()), {"ok": True, "video_id": "V1"})
 
 
 class TestImpugnarSubcomando(unittest.TestCase):

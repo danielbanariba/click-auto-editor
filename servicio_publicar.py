@@ -67,6 +67,8 @@ BOTONES = {
     # Impugnar es una declaración legal a nombre del usuario y borrar no se deshace: cada
     # botón en su fila.
     "impugnar": [[("⚖️ Impugnar", "impugnar")], [("🗑️ Eliminar video", "eliminar_video")]],
+    # Una copia retirada nunca se va a poder publicar: no hay nada que conservar ni reintentar.
+    "copia_retirada": [[("🗑️ Eliminar video", "eliminar_video")]],
 }
 AVISO_BOTON = {
     "subir": "Subiendo…",
@@ -595,6 +597,8 @@ class Servicio:
                 foto=resultado.get("captura_studio"),
                 video_id=video_id,
             )
+        elif motivo == "copia_retirada":
+            self.preguntar_por_copia_retirada(resultado, video_id)
         elif motivo in ("fallo", "no_existe"):
             self.avisar(f"❌ YouTube rechazó o perdió el video {video_id} ({motivo}).")
         elif motivo == "no_es_privado":
@@ -627,6 +631,22 @@ class Servicio:
             f"🚩 \"{titulo}\" tiene reclamo de la lista negra de reclamantes:\n{lista}\n\n"
             f"https://studio.youtube.com/video/{video_id}/claims\n\n"
             "El video sigue programado. ¿Lo elimino de YouTube? No se puede deshacer.",
+            foto=resultado.get("captura_studio"),
+            video_id=video_id,
+        )
+
+    def preguntar_por_copia_retirada(self, resultado, video_id):
+        """YouTube retiró el video por ser copia de otro: avisa y solo ofrece borrarlo."""
+        titulo = resultado.get("titulo") or video_id
+        datos = "".join(f"{linea}\n" for linea in resultado.get("detalle") or [])
+        self.preguntar(
+            "copia_retirada",
+            "🚫 No se puede publicar porque es copia de otro video que YouTube retiró por derechos "
+            f"de autor:\n\"{titulo}\"\n{datos}\n"
+            "Ya no queda pendiente de programar, y el álbum está en el registro de publicados: no se "
+            "vuelve a renderizar ni a subir.\n"
+            f"https://studio.youtube.com/video/{video_id}/edit\n\n"
+            "¿Lo elimino de YouTube? No se puede deshacer.",
             foto=resultado.get("captura_studio"),
             video_id=video_id,
         )
@@ -928,6 +948,10 @@ class Servicio:
             self.lanzar_paso("impugnar", "--video-id", pregunta["video_id"])
         elif accion == "eliminar_video":
             self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"])
+
+    def respuesta_copia_retirada(self, accion, pregunta):
+        # La API no lista un video retirado por copia: se borra sin la comprobación de siempre.
+        self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"], "--retirado")
 
     def respuesta_reprogramar(self, accion, pregunta):
         self.fallos_programar.pop(pregunta["video_id"], None)

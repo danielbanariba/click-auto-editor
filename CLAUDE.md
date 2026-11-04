@@ -85,7 +85,7 @@ env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/
 env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, then deletes the album folder
 env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the album folder without uploading (already published)
 env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → monetization on → public now / first free moment, or +2 years if claimed
-env/bin/python pipeline_agente.py eliminar_video --video-id ID  # deletes the video from YouTube (irreversible; the service only runs it from a Telegram button)
+env/bin/python pipeline_agente.py eliminar_video --video-id ID [--retirado]  # deletes the video from YouTube (irreversible; the service only runs it from a Telegram button); --retirado skips the existence check for a video YouTube removed as a copy
 env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # disputes every claim of the video in Studio (a legal statement in the user's name); --sin-enviar fills the first form and closes it without sending
 env/bin/python pipeline_agente.py apelar [--sin-enviar] [--limite N]  # appeals age restrictions and limited ads in Hebrew (in the user's name); --sin-enviar fills one form of each kind and closes it
 env/bin/python pipeline_agente.py seguir_impugnaciones  # reads /claims of the disputed videos and reports what changed (read-only)
@@ -138,6 +138,22 @@ one JSON line; the service reports the result. A video that is already gone
 (`no_existe`) is reported as already deleted, not as a failure. Deleting cannot be undone, so
 nothing deletes a video without that button press. The question is persisted in
 `data/agente/servicio.json` like the others, so it survives restarts.
+
+YouTube sometimes removes a fresh upload because it is a copy of another video that was
+taken down for copyright (seen on 2026-11-04: the band itself had filed the takedown). The
+API then does not list the video, not even to its owner, so `programar` sees `no_existe`.
+Only then it reads Studio, inside the `programar` lock (`leer_retiro_en_studio`): it opens
+`/video/<id>/edit` and clicks only the "Retirado" notice and the "Revisar problemas" button
+of its tooltip. That tooltip says "...es un duplicado de otro que se ha retirado...". The dialog
+says who filed the takedown ("De:"), for which content, and when. Anything else, or a page that
+cannot be read, keeps the old `no_existe` notice. For a copy, `programar` returns
+`motivo = copia_retirada`, removes the video from `pendientes.json` (it can never be published)
+and adds its album to the published registry if it is not there yet. The service sends one
+Telegram question with only "🗑️ Eliminar video": "No se puede publicar porque es copia de
+otro video que YouTube retiró por derechos de autor", the title, those lines, the Studio link and
+the screenshot. The button runs `eliminar_video --retirado`, which calls `videos.delete` without
+the `videos.list` check (it would always answer `no_existe`). If YouTube refuses, the failure
+notice gives the Studio link to delete it by hand.
 
 A claimed video with no blacklist match gets a different Telegram question: its
 title, the claimants, the `/claims` link, the Studio screenshot and a note that
