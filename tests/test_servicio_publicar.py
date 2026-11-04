@@ -780,6 +780,49 @@ class TestApelaciones(BaseServicio):
         self.assertNotIn("No pude apelar", texto)
         self.assertIn("No pude ver", texto.split("Banda - Ocho")[0])
 
+    def test_tras_apelar_sigue_las_impugnaciones_y_avisa_lo_que_cambio(self):
+        # Defecto: el seguimiento de las impugnaciones no se lanzaba, o lo que cambió no llegaba.
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar("apelar", {"ok": True, "videos": [], "fallos": []})
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("seguir_impugnaciones")), 1)
+        en_revision = "Impugnación en proceso de revisión. Caduca dentro de 20 días."
+        self.lanzador.terminar(
+            "seguir_impugnaciones",
+            {
+                "ok": False,
+                "log": "/logs/seguir.log",
+                "cambios": [
+                    {"video_id": "V1", "titulo": "Banda - Uno", "reclamo": "Canción B — Artista",
+                     "antes": en_revision, "ahora": "El reclamante ha rechazado tu impugnación."},
+                    {"video_id": "V1", "titulo": "Banda - Uno", "reclamo": "Canción C — Artista",
+                     "antes": en_revision, "ahora": None},
+                ],
+                "fallos": [{"video_id": "V2", "titulo": "Banda - Dos", "motivo": "lista_de_reclamos_no_disponible"}],
+            },
+        )
+        self.servicio.paso()
+        texto = self.telegram.mensajes[-1]["texto"]
+        uno, dos = texto.split("Banda - Dos")
+        self.assertIn("Banda - Uno", uno)
+        self.assertIn("El reclamante ha rechazado tu impugnación.", uno.split("Canción B — Artista")[1])
+        self.assertIn("ya no está", uno.split("Canción C — Artista")[1])
+        self.assertIn("https://studio.youtube.com/video/V1/claims", uno)
+        self.assertIn("https://studio.youtube.com/video/V2/claims", dos)
+        self.assertIn("/logs/seguir.log", texto)
+
+    def test_un_seguimiento_sin_cambios_no_manda_ningun_mensaje(self):
+        # Defecto: un mensaje diario vacío sobre las impugnaciones.
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar("apelar", {"ok": True, "videos": [], "fallos": []})
+        self.servicio.paso()
+        antes = len(self.telegram.mensajes)
+        self.lanzador.terminar("seguir_impugnaciones", {"ok": True, "cambios": [], "fallos": []})
+        self.servicio.paso()
+        self.assertEqual(len(self.telegram.mensajes), antes)
+
     def test_sin_nada_que_apelar_no_manda_ningun_mensaje(self):
         # Defecto: un mensaje diario vacío.
         self.ahora = self.DIA

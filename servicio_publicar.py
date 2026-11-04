@@ -91,9 +91,11 @@ LIMITES_PASO_S = {
     "subir": 4 * 3600,
     "programar": 8 * 3600,  # espera el procesado de YouTube y el margen del reclamo
     "apelar": 90 * 60,  # tiene el candado de Studio: colgado, frenaría a `programar`
+    "seguir_impugnaciones": 45 * 60,  # también; corta solo a los 30 min y sigue al otro día
 }
 # `apelar` anota cada video antes de pulsar el envío: cortarlo nunca hace que se repita uno.
-PASOS_CORTABLES = ("verificar", "programar", "apelar")
+# `seguir_impugnaciones` solo lee Studio.
+PASOS_CORTABLES = ("verificar", "programar", "apelar", "seguir_impugnaciones")
 GRACIA_CORTE_S = 10  # entre SIGTERM y SIGKILL
 MOTIVOS_SUBIDA = {
     "limite_canal": "YouTube no deja subir más videos por hoy",
@@ -680,7 +682,11 @@ class Servicio:
         self.avisar(texto, foto=foto)
 
     def tras_apelar(self, resultado, argumentos):
-        """Avisa qué se mandó y qué resolvió YouTube; si no hubo nada, no manda nada."""
+        """Avisa qué se mandó y qué resolvió YouTube; si no hubo nada, no manda nada.
+
+        Después lanza `seguir_impugnaciones`: así las dos lecturas diarias de Studio van seguidas.
+        """
+        self.lanzar_paso("seguir_impugnaciones")
         videos = resultado.get("videos") or []
         resueltos = resultado.get("resultados") or []
         fallos = resultado.get("fallos") or []
@@ -742,6 +748,42 @@ class Servicio:
         if motivo or fallos:
             lineas.append(f"Log: {resultado.get('log')}")
         self.avisar("\n".join(["📨 Apelaciones de hoy"] + lineas))
+
+    def tras_seguir_impugnaciones(self, resultado, argumentos):
+        """Avisa qué reclamos impugnados cambiaron en Studio; si nada cambió, no manda nada."""
+        cambios = resultado.get("cambios") or []
+        fallos = resultado.get("fallos") or []
+        lineas = []
+        por_video = {}
+        for cambio in cambios:
+            por_video.setdefault(cambio["video_id"], []).append(cambio)
+        for video_id, del_video in por_video.items():
+            lineas.append(f"\"{del_video[0].get('titulo') or video_id}\"")
+            for cambio in del_video:
+                if cambio["ahora"] is None:
+                    lineas.append(f"• {cambio['reclamo']}: ya no está en la lista (el reclamo se retiró)")
+                else:
+                    lineas.append(f"• {cambio['reclamo']}: {cambio['ahora']}\n  (antes: {cambio['antes']})")
+            lineas.append(f"https://studio.youtube.com/video/{video_id}/claims")
+        if lineas:
+            lineas.insert(0, "⚖️ Studio cambió el estado de reclamos que impugné:")
+        if fallos:
+            lineas.append("❌ No pude leer los reclamos (no toqué nada; lo miro de nuevo mañana):")
+            for fallo in fallos:
+                causa = MOTIVOS_IMPUGNACION.get(fallo.get("motivo")) or fallo.get("motivo")
+                lineas.append(
+                    f"• {fallo.get('titulo') or fallo['video_id']}: {causa}\n"
+                    f"  https://studio.youtube.com/video/{fallo['video_id']}/claims"
+                )
+        motivo = resultado.get("motivo")
+        if motivo:
+            causa = MOTIVOS_IMPUGNACION.get(motivo) or motivo
+            lineas.append(f"❌ No terminé de mirar las impugnaciones: {causa}. Sigo mañana.")
+        if not lineas:
+            return
+        if motivo or fallos:
+            lineas.append(f"Log: {resultado.get('log')}")
+        self.avisar("\n".join(lineas))
 
     def tras_eliminar_video(self, resultado, argumentos):
         video_id = valor(argumentos, "--video-id")

@@ -88,6 +88,7 @@ env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim che
 env/bin/python pipeline_agente.py eliminar_video --video-id ID  # deletes the video from YouTube (irreversible; the service only runs it from a Telegram button)
 env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # disputes every claim of the video in Studio (a legal statement in the user's name); --sin-enviar fills the first form and closes it without sending
 env/bin/python pipeline_agente.py apelar [--sin-enviar] [--limite N]  # appeals age restrictions and limited ads in Hebrew (in the user's name); --sin-enviar fills one form of each kind and closes it
+env/bin/python pipeline_agente.py seguir_impugnaciones  # reads /claims of the disputed videos and reports what changed (read-only)
 env/bin/python pipeline_agente.py estado [--esperar-render]  # unscheduled uploads, rendered albums awaiting approval, render running
 env/bin/python pipeline_agente.py sembrar_publicados  # loads the channel titles (1 quota unit per 50 videos) and the albums the service deleted or uploaded into the published registry
 ```
@@ -171,6 +172,19 @@ or the count is anything else, the claim is `no_confirmado` and the run stops. A
 failure stops the run, and the
 JSON reports `reclamos`, `impugnados`, `fallos` and a `captura` of `/claims`. A
 video with no disputable claims returns `motivo = sin_reclamos_impugnables`.
+
+`seguir_impugnaciones` follows the disputes once a day; the service launches it right after
+`apelar`. It takes the videos from the `servicio_impugnar_*.out` logs with at least one claim
+disputed, opens their `/claims` and only reads it (it never presses anything). Each claim is
+a `ytcr-video-content-list-row`: its name is the song and the artist, and its status is the
+text of `#impact-container` without its buttons. The first read of a video is the baseline,
+kept in `data/agente/impugnaciones.json`. After that, a status that changed (the day count
+of "Caduca dentro de N días" does not count) or a claim that is no longer listed is a change:
+it is written there and reported once in one Telegram message, with the old and new text and
+the `/claims` link. A page with neither the list nor Studio's "no claims" notice, or with
+rows that do not match the "Ver detalles" buttons, is a failure and changes nothing. A video
+with no claim "en proceso" is no longer followed. The run holds the `programar` lock, looks
+first at the videos checked longest ago and stops after 30 min (`TIEMPO_MAXIMO_SEGUIMIENTO_S`).
 
 Monetization (`studio_monetizacion.py`) turns ads on at
 `/video/<id>/monetization`. After opening it, Studio navigates several times and ends
