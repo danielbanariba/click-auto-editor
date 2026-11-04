@@ -1845,6 +1845,115 @@ def eliminar_video(video_id, uploader=None):
 
 
 # ---------------------------------------------------------------------------
+# sembrar_publicados
+# ---------------------------------------------------------------------------
+
+
+def subidas_del_canal(uploader, yt):
+    """(título, video_id) de todas las subidas del canal: 50 por llamada, 1 unidad de cuota cada una."""
+    lista = ejecutar_api(uploader, yt, uploader.get_uploads_playlist_id)
+    if not lista:
+        return []
+    subidas, pagina = [], None
+    while True:
+        respuesta = ejecutar_api(
+            uploader,
+            yt,
+            lambda c: c.playlistItems()
+            .list(part="snippet", playlistId=lista, maxResults=50, pageToken=pagina)
+            .execute(),
+        )
+        for item in respuesta.get("items", []):
+            snippet = item.get("snippet", {})
+            video_id = snippet.get("resourceId", {}).get("videoId")
+            if video_id:
+                subidas.append((snippet.get("title", ""), video_id))
+        pagina = respuesta.get("nextPageToken")
+        if not pagina:
+            return subidas
+
+
+def eliminados_por_el_servicio():
+    """Los álbumes que el servicio eliminó, según el JSON final de cada `servicio_eliminar_*.out`."""
+    albumes = []
+    # El dígito deja afuera los servicio_eliminar_video_*.out, que borran videos de YouTube.
+    for salida in sorted(DIR_LOGS.glob("servicio_eliminar_[0-9]*.out")):
+        lineas = salida.read_text(encoding="utf-8", errors="replace").splitlines()
+        for linea in reversed(lineas):
+            if not linea.startswith("{"):
+                continue
+            try:
+                resultado = json.loads(linea)
+            except json.JSONDecodeError:
+                continue
+            if resultado.get("ok") and resultado.get("album"):
+                albumes.append(resultado["album"])
+            break
+    return albumes
+
+
+def subidos_por_el_servicio():
+    try:
+        estado = json.loads((DIR_AGENTE / "servicio.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    return list(estado.get("subidos", []))
+
+
+def sembrar_publicados(uploader=None):
+    """Carga en el registro los títulos del canal y lo que el servicio ya eliminó o subió.
+
+    Se puede repetir: saltea los video_id y los pares (origen, nombre) que ya están.
+    """
+    uploader = uploader or uploader_real()
+    log = ruta_log("sembrar_publicados")
+    with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
+        uploader.cargar_env()
+        youtube, *_ = uploader.probar_credenciales_disponibles(prefix="upload")
+        if not youtube:
+            return {"ok": False, "motivo": "sin_credenciales", "log": str(log)}
+        try:
+            canal = subidas_del_canal(uploader, {"cliente": youtube})
+        except SinCredenciales:
+            return {"ok": False, "motivo": "sin_credenciales", "log": str(log)}
+        except HttpError as exc:
+            print(f"Error YouTube API: {exc}")
+            return {"ok": False, "motivo": "error_api", "detalle": str(exc)[:200], "log": str(log)}
+        except ERRORES_DE_CONEXION as exc:
+            detalle = f"{type(exc).__name__}: {exc}"[:200]
+            print(f"Sin conexion con YouTube tras {REINTENTOS_CONEXION} reintentos: {detalle}")
+            return {"ok": False, "motivo": "sin_conexion", "detalle": detalle, "log": str(log)}
+
+    eliminados = eliminados_por_el_servicio()
+    subidos = subidos_por_el_servicio()
+    filas = (
+        [(titulo, "canal", video_id) for titulo, video_id in canal]
+        + [(nombre, "eliminar", "") for nombre in eliminados]
+        + [(nombre, "subir", "") for nombre in subidos]
+    )
+    with bloqueo("publicados"):
+        registro = registro_publicados.leer(REGISTRO_PUBLICADOS)
+        video_ids = registro.video_ids()
+        vistos = {(f["origen"], f["nombre"]) for f in registro.filas}
+        nuevas = []
+        for nombre, origen, video_id in filas:
+            if (video_id and video_id in video_ids) or (origen, nombre) in vistos:
+                continue
+            if video_id:
+                video_ids.add(video_id)
+            vistos.add((origen, nombre))
+            nuevas.append((nombre, origen, video_id))
+        agregados = registro_publicados.anotar(REGISTRO_PUBLICADOS, nuevas)
+    return {
+        "ok": True,
+        "agregados": agregados,
+        "leidos": {"canal": len(canal), "eliminar": len(eliminados), "subir": len(subidos)},
+        "registro": str(REGISTRO_PUBLICADOS),
+        "log": str(log),
+    }
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1908,6 +2017,11 @@ def parse_args(argv=None):
     )
     p.add_argument("--limite", type=int, default=LIMITE_APELACIONES, help="Envíos como máximo.")
 
+    sub.add_parser(
+        "sembrar_publicados",
+        help="Carga en el registro de publicados los títulos del canal y lo eliminado o subido.",
+    )
+
     p = sub.add_parser(
         "estado", help="Videos sin programar, álbumes sin aprobar y si hay un render corriendo."
     )
@@ -1939,6 +2053,8 @@ def main(argv=None):
         return responder(impugnar(args.video_id, sin_enviar=args.sin_enviar))
     if args.comando == "apelar":
         return responder(apelar(sin_enviar=args.sin_enviar, limite=args.limite))
+    if args.comando == "sembrar_publicados":
+        return responder(sembrar_publicados())
     return responder(estado(esperar_render=args.esperar_render))
 
 

@@ -55,6 +55,22 @@ each one to the SSD and the folder is deleted after publishing. When
 DeathGrind does not know the release type, an `[EP]` suffix in the folder
 name makes the title "Full EP".
 
+`data/agente/ya_publicados.tsv` is the registry of albums that are already
+published (`registro_publicados.py`). Each line holds a key, the name, the
+origin (`canal`, `eliminar` or `subir`), the video id and the date. `eliminar`
+records the album before deleting the folder; `subir` records it after the
+upload got a video id. `sembrar_publicados` loads the channel titles and the
+albums the service already deleted or uploaded, and it can run again without
+duplicating rows. The key is "band|album": no case, accents, signs, year, type
+tag or `__N` suffix. A censored title ("C**") matches any letter of the same
+length. `renderizar` without `--carpeta` moves every registered album it finds
+on its way to `Ya publicados/` (under `BASE_DIR`, with `__N` when the name is
+taken) and renders the next one. A move that fails leaves that album in place,
+unrendered. With `--carpeta` the registry is not checked. The service lists by
+Telegram what was moved (up to 10 names and how many more) and, once per album,
+what could not be moved. It is a name match, not proof: a reissue with the same
+name is moved too, which is why nothing is deleted.
+
 ```bash
 journalctl --user -u publicar-albumes -f         # what the service is doing
 systemctl --user restart publicar-albumes        # after changing the code
@@ -64,7 +80,7 @@ Each step is a `pipeline_agente.py` subcommand that prints one JSON line;
 logs, screenshots and state go to `data/agente/` (gitignored).
 
 ```bash
-env/bin/python pipeline_agente.py renderizar             # next album (cola, Album/, EP/) → Renderizando/
+env/bin/python pipeline_agente.py renderizar             # next album (cola, Album/, EP/) → Renderizando/; already published ones → Ya publicados/
 env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/4K checks, screenshot + YouTube search screenshot
 env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, then deletes the album folder
 env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the album folder without uploading (already published)
@@ -73,6 +89,7 @@ env/bin/python pipeline_agente.py eliminar_video --video-id ID  # deletes the vi
 env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # disputes every claim of the video in Studio (a legal statement in the user's name); --sin-enviar fills the first form and closes it without sending
 env/bin/python pipeline_agente.py apelar [--sin-enviar] [--limite N]  # appeals age restrictions and limited ads in Hebrew (in the user's name); --sin-enviar fills one form of each kind and closes it
 env/bin/python pipeline_agente.py estado [--esperar-render]  # unscheduled uploads, rendered albums awaiting approval, render running
+env/bin/python pipeline_agente.py sembrar_publicados  # loads the channel titles (1 quota unit per 50 videos) and the albums the service deleted or uploaded into the published registry
 ```
 
 Scheduling: the videos stay at least one hour apart. An unclaimed video is
@@ -293,6 +310,7 @@ Central config for all scripts. Key settings:
 - `mapear_playlists_checkpoint.txt`: tracks which videos have been mapped to playlists
 - `data/playlist_links_cache.json`: cached playlist IDs per band/genre
 - `Ya subidos/` (under `BASE_DIR`): album folders moved there after a successful upload
+- `data/agente/ya_publicados.tsv`: registry of already published albums; `renderizar` moves the matching ones to `Ya publicados/` (under `BASE_DIR`) instead of rendering them
 - `generos_activos.txt`: tab-separated list of active music genres with IDs
 
 ## Credentials and Secrets (never commit)
