@@ -111,11 +111,13 @@ class BaseServicio(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp)
         self.telegram = TelegramFalso()
         self.lanzador = LanzadorFalso()
+        # Hora de pared: en 0 la corrida diaria de `apelar` no toca (otro test la mueve).
+        self.ahora = 0.0
         self.servicio = self.nuevo_servicio()
 
     def nuevo_servicio(self):
         servicio = sp.Servicio(
-            self.telegram, self.lanzador, estado_json=self.tmp / "servicio.json"
+            self.telegram, self.lanzador, estado_json=self.tmp / "servicio.json", ahora=lambda: self.ahora
         )
         servicio.pausa_error_s = 0
         servicio.iniciar()
@@ -696,6 +698,63 @@ class TestImpugnarDesdeTelegram(BaseServicio):
                 self.assertNotIn("Impugné", aviso["texto"])
                 self.lanzador.procesos.clear()
                 self.telegram.mensajes.clear()
+
+
+class TestApelaciones(BaseServicio):
+    DIA = sp.INTERVALO_APELACIONES_S
+
+    def test_apela_una_vez_por_dia_y_lo_recuerda_tras_un_reinicio(self):
+        # Defecto: lanzar `apelar` en cada vuelta del ciclo, o de nuevo tras cada reinicio.
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.servicio.paso()  # sigue corriendo: no se lanza otro
+        self.lanzador.terminar("apelar", {"ok": True, "videos": [], "fallos": []})
+        self.servicio.paso()
+        self.servicio = self.nuevo_servicio()
+        self.ahora += self.DIA - 1
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("apelar")), 1)
+        self.ahora += 1
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("apelar")), 2)
+
+    def test_avisa_lo_que_mando_y_lo_que_no_pudo(self):
+        # Defecto: un aviso que no dice qué video se apeló ni cuál quedó sin confirmar o falló.
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar(
+            "apelar",
+            {
+                "ok": False,
+                "log": "/logs/apelar.log",
+                "videos": [
+                    {"tipo": "edad", "video_id": "ID1", "titulo": "Banda - Uno", "estado": "enviado"},
+                    {"tipo": "anuncios", "video_id": "ID2", "titulo": "Banda - Dos", "estado": "no_confirmado"},
+                    {"tipo": "edad", "video_id": "ID3", "titulo": "Banda - Tres", "estado": "ya_apelado"},
+                ],
+                "fallos": [
+                    {"tipo": "anuncios", "video_id": "ID4", "titulo": "Banda - Cuatro",
+                     "motivo": "formulario_no_disponible"},
+                ],
+            },
+        )
+        self.servicio.paso()
+        texto = self.telegram.mensajes[-1]["texto"]
+        self.assertIn("Banda - Uno (restricción de edad)", texto)
+        self.assertIn("https://studio.youtube.com/video/ID1/edit", texto)
+        self.assertIn("revísalo", texto.split("Banda - Dos")[0])
+        self.assertIn("1 ya tenían una apelación", texto)
+        self.assertIn("Banda - Cuatro: el formulario de Studio no se parece al esperado", texto)
+        self.assertIn("/logs/apelar.log", texto)
+
+    def test_sin_nada_que_apelar_no_manda_ningun_mensaje(self):
+        # Defecto: un mensaje diario vacío.
+        self.ahora = self.DIA
+        self.servicio.paso()
+        antes = len(self.telegram.mensajes)
+        self.lanzador.terminar("apelar", {"ok": True, "videos": [], "fallos": []})
+        self.servicio.paso()
+        self.assertEqual(len(self.telegram.mensajes), antes)
 
 
 class TestProgramarFallido(BaseServicio):

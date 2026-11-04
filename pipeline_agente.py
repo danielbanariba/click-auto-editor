@@ -54,6 +54,8 @@ PENDIENTES_JSON = DIR_AGENTE / "pendientes.json"
 PROGRAMADOS_JSONL = DIR_AGENTE / "programados.jsonl"
 DIR_CAPTURAS = DIR_AGENTE / "capturas"
 LISTA_NEGRA_RECLAMANTES = PROJECT_ROOT / "lista_negra_reclamantes.txt"
+# Los videos que ya se apelaron (o que no se pueden apelar): a ninguno se le manda nada dos veces.
+APELACIONES_JSON = DIR_AGENTE / "apelaciones.json"
 DIR_LOGS = DIR_AGENTE / "logs"
 RAICES_BORRABLES = (DIR_RENDERIZANDO, DIR_UPLOAD)
 
@@ -1684,6 +1686,64 @@ def impugnar(video_id, sin_enviar=False, abrir_studio=pagina_de_studio, modulo=N
 
 
 # ---------------------------------------------------------------------------
+# apelar
+# ---------------------------------------------------------------------------
+
+# Envíos por corrida (una por día): cientos de apelaciones seguidas pueden parecer spam.
+LIMITE_APELACIONES = 10
+
+
+def leer_apelaciones():
+    if not APELACIONES_JSON.exists():
+        return {}
+    with open(APELACIONES_JSON, "r", encoding="utf-8") as archivo:
+        return json.load(archivo)
+
+
+def guardar_apelaciones(registro):
+    APELACIONES_JSON.parent.mkdir(parents=True, exist_ok=True)
+    temporal = APELACIONES_JSON.with_name(f"{APELACIONES_JSON.name}.tmp")
+    with open(temporal, "w", encoding="utf-8") as archivo:
+        json.dump(registro, archivo, ensure_ascii=False, indent=2)
+    temporal.replace(APELACIONES_JSON)
+
+
+def apelar(sin_enviar=False, limite=LIMITE_APELACIONES, abrir_studio=pagina_de_studio):
+    """Apela en hebreo la restricción de edad y los anuncios limitados de los videos del canal.
+
+    Lo lanza el servicio una vez por día. Cada video queda en APELACIONES_JSON antes de
+    pulsar el envío y no se vuelve a tocar; `sin_enviar` es la prueba en seco.
+    """
+    import studio_apelaciones
+
+    log = ruta_log("apelar")
+    base = {"log": str(log), "sin_enviar": sin_enviar}
+    registro = leer_apelaciones()
+
+    def anotar(clave, datos):
+        registro[clave] = datos
+        guardar_apelaciones(registro)
+
+    def capturar(nombre):
+        return capturar_pagina(pagina, DIR_CAPTURAS / f"{nombre}.png")
+
+    with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
+        try:
+            # El mismo candado que `programar` e `impugnar`: comparten la copia del perfil.
+            with bloqueo("programar"), abrir_studio() as pagina:
+                DIR_CAPTURAS.mkdir(parents=True, exist_ok=True)
+                resumen = studio_apelaciones.apelar_videos(
+                    pagina, registro, anotar, limite, sin_enviar=sin_enviar, capturar=capturar
+                )
+        except errores_del_paso_de_studio() as exc:
+            detalle = f"{type(exc).__name__}: {exc}"[:200]
+            print(f"No se pudo apelar en Studio: {detalle}")
+            motivo = exc.motivo if isinstance(exc, NavegadorNoDisponible) else "error_navegador"
+            return {"ok": False, "motivo": motivo, "detalle": detalle, "videos": [], "fallos": [], **base}
+    return {"ok": not resumen.get("motivo") and not resumen["fallos"], **resumen, **base}
+
+
+# ---------------------------------------------------------------------------
 # eliminar_video
 # ---------------------------------------------------------------------------
 
@@ -1789,6 +1849,17 @@ def parse_args(argv=None):
     )
 
     p = sub.add_parser(
+        "apelar",
+        help="Apela en hebreo la restricción de edad y los anuncios limitados (a nombre del usuario).",
+    )
+    p.add_argument(
+        "--sin-enviar",
+        action="store_true",
+        help="Llena el primer formulario de cada tipo y lo cierra sin enviarlo (prueba en seco).",
+    )
+    p.add_argument("--limite", type=int, default=LIMITE_APELACIONES, help="Envíos como máximo.")
+
+    p = sub.add_parser(
         "estado", help="Videos sin programar, álbumes sin aprobar y si hay un render corriendo."
     )
     p.add_argument(
@@ -1817,6 +1888,8 @@ def main(argv=None):
         return responder(eliminar_video(args.video_id))
     if args.comando == "impugnar":
         return responder(impugnar(args.video_id, sin_enviar=args.sin_enviar))
+    if args.comando == "apelar":
+        return responder(apelar(sin_enviar=args.sin_enviar, limite=args.limite))
     return responder(estado(esperar_render=args.esperar_render))
 
 

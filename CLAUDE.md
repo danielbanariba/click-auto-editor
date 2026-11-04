@@ -71,6 +71,7 @@ env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the alb
 env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → monetization on → public now / first free moment, or +2 years if claimed
 env/bin/python pipeline_agente.py eliminar_video --video-id ID  # deletes the video from YouTube (irreversible; the service only runs it from a Telegram button)
 env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # disputes every claim of the video in Studio (a legal statement in the user's name); --sin-enviar fills the first form and closes it without sending
+env/bin/python pipeline_agente.py apelar [--sin-enviar] [--limite N]  # appeals age restrictions and limited ads in Hebrew (in the user's name); --sin-enviar fills one form of each kind and closes it
 env/bin/python pipeline_agente.py estado [--esperar-render]  # unscheduled uploads, rendered albums awaiting approval, render running
 ```
 
@@ -167,6 +168,33 @@ anuncios"; with anything else, or no checkbox, it cancels and the video is left
 as it was. A failure after Enviar returns `motivo = cuestionario_ya_enviado`.
 Any monetization failure never stops the video: the service sends a Telegram
 notice with the `/monetization` link of that video.
+
+Appeals (`apelar`, `studio_apelaciones.py`) run once a day, launched by the service
+without asking (the user's decision: "Mandalo solo"); the time of the last run is
+`ultima_apelacion` in `data/agente/servicio.json`. The step walks the Studio content
+list filtered by age restriction (`AGE_RESTRICTION`) and then by limited ads
+(`MONETIZATION` `LIMITED`), page by page, and sends a fixed text in modern Hebrew
+(`TEXTO_APELACION_EDAD`, `TEXTO_COMENTARIOS_ANUNCIOS`; the age field takes 300
+characters):
+
+- Age: the "Avisos" tooltip cause "YouTube ha limitado la audiencia...", "Ver todas
+  las opciones", and in "Apelar la decisión" the checkbox, "Tu explicación" and
+  "Enviar apelación". "Entendido" (confirm the problem) is never pressed. An already
+  resolved appeal ("Apelación rechazada") is recorded as `ya_apelado`.
+- Limited ads (rows without an age restriction): "Ver comentarios", "Enviar
+  comentarios", and the Google feedback panel. The panel is an `about:blank` iframe
+  inside the `google.com/tools/feedback` one; its box is the textarea labelled
+  "Explica tus comentarios (obligatorio)". This is not a formal appeal. A tooltip with
+  no "Ver comentarios" (no manual review) is recorded as `sin_opcion`, without sending.
+
+`data/agente/apelaciones.json` keeps one entry per `<tipo>:<video_id>`. Each one is
+written before the send button is pressed (`enviando`), so a cut or crash never sends
+twice, and a video in that file is never touched again. A send whose form does not
+close is `no_confirmado`. It sends at most `LIMITE_APELACIONES` (10) per run, age
+first. It runs under the `programar` lock and stops after 3 failures in a row. The
+"Revisar un problema" dialog does not close with Escape: it is closed with its X and
+then "Salir". The service reports what was sent, what was not confirmed and what failed
+in one Telegram message, and stays silent when there was nothing to appeal.
 
 ### Common commands
 

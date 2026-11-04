@@ -11,6 +11,8 @@ Corre siempre en segundo plano (systemd/publicar-albumes.service):
    lo publica en el acto o lo programa (siempre a una hora de otro video).
 5. Si un reclamante está en la lista negra, pregunta si elimina el video de YouTube.
    Si el video tiene reclamo y ninguno es de la lista negra, pregunta si lo impugna.
+6. Una vez por día apela en hebreo la restricción de edad y los anuncios limitados de los
+   videos del canal, sin preguntar, y después avisa qué mandó.
 
 Cada paso lo hace pipeline_agente.py en un proceso aparte. Las preguntas
 abiertas y los álbumes rechazados viven en data/agente/servicio.json, así un
@@ -43,6 +45,7 @@ ESPERA_TELEGRAM_S = 20
 PAUSA_TELEGRAM_MAX_S = 60
 REINTENTO_S = 30 * 60
 INTENTOS_PROGRAMAR = 3  # fallos seguidos de `programar` antes de preguntar
+INTERVALO_APELACIONES_S = 24 * 3600
 LIMITE_LEYENDA = 1024
 LIMITE_TEXTO = 4096
 SIN_CONFIGURACION = 78  # EX_CONFIG: el unit de systemd no reinicia con este código
@@ -84,8 +87,10 @@ LIMITES_PASO_S = {
     "renderizar": pa.ESPERA_RENDER_MAX_S,
     "subir": 4 * 3600,
     "programar": 8 * 3600,  # espera el procesado de YouTube y el margen del reclamo
+    "apelar": 90 * 60,  # tiene el candado de Studio: colgado, frenaría a `programar`
 }
-PASOS_CORTABLES = ("verificar", "programar")
+# `apelar` anota cada video antes de pulsar el envío: cortarlo nunca hace que se repita uno.
+PASOS_CORTABLES = ("verificar", "programar", "apelar")
 GRACIA_CORTE_S = 10  # entre SIGTERM y SIGKILL
 MOTIVOS_SUBIDA = {
     "limite_canal": "YouTube no deja subir más videos por hoy",
@@ -115,6 +120,20 @@ MOTIVOS_IMPUGNACION = {
     "canal_no_disponible": "YouTube pidió elegir canal y no pude entrar con «Daniel Banariba»",
     "error_navegador": "falló el navegador",
 }
+
+MOTIVOS_APELACION = {
+    "aviso_no_disponible": "no se abrió el aviso del video",
+    "dialogo_desconocido": "el aviso de Studio no se parece al esperado",
+    "formulario_no_disponible": "el formulario de Studio no se parece al esperado",
+    "lista_no_disponible": "la lista de contenido de Studio no terminó de cargar",
+    "dialogo_abierto": "Studio dejó un diálogo abierto y no seguí",
+    "demasiados_fallos": "fallaron varios videos seguidos y lo dejé para mañana",
+    "tiempo_agotado": "tardó demasiado y lo corté",
+    "sin_sesion_en_studio": "Studio no tiene la sesión iniciada",
+    "canal_no_disponible": "YouTube pidió elegir canal y no pude entrar con «Daniel Banariba»",
+    "error_navegador": "falló el navegador",
+}
+TIPOS_APELACION = {"edad": "restricción de edad", "anuncios": "anuncios limitados"}
 
 log = logging.getLogger("servicio_publicar")
 
@@ -276,11 +295,12 @@ def carpetas_de_origen():
 
 
 class Servicio:
-    def __init__(self, telegram, lanzar, estado_json=ESTADO_JSON, reloj=time.monotonic):
+    def __init__(self, telegram, lanzar, estado_json=ESTADO_JSON, reloj=time.monotonic, ahora=time.time):
         self.telegram = telegram
         self.lanzar = lanzar
         self.ruta_estado = Path(estado_json)
         self.reloj = reloj
+        self.ahora = ahora  # hora del reloj de pared: la de la última apelación sobrevive reinicios
         # rechazados y subidos: álbumes que siguen en Renderizando/ pero no se vuelven a ofrecer.
         self.estado = {"offset": 0, "preguntas": {}, "rechazados": [], "subidos": []}
         self.tareas = []
@@ -318,6 +338,7 @@ class Servicio:
     def paso(self):
         self.revisar_tareas()
         self.revisar_reintentos()
+        self.revisar_apelaciones()
         self.enviar_preguntas()
         self.avanzar_album()
         self.atender_telegram()
@@ -367,6 +388,16 @@ class Servicio:
         for reintento in [r for r in self.reintentos if r[0] <= ahora]:
             self.reintentos.remove(reintento)
             self.lanzar_paso(*reintento[1])
+
+    def revisar_apelaciones(self):
+        """Lanza `apelar` una vez por día; la hora de la última corrida queda en el estado."""
+        if any(argumentos[0] == "apelar" for argumentos, _ in self.tareas):
+            return
+        if self.ahora() - self.estado.get("ultima_apelacion", 0) < INTERVALO_APELACIONES_S:
+            return
+        self.estado["ultima_apelacion"] = self.ahora()
+        self.guardar()
+        self.lanzar_paso("apelar")
 
     def avanzar_album(self):
         if any(argumentos[0] in PASOS_DEL_ALBUM for argumentos, _ in self.tareas):
@@ -614,6 +645,47 @@ class Servicio:
         if resultado.get("log"):
             texto += f"\nLog: {resultado['log']}"
         self.avisar(texto, foto=foto)
+
+    def tras_apelar(self, resultado, argumentos):
+        """Avisa qué se mandó; si no hubo nada que apelar, no manda nada."""
+        videos = resultado.get("videos") or []
+        fallos = resultado.get("fallos") or []
+        lineas = []
+        for estado, encabezado in (
+            ("enviado", "✅ Apelé en hebreo:"),
+            ("no_confirmado", "⚠️ Lo envié pero Studio no mostró que llegó (revísalo):"),
+        ):
+            hechos = [v for v in videos if v.get("estado") == estado]
+            if hechos:
+                lineas.append(encabezado)
+                lineas += [
+                    f"• {v.get('titulo') or v['video_id']} ({TIPOS_APELACION[v['tipo']]})\n"
+                    f"  https://studio.youtube.com/video/{v['video_id']}/edit"
+                    for v in hechos
+                ]
+        ya_apelados = sum(1 for v in videos if v.get("estado") == "ya_apelado")
+        if ya_apelados:
+            lineas.append(f"ℹ️ {ya_apelados} ya tenían una apelación y Studio no deja otra: no les mandé nada.")
+        sin_opcion = sum(1 for v in videos if v.get("estado") == "sin_opcion")
+        if sin_opcion:
+            lineas.append(
+                f"ℹ️ {sin_opcion} con anuncios limitados no tienen «Ver comentarios» (sin revisión manual): "
+                "no les mandé nada."
+            )
+        if fallos:
+            lineas.append("❌ No pude apelar (no envié nada; lo intento de nuevo mañana):")
+            for fallo in fallos:
+                causa = MOTIVOS_APELACION.get(fallo.get("motivo")) or fallo.get("motivo")
+                lineas.append(f"• {fallo.get('titulo') or fallo.get('video_id')}: {causa}")
+        motivo = resultado.get("motivo")
+        if motivo:
+            causa = MOTIVOS_APELACION.get(motivo) or motivo
+            lineas.append(f"❌ No terminé las apelaciones de hoy: {causa}. Sigo mañana.")
+        if not lineas:
+            return
+        if motivo or fallos:
+            lineas.append(f"Log: {resultado.get('log')}")
+        self.avisar("\n".join(["📨 Apelaciones de hoy"] + lineas))
 
     def tras_eliminar_video(self, resultado, argumentos):
         video_id = valor(argumentos, "--video-id")
