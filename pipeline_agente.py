@@ -1396,7 +1396,8 @@ def armar_resumen_programado(
         quienes = f" ({', '.join(reclamantes)})" if reclamantes else ""
         return f"⚠️ {titulo}\nTiene reclamo{quienes}: programado para {fecha} para apelar."
     cuando = "publicado ahora" if publicado_ahora else f"programado para {fecha}"
-    texto = f"✓ {titulo}\nSin reclamos: {cuando}."
+    marca = "🎉✅" if publicado_ahora else "✓"
+    texto = f"{marca} {titulo}\nSin reclamos: {cuando}."
     if (monetizacion or {}).get("estado") in ("activada", "ya_activa"):
         texto += "\nMonetización activada."
     return texto

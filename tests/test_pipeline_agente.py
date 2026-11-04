@@ -1359,7 +1359,7 @@ class TestProgramar(unittest.TestCase):
     def test_el_resumen_dice_publicado_ahora_o_programado_para(self):
         cuando = momento("2026-11-02 18:00")
         ahora = pa.armar_resumen_programado("T", cuando, False, [], publicado_ahora=True)
-        self.assertEqual(ahora, "✓ T\nSin reclamos: publicado ahora.")
+        self.assertEqual(ahora, "🎉✅ T\nSin reclamos: publicado ahora.")
         luego = pa.armar_resumen_programado("T", cuando, False, [], publicado_ahora=False)
         self.assertEqual(luego, "✓ T\nSin reclamos: programado para 2026-11-02 18:00.")
 
