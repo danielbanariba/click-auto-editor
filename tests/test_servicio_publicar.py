@@ -1207,6 +1207,21 @@ class TestAvisos(BaseServicio):
         self.assertEqual(len(self.telegram.mensajes), 1)
         self.assertIn("Banda - Roto (2020): sin permiso", self.telegram.mensajes[0]["texto"])
 
+    def test_un_album_que_no_se_pudo_apartar_se_avisa_una_sola_vez(self):
+        # Defecto: el álbum sigue al frente de la cola, cada render vuelve a intentar moverlo y
+        # el mismo aviso llega después de cada render.
+        no_movido = {"album": "Banda - Roto (2020)", "origen": "canal", "como": "Banda - Roto (2020)",
+                     "error": "sin permiso"}
+        for nombre in ("Banda - Uno", "Banda - Dos"):
+            carpeta = self.album_renderizado(nombre)
+            self.servicio.tras_renderizar(
+                {"ok": True, "album": nombre, "carpeta": carpeta, "ya_publicados": [no_movido]},
+                ["renderizar"],
+            )
+
+        avisos = [m for m in self.telegram.mensajes if "sin permiso" in m["texto"]]
+        self.assertEqual(len(avisos), 1)
+
     def test_error_de_red_en_telegram_no_frena_el_servicio(self):
         self.album_en_cola("Banda - Disco")
         self.telegram.falla = sp.ErrorTelegram("sin red")

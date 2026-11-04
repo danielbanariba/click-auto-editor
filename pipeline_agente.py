@@ -201,7 +201,7 @@ def anotar_publicados(filas):
 
 
 def destino_libre(directorio, nombre):
-    """`directorio/nombre`, o con sufijo `__N` si ya existe: shutil.move lo metería adentro."""
+    """`directorio/nombre`, o con sufijo `__N` si ya existe: rename pisaría una carpeta vacía."""
     destino, n = directorio / nombre, 2
     while destino.exists():
         destino, n = directorio / f"{nombre}__{n}", n + 1
@@ -225,7 +225,10 @@ def siguiente_sin_publicar():
             try:
                 DIR_YA_PUBLICADOS.mkdir(parents=True, exist_ok=True)
                 destino = destino_libre(DIR_YA_PUBLICADOS, nombre)
-                shutil.move(origen / nombre, destino)
+                # rename y no shutil.move: los orígenes y Ya publicados/ están en BASE_DIR, y si
+                # rename falla, shutil.move copia el álbum y, sin poder borrar el original, deja
+                # una copia entera en cada vuelta.
+                (origen / nombre).rename(destino)
                 apartado["destino"] = str(destino)
             except OSError as exc:
                 apartado["error"] = str(exc)

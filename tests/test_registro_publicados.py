@@ -76,6 +76,18 @@ class TestRegistro(unittest.TestCase):
         self.assertEqual(registro.buscar("Banda - Dos (2021)")["video_id"], "vid00000002")
         self.assertEqual(registro.video_ids(), {"vid00000002"})
 
+    def test_un_registro_cortado_o_con_separadores_raros_se_sigue_leyendo(self):
+        # Defecto: una escritura cortada a mitad de una letra deja bytes que no son UTF-8 y leer
+        # lanza, así que ningún render automático arranca; y un título con U+2028 se parte en
+        # dos líneas al leer y no coincide nunca.
+        rp.anotar(self.ruta, [("Banda - Uno Parte (2020)", "canal", "vid00000001")])
+        with open(self.ruta, "ab") as archivo:
+            archivo.write("banda|do\tBanda - Dó".encode("utf-8")[:-1])  # la "ó" sin su segundo byte
+
+        registro = rp.leer(self.ruta)
+
+        self.assertEqual(registro.buscar("Banda - Uno Parte (2020)")["video_id"], "vid00000001")
+
     def test_sin_archivo_no_hay_nada_publicado(self):
         self.assertIsNone(rp.leer(self.tmp / "no_existe.tsv").buscar("Banda - Uno (2020)"))
 

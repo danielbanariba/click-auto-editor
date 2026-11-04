@@ -313,6 +313,8 @@ class Servicio:
         self.fallos_programar = {}  # video_id -> fallos seguidos que llegaron al reintento genérico
         self.album_pausado_hasta = 0.0
         self.avisos = set()
+        # Álbumes publicados que no se pudieron mover: se avisan una vez (avisos se vacía en cada render).
+        self.no_apartados = set()
         self.pausa_error_s = 5
         self.fallos_telegram = 0  # fallos seguidos de getUpdates; 0 es que Telegram responde
         self.telegram_caido_desde = None
@@ -443,11 +445,11 @@ class Servicio:
                 + "\n".join(lineas)
             )
         for a in apartados:
-            if "error" in a:
-                self.avisar_una_vez(
-                    f"no_apartado_{a['album']}",
+            if "error" in a and a["album"] not in self.no_apartados:
+                self.no_apartados.add(a["album"])
+                self.avisar(
                     f"⚠️ {a['album']}: {a['error']}\nYa está publicado y no pude moverlo a "
-                    f"{pa.DIR_YA_PUBLICADOS.name}/. Sigue en su carpeta y no lo renderizo.",
+                    f"{pa.DIR_YA_PUBLICADOS.name}/. Sigue en su carpeta y no lo renderizo."
                 )
 
     def tras_renderizar(self, resultado, argumentos):

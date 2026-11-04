@@ -81,9 +81,12 @@ class Registro:
 
 def leer(ruta):
     try:
-        lineas = ruta.read_text(encoding="utf-8").splitlines()
+        # Una escritura cortada a mitad de una letra no puede frenar los renders: se reemplaza.
+        texto = ruta.read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:
-        lineas = []
+        texto = ""
+    # split("\n") y no splitlines(), que también corta en U+2028 y otros que un título puede traer.
+    lineas = [linea.rstrip("\r") for linea in texto.split("\n")]
     filas = [linea.split("\t") for linea in lineas if linea and not linea.startswith("#")]
     return Registro([dict(zip(COLUMNAS, f)) for f in filas if len(f) == len(COLUMNAS)])
 

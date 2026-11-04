@@ -437,17 +437,21 @@ class TestOrigenes(unittest.TestCase):
         self.assertEqual(pa.listar_carpetas(pa.DIR_YA_PUBLICADOS), sorted(nombres))
         self.assertIsNone(pa.siguiente_album())
 
-    def test_un_album_publicado_que_no_se_puede_apartar_no_se_renderiza(self):
-        # Defecto: si moverlo falla, se renderiza igual el álbum ya publicado.
+    def test_un_album_publicado_que_no_se_puede_apartar_no_se_renderiza_ni_se_copia(self):
+        # Defecto: si moverlo falla, se renderiza igual el álbum ya publicado; o el movimiento
+        # cae en copiarlo y, cuando el original no se puede borrar, cada vuelta deja otra copia
+        # entera en Ya publicados/.
         rp.anotar(pa.REGISTRO_PUBLICADOS, [("Banda A - Nuevo (2021)", "canal", "")])
         for nombre in ("Banda A - Nuevo (2021)", "Banda B - Viejo (2019)"):
             (self.album / nombre).mkdir()
+        (self.album / "Banda A - Nuevo (2021)" / "01. pista.flac").write_bytes(b"audio")
 
-        with mock.patch.object(pa.shutil, "move", side_effect=PermissionError("sin permiso")):
+        with mock.patch.object(pa.os, "rename", side_effect=PermissionError("sin permiso")):
             resultado, renderizados = self.renderizar()
 
         self.assertEqual(renderizados, [self.album / "Banda B - Viejo (2019)"])
-        self.assertTrue((self.album / "Banda A - Nuevo (2021)").is_dir())
+        self.assertTrue((self.album / "Banda A - Nuevo (2021)" / "01. pista.flac").is_file())
+        self.assertEqual(pa.listar_carpetas(pa.DIR_YA_PUBLICADOS), [])
         self.assertEqual(resultado["ya_publicados"], [
             {"album": "Banda A - Nuevo (2021)", "origen": "canal", "como": "Banda A - Nuevo (2021)",
              "error": "sin permiso"},
