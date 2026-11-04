@@ -182,8 +182,11 @@ kept in `data/agente/impugnaciones.json`. After that, a status that changed (the
 of "Caduca dentro de N días" does not count) or a claim that is no longer listed is a change:
 it is written there and reported once in one Telegram message, with the old and new text and
 the `/claims` link. A page with neither the list nor Studio's "no claims" notice, or with
-rows that do not match the "Ver detalles" buttons, is a failure and changes nothing. A video
-with no claim "en proceso" is no longer followed. The run holds the `programar` lock, looks
+rows that do not match the "Ver detalles" buttons, is a failure and changes nothing. The list
+draws in parts and Studio may show the "no claims" notice for a moment first, so a read
+with a claim missing, or with none, counts only when a re-read of the same page
+`PAUSA_RELECTURA_RECLAMOS_S` (10 s) later sees the same; two re-reads that keep changing are
+a failure. A video with no claim "en proceso" is no longer followed. The run holds the `programar` lock, looks
 first at the videos checked longest ago and stops after 30 min (`TIEMPO_MAXIMO_SEGUIMIENTO_S`).
 
 Monetization (`studio_monetizacion.py`) turns ads on at

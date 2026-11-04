@@ -27,10 +27,13 @@ PAGINA = """<!doctype html><html><head><meta charset="utf-8"><title>Reclamacione
 </head><body>
 <h1>Contenido protegido</h1>
 <ytcr-video-content-list>__FILAS__</ytcr-video-content-list>
-<div>__VACIO__</div>
+<div id="vacio">__VACIO__</div>
 <script>
-document.querySelectorAll("button").forEach(b => b.onclick = () =>
-  fetch("/_pulsado", {method: "POST", body: b.innerText}));
+document.addEventListener("click", e => {
+  const boton = e.target.closest("button");
+  if (boton) fetch("/_pulsado", {method: "POST", body: boton.innerText});
+}, true);
+__DESPUES__
 </script></body></html>"""
 
 FILA = """<ytcr-video-content-list-row>
@@ -52,6 +55,7 @@ class StudioFalso:
     def __init__(self, reclamos):
         self.reclamos = reclamos  # {video_id: [(canción, artista, estado)]}
         self.con_error = set()  # videos cuya /claims responde una página de error
+        self.despues = {}  # {video_id: (ms, reclamos)}: la lista que se termina de dibujar después
         self.abiertos = []
         self.pulsados = []
 
@@ -68,10 +72,21 @@ class StudioFalso:
         if video_id in self.con_error:
             return ruta.fulfill(status=200, body=PAGINA_DE_ERROR, content_type="text/html; charset=utf-8")
         filas = self.reclamos.get(video_id, [])
-        html = PAGINA.replace(
-            "__FILAS__", "".join(FILA.format(cancion=c, artista=a, estado=e) for c, a, e in filas)
-        ).replace("__VACIO__", "" if filas else "No se han encontrado reclamaciones en este vídeo")
+        despues = ""
+        if video_id in self.despues:
+            ms, completas = self.despues[video_id]
+            despues = (
+                "setTimeout(() => { document.querySelector('ytcr-video-content-list').innerHTML = "
+                f"{json.dumps(self.filas(completas))}; document.getElementById('vacio').textContent = ''; }}, {ms});"
+            )
+        html = PAGINA.replace("__FILAS__", self.filas(filas)).replace(
+            "__VACIO__", "" if filas else "No se han encontrado reclamaciones en este vídeo"
+        ).replace("__DESPUES__", despues)
         return ruta.fulfill(status=200, body=html, content_type="text/html; charset=utf-8")
+
+    @staticmethod
+    def filas(reclamos):
+        return "".join(FILA.format(cancion=c, artista=a, estado=e) for c, a, e in reclamos)
 
 
 class TestSeguirImpugnaciones(unittest.TestCase):
@@ -96,6 +111,7 @@ class TestSeguirImpugnaciones(unittest.TestCase):
             mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "estado" / "pendientes.json"),
             # Los tiempos de producción son los que Studio necesita; aquí la página es local.
             mock.patch.object(pa, "ESPERA_RESULTADO_RECLAMOS_S", 2),
+            mock.patch.object(pa, "PAUSA_RELECTURA_RECLAMOS_S", 3),
         ]
         for parche in parches:
             parche.start()
@@ -170,6 +186,32 @@ class TestSeguirImpugnaciones(unittest.TestCase):
         self.assertEqual([(f["video_id"], f["motivo"]) for f in segundo["fallos"]],
                          [("V1", "lista_de_reclamos_no_disponible")])
         self.assertEqual(tercero["cambios"], [])
+
+    def seguir_con_la_lista_a_medio_dibujar(self, filas_al_principio):
+        self.impugnado("V1", 2, "Banda - Uno")
+        dos = [("Canción A", "Artista", EN_REVISION.format(dias=29)),
+               ("Canción B", "Artista", EN_REVISION.format(dias=29))]
+        studio = StudioFalso({"V1": dos})
+        self.seguir(studio)
+        studio.reclamos["V1"] = dos[:filas_al_principio]
+        studio.despues["V1"] = (1500, dos)  # el resto de la lista llega 1,5 s después
+        resultado = self.seguir(studio)
+        guardado = json.loads(self.registro.read_text(encoding="utf-8"))["V1"]
+        return resultado, guardado
+
+    def test_una_lista_que_llega_por_partes_no_da_reclamos_por_retirados(self):
+        # Defecto: la lista leída antes de que llegara su segunda fila daba esa fila por retirada.
+        resultado, guardado = self.seguir_con_la_lista_a_medio_dibujar(1)
+        self.assertEqual((resultado["cambios"], resultado["fallos"]), ([], []))
+        self.assertEqual(sorted(guardado["reclamos"]), ["Canción A — Artista", "Canción B — Artista"])
+
+    def test_un_aviso_de_sin_reclamos_antes_de_la_lista_no_da_nada_por_retirado(self):
+        # Defecto: el aviso de "sin reclamos" que Studio muestra un rato antes de la lista daba
+        # todo por retirado y el video dejaba de seguirse.
+        resultado, guardado = self.seguir_con_la_lista_a_medio_dibujar(0)
+        self.assertEqual((resultado["cambios"], resultado["fallos"]), ([], []))
+        self.assertEqual(sorted(guardado["reclamos"]), ["Canción A — Artista", "Canción B — Artista"])
+        self.assertFalse(guardado["terminado"])
 
 
 if __name__ == "__main__":

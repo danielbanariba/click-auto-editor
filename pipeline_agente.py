@@ -1747,6 +1747,10 @@ IMPUGNACIONES_JSON = DIR_AGENTE / "impugnaciones.json"
 P_IMPUGNACION_PENDIENTE = re.compile(r"en proceso", re.IGNORECASE)
 # La corrida tiene el candado de Studio: lo que no alcanza a mirar lo mira al día siguiente.
 TIEMPO_MAXIMO_SEGUIMIENTO_S = 30 * 60
+# Una lista que todavía se dibuja muestra menos filas, o un rato el aviso de "sin reclamos":
+# un reclamo que falta, o ninguno, cuenta solo si otra lectura unos segundos después ve lo mismo.
+PAUSA_RELECTURA_RECLAMOS_S = 10
+RELECTURAS_DE_RECLAMOS = 2
 
 # Una fila por reclamo de /claims (visto en vivo el 2026-11-04): sus renglones (canción,
 # artista, "Derechos de autor", "Audio", ...) y la línea de estado de `#impact-container`
@@ -1792,11 +1796,12 @@ def impugnados_por_el_servicio():
     return videos
 
 
-def leer_reclamos(pagina, video_id):
+def leer_reclamos(pagina, video_id, recargar=True):
     """Los reclamos que muestra /claims: [{"reclamo", "estado"}].
 
     [] si Studio dice que no hay reclamos; None si la página no muestra ni la lista ni ese
-    aviso, o si la lista no tiene la forma conocida (una fila por "Ver detalles"). Solo lee.
+    aviso, o si la lista no tiene la forma conocida (una fila por "Ver detalles"). Con
+    `recargar=False` vuelve a leer la página ya abierta, sin navegar. Solo lee.
     """
     from playwright.sync_api import Error as PlaywrightError
 
@@ -1822,11 +1827,12 @@ def leer_reclamos(pagina, video_id):
             reclamos.append({"reclamo": nombre, "estado": fila["estado"]})
         return reclamos
 
-    pagina.goto(URL_RECLAMOS.format(video_id=video_id), wait_until="domcontentloaded", timeout=ESPERA_NAVEGACION_MS)
-    try:
-        pagina.wait_for_load_state("networkidle", timeout=12_000)
-    except PlaywrightError:
-        pass
+    if recargar:
+        pagina.goto(URL_RECLAMOS.format(video_id=video_id), wait_until="domcontentloaded", timeout=ESPERA_NAVEGACION_MS)
+        try:
+            pagina.wait_for_load_state("networkidle", timeout=12_000)
+        except PlaywrightError:
+            pass
     for intento in range(1, INTENTOS_NAVEGACION + 1):
         try:
             return leer()
@@ -1836,6 +1842,25 @@ def leer_reclamos(pagina, video_id):
                 raise
             print(f"Studio navegó mientras se leían los reclamos (intento {intento}): {exc}")
             time.sleep(PAUSA_REINTENTO_NAVEGACION_S)
+
+
+def confirmar_reclamos(pagina, video_id, antes, reclamos):
+    """`reclamos` si están todos los de `antes` y la lista no está vacía; si no, relee la misma
+    página tras una pausa y vale cuando dos lecturas seguidas coinciden. None si no coinciden."""
+    relecturas = 0
+    while reclamos is not None and (
+        not reclamos or not set(antes) <= {reclamo["reclamo"] for reclamo in reclamos}
+    ):
+        if relecturas == RELECTURAS_DE_RECLAMOS:
+            return None
+        time.sleep(PAUSA_RELECTURA_RECLAMOS_S)
+        otra = leer_reclamos(pagina, video_id, recargar=False)
+        relecturas += 1
+        if otra == reclamos:
+            return reclamos
+        print(f"{video_id}: la lista de reclamos cambió entre dos lecturas; la vuelvo a leer")
+        reclamos = otra
+    return reclamos
 
 
 def comparar_reclamos(antes, reclamos):
@@ -1882,7 +1907,8 @@ def seguir_impugnaciones(abrir_studio=pagina_de_studio):
                             print("Se acabó el tiempo de la corrida: el resto se mira mañana.")
                             break
                         datos = registro[video_id]
-                        reclamos = leer_reclamos(pagina, video_id)
+                        antes = datos.get("reclamos") or {}
+                        reclamos = confirmar_reclamos(pagina, video_id, antes, leer_reclamos(pagina, video_id))
                         if reclamos is None:
                             print(f"{video_id}: no se pudo leer /claims")
                             fallos.append(
@@ -1890,7 +1916,7 @@ def seguir_impugnaciones(abrir_studio=pagina_de_studio):
                                  "motivo": "lista_de_reclamos_no_disponible"}
                             )
                             continue
-                        ahora, nuevos = comparar_reclamos(datos.get("reclamos") or {}, reclamos)
+                        ahora, nuevos = comparar_reclamos(antes, reclamos)
                         cambios += [{"video_id": video_id, "titulo": datos.get("titulo"), **c} for c in nuevos]
                         datos.update(
                             reclamos=ahora,
