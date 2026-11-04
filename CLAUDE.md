@@ -274,5 +274,8 @@ Central config for all scripts. Key settings:
 - Render is 4K and heavy; `MAX_PARALLEL_RENDERS=1` is the safe default
 - Ramdisk requires `sudo` without password for mount (configured via sudoers)
 - CUDA fallback chain: C++/CUDA → FFmpeg NVENC → FFmpeg libx264
+- A CUDA "out of memory" means another program holds the VRAM (an ollama model took
+  16 GB on 2026-11-03): it is not the album's fault, so the render stops without moving
+  the album to Error404 and the service asks "Reintentar" before rendering another one
 - Playwright sleeps are calibrated; reducing them breaks YouTube Studio automation
 - `12. mapear_playlists.py` runs as a systemd service (`systemd/mapear_playlists.service`, installed as a copy in `/etc/systemd/system/`) with auto-restart
