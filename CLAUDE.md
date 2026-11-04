@@ -180,7 +180,11 @@ characters):
 - Age: the "Avisos" tooltip cause "YouTube ha limitado la audiencia...", "Ver todas
   las opciones", and in "Apelar la decisión" the checkbox, "Tu explicación" and
   "Enviar apelación". "Entendido" (confirm the problem) is never pressed. An already
-  resolved appeal ("Apelación rechazada") is recorded as `ya_apelado`.
+  resolved appeal ("Apelación rechazada") is recorded as `ya_apelado`. Some tooltips
+  show only "Revisar y tomar medidas" instead of the cause: it opens the same problem
+  dialog, but only a resolved appeal is recorded from it. An appealable form opened
+  that way does not say which problem it is about, so nothing is sent: it is recorded
+  as `revisar_a_mano` and the service lists it with its Studio link.
 - Limited ads (rows without an age restriction): "Ver comentarios", "Enviar
   comentarios", and the Google feedback panel. The panel is an `about:blank` iframe
   inside the `google.com/tools/feedback` one; its box is the textarea labelled

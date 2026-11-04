@@ -86,7 +86,7 @@ function globo(id) {
   g.hidden = false;
   g.querySelectorAll("button").forEach(b => b.onclick = () => {
     g.hidden = true;
-    if (b.innerText === CAUSA_EDAD) abrirEdad(v);
+    if (b.innerText === CAUSA_EDAD || b.innerText === "Revisar y tomar medidas") abrirEdad(v);
     if (b.innerText === "Ver comentarios") abrirComentarios(v);
   });
 }
@@ -168,11 +168,15 @@ pintarFilas();
 CAUSA_ANUNCIOS = "Los anunciantes no muestran anuncios en este tipo de contenido"
 
 
-def video(video_id, edad=None, anuncios=None):
-    """Un video de la lista: `edad` apelable/rechazada, `anuncios` comentarios/otro."""
+def video(video_id, edad=None, anuncios=None, revisar=False):
+    """Un video de la lista: `edad` apelable/rechazada, `anuncios` comentarios/otro.
+
+    `revisar`: el globo trae solo "Revisar y tomar medidas" en lugar de las causas (visto en
+    vivo en videos con la apelación ya rechazada).
+    """
     if edad:
         avisos = "Visible para mayores de 18 años Sin ingresos publicitarios +1"
-        botones = [sa.CAUSA_EDAD, CAUSA_ANUNCIOS]
+        botones = ["Revisar y tomar medidas"] if revisar else [sa.CAUSA_EDAD, CAUSA_ANUNCIOS]
     elif anuncios == "comentarios":
         avisos, botones = "Ingresos publicitarios limitados", ["Ver comentarios"]
     else:
@@ -311,6 +315,23 @@ class TestApelar(unittest.TestCase):
         self.assertEqual(studio.apelaciones, [])
         self.assertEqual(resultado["videos"][0]["estado"], "ya_apelado")
         self.assertEqual(self.anotados()["edad:videoID0001"]["detalle"], "Apelación rechazada")
+
+    def test_un_aviso_con_revisar_y_tomar_medidas_abre_el_problema_y_anota_la_rechazada(self):
+        # Defecto: sin la causa en el globo no se abría nada y tres de esos frenaban la corrida.
+        studio = StudioFalso([video("videoID0001", edad="rechazada", revisar=True)])
+        resultado = self.apelar(studio)
+        self.assertEqual(studio.apelaciones, [])
+        self.assertEqual(resultado["videos"][0]["estado"], "ya_apelado")
+        self.assertEqual(self.anotados()["edad:videoID0001"]["detalle"], "Apelación rechazada")
+
+    def test_por_revisar_y_tomar_medidas_un_formulario_apelable_no_se_manda_y_queda_a_mano(self):
+        # Defecto: ese botón es genérico y el formulario no dice de qué problema es; mandar ahí
+        # el texto de edad sería una declaración a ciegas.
+        studio = StudioFalso([video("videoID0001", edad="apelable", revisar=True)])
+        resultado = self.apelar(studio)
+        self.assertEqual(studio.apelaciones, [])
+        self.assertEqual(resultado["videos"][0]["estado"], "revisar_a_mano")
+        self.assertEqual(self.anotados()["edad:videoID0001"]["estado"], "revisar_a_mano")
 
     def test_anuncios_limitados_manda_el_texto_por_el_panel_de_comentarios(self):
         # Defecto: no llegar a la caja del iframe, otro texto, o mandar comentarios de anuncios a

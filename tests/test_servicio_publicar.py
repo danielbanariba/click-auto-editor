@@ -731,6 +731,7 @@ class TestApelaciones(BaseServicio):
                     {"tipo": "edad", "video_id": "ID1", "titulo": "Banda - Uno", "estado": "enviado"},
                     {"tipo": "anuncios", "video_id": "ID2", "titulo": "Banda - Dos", "estado": "no_confirmado"},
                     {"tipo": "edad", "video_id": "ID3", "titulo": "Banda - Tres", "estado": "ya_apelado"},
+                    {"tipo": "edad", "video_id": "ID5", "titulo": "Banda - Cinco", "estado": "revisar_a_mano"},
                 ],
                 "fallos": [
                     {"tipo": "anuncios", "video_id": "ID4", "titulo": "Banda - Cuatro",
@@ -744,6 +745,9 @@ class TestApelaciones(BaseServicio):
         self.assertIn("https://studio.youtube.com/video/ID1/edit", texto)
         self.assertIn("revísalo", texto.split("Banda - Dos")[0])
         self.assertIn("1 ya tenían una apelación", texto)
+        a_mano = texto.split("a mano")[1]
+        self.assertIn("Banda - Cinco (restricción de edad)", a_mano)
+        self.assertIn("https://studio.youtube.com/video/ID5/edit", a_mano)
         self.assertIn("Banda - Cuatro: el formulario de Studio no se parece al esperado", texto)
         self.assertIn("/logs/apelar.log", texto)
 

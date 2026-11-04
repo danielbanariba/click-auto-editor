@@ -6,7 +6,9 @@ el registro, abre su aviso:
 
 - Restricción de edad: la causa "YouTube ha limitado la audiencia...", "Ver todas las
   opciones" y la tarjeta "Apelar la decisión" (casilla, "Tu explicación" y "Enviar
-  apelación"). "Entendido" confirma el problema y nunca se pulsa.
+  apelación"). "Entendido" confirma el problema y nunca se pulsa. Si el aviso solo trae
+  "Revisar y tomar medidas", se abre por ahí, pero solo se anota una apelación ya resuelta:
+  un formulario abierto así queda para revisar a mano, porque no dice de qué problema es.
 - Anuncios limitados con revisión manual: "Ver comentarios", "Enviar comentarios" y el panel
   de comentarios de Google (texto obligatorio y "Enviar"). No es una apelación formal.
 
@@ -54,6 +56,7 @@ P_APELACION = re.compile(r"apelaci[oó]n", re.IGNORECASE)
 P_ENVIAR = re.compile(r"^\s*enviar\s*$", re.IGNORECASE)
 
 CAUSA_EDAD = "YouTube ha limitado la audiencia de este vídeo a usuarios de al menos 18 años"
+REVISAR_Y_TOMAR_MEDIDAS = "Revisar y tomar medidas"
 VER_TODAS_LAS_OPCIONES = "Ver todas las opciones"
 ENVIAR_APELACION = "Enviar apelación"
 VER_COMENTARIOS = "Ver comentarios"
@@ -219,10 +222,10 @@ def candidatos(pagina, canal, tipo, registro):
             return
 
 
-def abrir_aviso(pagina, video_id, boton):
-    """Pasa el mouse por los avisos del video y pulsa `boton` en el globo que aparece.
+def abrir_aviso(pagina, video_id, *opciones):
+    """Pasa el mouse por los avisos del video y pulsa en el globo la primera de `opciones` que aparece.
 
-    Devuelve los botones del globo; si `boton` no está entre ellos, no pulsa nada.
+    Devuelve los botones del globo; si ninguna de `opciones` está entre ellos, no pulsa nada.
     """
     fila = pagina.locator("ytcp-video-row").filter(
         has=pagina.locator(f'a[href*="/video/{video_id}/"]')
@@ -236,7 +239,8 @@ def abrir_aviso(pagina, video_id, boton):
             globo.wait_for(timeout=ESPERA_AVISO_S * 1000)
             globo.hover(timeout=5_000)
             botones = [t.strip() for t in globo.locator('button, [role="button"]').all_inner_texts() if t.strip()]
-            if boton not in botones:
+            boton = next((o for o in opciones if o in botones), None)
+            if boton is None:
                 return botones
             globo.locator('button, [role="button"]').filter(
                 has_text=re.compile(rf"^\s*{re.escape(boton)}\s*$")
@@ -269,7 +273,9 @@ def cerrar_dialogos(pagina):
 
 
 def _apelar_edad(pagina, fila, sin_enviar, anotar):
-    abrir_aviso(pagina, fila["video_id"], CAUSA_EDAD)
+    # Algunos globos traen "Revisar y tomar medidas" en lugar de la causa (visto en vivo en
+    # apelaciones ya rechazadas): abre el diálogo del problema, que `estado` clasifica igual.
+    botones = abrir_aviso(pagina, fila["video_id"], CAUSA_EDAD, REVISAR_Y_TOMAR_MEDIDAS)
 
     def estado():
         if _boton(pagina, VER_TODAS_LAS_OPCIONES):
@@ -285,6 +291,10 @@ def _apelar_edad(pagina, fila, sin_enviar, anotar):
     if visto != "apelable":
         # "Apelación rechazada" o una ya enviada: Studio no deja apelar otra vez.
         return {"estado": "ya_apelado", "detalle": visto}
+    if CAUSA_EDAD not in botones:
+        # Ese botón es genérico y el formulario no dice de qué problema es: el texto de edad
+        # no se manda a ciegas.
+        return {"estado": "revisar_a_mano", "detalle": REVISAR_Y_TOMAR_MEDIDAS}
     _pulsar(pagina, VER_TODAS_LAS_OPCIONES)
     if not _esperar(lambda: _boton(pagina, ENVIAR_APELACION), ESPERA_FORMULARIO_S):
         raise ErrorDeApelacion("formulario_no_disponible", f"no aparece «{ENVIAR_APELACION}»")
