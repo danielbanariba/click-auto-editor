@@ -1738,6 +1738,202 @@ def impugnar(video_id, sin_enviar=False, abrir_studio=pagina_de_studio, modulo=N
 
 
 # ---------------------------------------------------------------------------
+# seguir_impugnaciones
+# ---------------------------------------------------------------------------
+
+# El último estado leído de cada reclamo de los videos que el servicio impugnó.
+IMPUGNACIONES_JSON = DIR_AGENTE / "impugnaciones.json"
+# Mientras algún reclamo dice esto, la impugnación sigue abierta y el video se sigue mirando.
+P_IMPUGNACION_PENDIENTE = re.compile(r"en proceso", re.IGNORECASE)
+# La corrida tiene el candado de Studio: lo que no alcanza a mirar lo mira al día siguiente.
+TIEMPO_MAXIMO_SEGUIMIENTO_S = 30 * 60
+# Una lista que todavía se dibuja muestra menos filas, o un rato el aviso de "sin reclamos":
+# un reclamo que falta, o ninguno, cuenta solo si otra lectura unos segundos después ve lo mismo.
+PAUSA_RELECTURA_RECLAMOS_S = 10
+RELECTURAS_DE_RECLAMOS = 2
+
+# Una fila por reclamo de /claims (visto en vivo el 2026-11-04): sus renglones (canción,
+# artista, "Derechos de autor", "Audio", ...) y la línea de estado de `#impact-container`
+# sin "Ver detalles" ni "Tomar medidas".
+JS_FILAS_DE_RECLAMOS = """() => Array.from(document.querySelectorAll('ytcr-video-content-list-row')).map(fila => {
+    const renglones = (el) => ((el && el.innerText) || '').split('\\n').map(t => t.trim()).filter(Boolean);
+    const impacto = fila.querySelector('#impact-container');
+    const botones = new Set(renglones(impacto && impacto.querySelector('.action-buttons')));
+    return {renglones: renglones(fila), estado: renglones(impacto).filter(t => !botones.has(t)).join(' ')};
+})"""
+
+
+def leer_impugnaciones():
+    if not IMPUGNACIONES_JSON.exists():
+        return {}
+    with open(IMPUGNACIONES_JSON, "r", encoding="utf-8") as archivo:
+        return json.load(archivo)
+
+
+def guardar_impugnaciones(registro):
+    IMPUGNACIONES_JSON.parent.mkdir(parents=True, exist_ok=True)
+    temporal = IMPUGNACIONES_JSON.with_name(f"{IMPUGNACIONES_JSON.name}.tmp")
+    with open(temporal, "w", encoding="utf-8") as archivo:
+        json.dump(registro, archivo, ensure_ascii=False, indent=2)
+    temporal.replace(IMPUGNACIONES_JSON)
+
+
+def impugnados_por_el_servicio():
+    """Los videos con algún reclamo impugnado, según el JSON final de cada `servicio_impugnar_*.out`."""
+    videos = {}
+    for salida in sorted(DIR_LOGS.glob("servicio_impugnar_[0-9]*.out")):
+        lineas = salida.read_text(encoding="utf-8", errors="replace").splitlines()
+        for linea in reversed(lineas):
+            if not linea.startswith("{"):
+                continue
+            try:
+                resultado = json.loads(linea)
+            except json.JSONDecodeError:
+                continue
+            if resultado.get("impugnados") and resultado.get("video_id"):
+                videos[resultado["video_id"]] = resultado.get("titulo") or resultado["video_id"]
+            break
+    return videos
+
+
+def leer_reclamos(pagina, video_id, recargar=True):
+    """Los reclamos que muestra /claims: [{"reclamo", "estado"}].
+
+    [] si Studio dice que no hay reclamos; None si la página no muestra ni la lista ni ese
+    aviso, o si la lista no tiene la forma conocida (una fila por "Ver detalles"). Con
+    `recargar=False` vuelve a leer la página ya abierta, sin navegar. Solo lee.
+    """
+    from playwright.sync_api import Error as PlaywrightError
+
+    def leer():
+        if esta_en_login_de_google(pagina):
+            raise NavegadorNoDisponible("sin_sesion_en_studio")
+        ver_detalles = apelacion_agente().P_VER_DETALLES_BTN
+        botones, texto = esperar_resultado_de_reclamos(pagina, ver_detalles, ESPERA_RESULTADO_RECLAMOS_S)
+        if botones == 0:
+            # Una página de error o a medio cargar no dice nada: tomarla por vacía daría por
+            # retirados reclamos que siguen ahí.
+            return [] if P_SIN_PROBLEMAS.search(texto) else None
+        apelacion_agente()._scroll_copyright_page_to_bottom(pagina)  # la lista se dibuja al bajar
+        filas = pagina.evaluate(JS_FILAS_DE_RECLAMOS)
+        if not filas or len(filas) != contar_filas_de_reclamos(pagina):
+            return None
+        reclamos, repetidos = [], {}
+        for fila in filas:
+            nombre = " — ".join(fila["renglones"][:2])
+            repetidos[nombre] = repetidos.get(nombre, 0) + 1
+            if repetidos[nombre] > 1:
+                nombre = f"{nombre} ({repetidos[nombre]})"
+            reclamos.append({"reclamo": nombre, "estado": fila["estado"]})
+        return reclamos
+
+    if recargar:
+        pagina.goto(URL_RECLAMOS.format(video_id=video_id), wait_until="domcontentloaded", timeout=ESPERA_NAVEGACION_MS)
+        try:
+            pagina.wait_for_load_state("networkidle", timeout=12_000)
+        except PlaywrightError:
+            pass
+    for intento in range(1, INTENTOS_NAVEGACION + 1):
+        try:
+            return leer()
+        except PlaywrightError as exc:
+            # Studio aún puede navegar justo después de cargar: se espera y se vuelve a mirar.
+            if "Execution context was destroyed" not in str(exc) or intento == INTENTOS_NAVEGACION:
+                raise
+            print(f"Studio navegó mientras se leían los reclamos (intento {intento}): {exc}")
+            time.sleep(PAUSA_REINTENTO_NAVEGACION_S)
+
+
+def confirmar_reclamos(pagina, video_id, antes, reclamos):
+    """`reclamos` si están todos los de `antes` y la lista no está vacía; si no, relee la misma
+    página tras una pausa y vale cuando dos lecturas seguidas coinciden. None si no coinciden."""
+    relecturas = 0
+    while reclamos is not None and (
+        not reclamos or not set(antes) <= {reclamo["reclamo"] for reclamo in reclamos}
+    ):
+        if relecturas == RELECTURAS_DE_RECLAMOS:
+            return None
+        time.sleep(PAUSA_RELECTURA_RECLAMOS_S)
+        otra = leer_reclamos(pagina, video_id, recargar=False)
+        relecturas += 1
+        if otra == reclamos:
+            return reclamos
+        print(f"{video_id}: la lista de reclamos cambió entre dos lecturas; la vuelvo a leer")
+        reclamos = otra
+    return reclamos
+
+
+def comparar_reclamos(antes, reclamos):
+    """Lo leído como {reclamo: estado} y los cambios contra `antes`: un estado distinto o un
+    reclamo que ya no está (`ahora` None). La cuenta de días ("Caduca dentro de N días") no
+    es un cambio. Sin `antes`, la lectura es la base y no hay cambios."""
+    ahora = {reclamo["reclamo"]: reclamo["estado"] for reclamo in reclamos}
+    sin_numeros = lambda texto: re.sub(r"\d+", "#", texto)
+    cambios = [
+        {"reclamo": nombre, "antes": estado, "ahora": ahora.get(nombre)}
+        for nombre, estado in antes.items()
+        if nombre not in ahora or sin_numeros(ahora[nombre]) != sin_numeros(estado)
+    ]
+    return ahora, cambios
+
+
+def seguir_impugnaciones(abrir_studio=pagina_de_studio):
+    """Lee en Studio el estado de los reclamos que impugnó el servicio y devuelve lo que cambió.
+
+    Solo abre /claims y lee: nunca pulsa nada. Los videos salen de los `servicio_impugnar_*.out`
+    con algún reclamo impugnado. La primera lectura de cada uno es la base; después, cada
+    cambio se anota en IMPUGNACIONES_JSON y sale una sola vez en `cambios`. Un video sin
+    reclamos "en proceso" deja de seguirse. Lo lanza el servicio una vez por día, tras `apelar`.
+    """
+    log = ruta_log("seguir_impugnaciones")
+    base = {"log": str(log)}
+    registro = leer_impugnaciones()
+    for video_id, titulo in impugnados_por_el_servicio().items():
+        registro.setdefault(video_id, {"titulo": titulo})
+    # Primero lo que hace más que no se mira: si se acaba el tiempo, mañana sigue el resto.
+    seguidos = sorted(
+        (video_id for video_id, datos in registro.items() if not datos.get("terminado")),
+        key=lambda video_id: registro[video_id].get("revisado", ""),
+    )
+    cambios, fallos = [], []
+    inicio = time.monotonic()
+    with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
+        try:
+            if seguidos:
+                # El mismo candado que `programar`, `impugnar` y `apelar`: comparten el perfil.
+                with bloqueo("programar"), abrir_studio() as pagina:
+                    for video_id in seguidos:
+                        if time.monotonic() - inicio > TIEMPO_MAXIMO_SEGUIMIENTO_S:
+                            print("Se acabó el tiempo de la corrida: el resto se mira mañana.")
+                            break
+                        datos = registro[video_id]
+                        antes = datos.get("reclamos") or {}
+                        reclamos = confirmar_reclamos(pagina, video_id, antes, leer_reclamos(pagina, video_id))
+                        if reclamos is None:
+                            print(f"{video_id}: no se pudo leer /claims")
+                            fallos.append(
+                                {"video_id": video_id, "titulo": datos.get("titulo"),
+                                 "motivo": "lista_de_reclamos_no_disponible"}
+                            )
+                            continue
+                        ahora, nuevos = comparar_reclamos(antes, reclamos)
+                        cambios += [{"video_id": video_id, "titulo": datos.get("titulo"), **c} for c in nuevos]
+                        datos.update(
+                            reclamos=ahora,
+                            revisado=datetime.now().isoformat(timespec="seconds"),
+                            terminado=not any(P_IMPUGNACION_PENDIENTE.search(e) for e in ahora.values()),
+                        )
+                        guardar_impugnaciones(registro)
+                        print(f"{video_id}: {len(ahora)} reclamos, {len(nuevos)} cambios")
+        except errores_del_paso_de_studio() as exc:
+            detalle = f"{type(exc).__name__}: {exc}"[:200]
+            print(f"No se pudieron leer los reclamos en Studio: {detalle}")
+            motivo = exc.motivo if isinstance(exc, NavegadorNoDisponible) else "error_navegador"
+            return {"ok": False, "motivo": motivo, "detalle": detalle, "cambios": cambios, "fallos": fallos, **base}
+    return {"ok": not fallos, "seguidos": len(seguidos), "cambios": cambios, "fallos": fallos, **base}
+
+
+# ---------------------------------------------------------------------------
 # apelar
 # ---------------------------------------------------------------------------
 
@@ -1764,7 +1960,8 @@ def apelar(sin_enviar=False, limite=LIMITE_APELACIONES, abrir_studio=pagina_de_s
     """Apela en hebreo la restricción de edad y los anuncios limitados de los videos del canal.
 
     Lo lanza el servicio una vez por día. Cada video queda en APELACIONES_JSON antes de
-    pulsar el envío y no se vuelve a tocar; `sin_enviar` es la prueba en seco.
+    pulsar el envío y nunca se le manda nada otra vez; lo enviado solo se vuelve a mirar para
+    anotar qué resolvió YouTube. `sin_enviar` es la prueba en seco.
     """
     import studio_apelaciones
 
@@ -2025,6 +2222,11 @@ def parse_args(argv=None):
         help="Carga en el registro de publicados los títulos del canal y lo eliminado o subido.",
     )
 
+    sub.add_parser(
+        "seguir_impugnaciones",
+        help="Lee en Studio el estado de los reclamos impugnados y dice qué cambió (solo lectura).",
+    )
+
     p = sub.add_parser(
         "estado", help="Videos sin programar, álbumes sin aprobar y si hay un render corriendo."
     )
@@ -2058,6 +2260,8 @@ def main(argv=None):
         return responder(apelar(sin_enviar=args.sin_enviar, limite=args.limite))
     if args.comando == "sembrar_publicados":
         return responder(sembrar_publicados())
+    if args.comando == "seguir_impugnaciones":
+        return responder(seguir_impugnaciones())
     return responder(estado(esperar_render=args.esperar_render))
 
 

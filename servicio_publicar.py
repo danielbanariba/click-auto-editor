@@ -91,9 +91,11 @@ LIMITES_PASO_S = {
     "subir": 4 * 3600,
     "programar": 8 * 3600,  # espera el procesado de YouTube y el margen del reclamo
     "apelar": 90 * 60,  # tiene el candado de Studio: colgado, frenaría a `programar`
+    "seguir_impugnaciones": 45 * 60,  # también; corta solo a los 30 min y sigue al otro día
 }
 # `apelar` anota cada video antes de pulsar el envío: cortarlo nunca hace que se repita uno.
-PASOS_CORTABLES = ("verificar", "programar", "apelar")
+# `seguir_impugnaciones` solo lee Studio.
+PASOS_CORTABLES = ("verificar", "programar", "apelar", "seguir_impugnaciones")
 GRACIA_CORTE_S = 10  # entre SIGTERM y SIGKILL
 MOTIVOS_SUBIDA = {
     "limite_canal": "YouTube no deja subir más videos por hoy",
@@ -680,10 +682,31 @@ class Servicio:
         self.avisar(texto, foto=foto)
 
     def tras_apelar(self, resultado, argumentos):
-        """Avisa qué se mandó; si no hubo nada que apelar, no manda nada."""
+        """Avisa qué se mandó y qué resolvió YouTube; si no hubo nada, no manda nada.
+
+        Después lanza `seguir_impugnaciones`: así las dos lecturas diarias de Studio van seguidas.
+        """
+        self.lanzar_paso("seguir_impugnaciones")
         videos = resultado.get("videos") or []
+        resueltos = resultado.get("resultados") or []
         fallos = resultado.get("fallos") or []
+
+        def renglones(lista):
+            return [
+                f"• {v.get('titulo') or v['video_id']} ({TIPOS_APELACION[v['tipo']]})\n"
+                f"  https://studio.youtube.com/video/{v['video_id']}/edit"
+                for v in lista
+            ]
+
         lineas = []
+        for estado, encabezado in (
+            ("rechazada", "❌ YouTube rechazó la apelación:"),
+            ("aceptada", "🎉 YouTube aceptó la apelación (el video salió de la lista de Studio):"),
+        ):
+            hechos = [r for r in resueltos if r.get("resultado") == estado]
+            if hechos:
+                lineas.append(encabezado)
+                lineas += renglones(hechos)
         for estado, encabezado in (
             ("enviado", "✅ Apelé en hebreo:"),
             ("no_confirmado", "⚠️ Lo envié pero Studio no mostró que llegó (revísalo):"),
@@ -696,11 +719,7 @@ class Servicio:
             hechos = [v for v in videos if v.get("estado") == estado]
             if hechos:
                 lineas.append(encabezado)
-                lineas += [
-                    f"• {v.get('titulo') or v['video_id']} ({TIPOS_APELACION[v['tipo']]})\n"
-                    f"  https://studio.youtube.com/video/{v['video_id']}/edit"
-                    for v in hechos
-                ]
+                lineas += renglones(hechos)
         ya_apelados = sum(1 for v in videos if v.get("estado") == "ya_apelado")
         if ya_apelados:
             lineas.append(f"ℹ️ {ya_apelados} ya tenían una apelación y Studio no deja otra: no les mandé nada.")
@@ -710,11 +729,16 @@ class Servicio:
                 f"ℹ️ {sin_opcion} con anuncios limitados no tienen «Ver comentarios» (sin revisión manual): "
                 "no les mandé nada."
             )
-        if fallos:
-            lineas.append("❌ No pude apelar (no envié nada; lo intento de nuevo mañana):")
-            for fallo in fallos:
-                causa = MOTIVOS_APELACION.get(fallo.get("motivo")) or fallo.get("motivo")
-                lineas.append(f"• {fallo.get('titulo') or fallo.get('video_id')}: {causa}")
+        for revision, encabezado in (
+            (False, "❌ No pude apelar (no envié nada; lo intento de nuevo mañana):"),
+            (True, "❌ No pude ver cómo va la apelación (lo miro de nuevo mañana):"),
+        ):
+            de_este_tipo = [f for f in fallos if bool(f.get("revision")) == revision]
+            if de_este_tipo:
+                lineas.append(encabezado)
+                for fallo in de_este_tipo:
+                    causa = MOTIVOS_APELACION.get(fallo.get("motivo")) or fallo.get("motivo")
+                    lineas.append(f"• {fallo.get('titulo') or fallo.get('video_id')}: {causa}")
         motivo = resultado.get("motivo")
         if motivo:
             causa = MOTIVOS_APELACION.get(motivo) or motivo
@@ -724,6 +748,42 @@ class Servicio:
         if motivo or fallos:
             lineas.append(f"Log: {resultado.get('log')}")
         self.avisar("\n".join(["📨 Apelaciones de hoy"] + lineas))
+
+    def tras_seguir_impugnaciones(self, resultado, argumentos):
+        """Avisa qué reclamos impugnados cambiaron en Studio; si nada cambió, no manda nada."""
+        cambios = resultado.get("cambios") or []
+        fallos = resultado.get("fallos") or []
+        lineas = []
+        por_video = {}
+        for cambio in cambios:
+            por_video.setdefault(cambio["video_id"], []).append(cambio)
+        for video_id, del_video in por_video.items():
+            lineas.append(f"\"{del_video[0].get('titulo') or video_id}\"")
+            for cambio in del_video:
+                if cambio["ahora"] is None:
+                    lineas.append(f"• {cambio['reclamo']}: ya no está en la lista (el reclamo se retiró)")
+                else:
+                    lineas.append(f"• {cambio['reclamo']}: {cambio['ahora']}\n  (antes: {cambio['antes']})")
+            lineas.append(f"https://studio.youtube.com/video/{video_id}/claims")
+        if lineas:
+            lineas.insert(0, "⚖️ Studio cambió el estado de reclamos que impugné:")
+        if fallos:
+            lineas.append("❌ No pude leer los reclamos (no toqué nada; lo miro de nuevo mañana):")
+            for fallo in fallos:
+                causa = MOTIVOS_IMPUGNACION.get(fallo.get("motivo")) or fallo.get("motivo")
+                lineas.append(
+                    f"• {fallo.get('titulo') or fallo['video_id']}: {causa}\n"
+                    f"  https://studio.youtube.com/video/{fallo['video_id']}/claims"
+                )
+        motivo = resultado.get("motivo")
+        if motivo:
+            causa = MOTIVOS_IMPUGNACION.get(motivo) or motivo
+            lineas.append(f"❌ No terminé de mirar las impugnaciones: {causa}. Sigo mañana.")
+        if not lineas:
+            return
+        if motivo or fallos:
+            lineas.append(f"Log: {resultado.get('log')}")
+        self.avisar("\n".join(lineas))
 
     def tras_eliminar_video(self, resultado, argumentos):
         video_id = valor(argumentos, "--video-id")

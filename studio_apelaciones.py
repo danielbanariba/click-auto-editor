@@ -2,7 +2,8 @@
 
 Lo usa `pipeline_agente.py apelar`, que el servicio lanza una vez por día. Recorre la lista
 de contenido de Studio filtrada por cada problema y, por cada video que todavía no está en
-el registro, abre su aviso:
+el registro, abre su aviso (lo ya mandado sin resultado se mira en el mismo recorrido; ver
+`apelar_videos`):
 
 - Restricción de edad: la causa "YouTube ha limitado la audiencia...", "Ver todas las
   opciones" y la tarjeta "Apelar la decisión" (casilla, "Tu explicación" y "Enviar
@@ -13,8 +14,8 @@ el registro, abre su aviso:
   de comentarios de Google (texto obligatorio y "Enviar"). No es una apelación formal.
 
 Apelar es una declaración a nombre del usuario: cada video se anota en el registro antes de
-pulsar el botón de envío y nunca se le vuelve a mandar nada. Nunca lanza errores hacia el
-paso: devuelve un diccionario con lo que hizo.
+pulsar el botón de envío y nunca se le vuelve a mandar nada; después solo se lee qué
+resolvió YouTube. Nunca lanza errores hacia el paso: devuelve un diccionario con lo que hizo.
 """
 import re
 import time
@@ -53,6 +54,7 @@ P_MAYORES_DE_18 = re.compile(r"mayores de 18", re.IGNORECASE)
 P_ANUNCIOS_LIMITADOS = re.compile(r"ingresos publicitarios limitados", re.IGNORECASE)
 P_SIGUIENTE = re.compile(r"(página siguiente|next page)", re.IGNORECASE)
 P_APELACION = re.compile(r"apelaci[oó]n", re.IGNORECASE)
+P_RECHAZADA = re.compile(r"apelaci[oó]n rechazada", re.IGNORECASE)
 P_ENVIAR = re.compile(r"^\s*enviar\s*$", re.IGNORECASE)
 
 CAUSA_EDAD = "YouTube ha limitado la audiencia de este vídeo a usuarios de al menos 18 años"
@@ -63,6 +65,8 @@ VER_COMENTARIOS = "Ver comentarios"
 ENVIAR_COMENTARIOS = "Enviar comentarios"
 CAJA_DE_COMENTARIOS = "Explica tus comentarios (obligatorio)"
 TIPOS = ("edad", "anuncios")
+# Lo que se mandó (o pudo mandarse) y todavía no tiene resultado: se mira en cada corrida.
+ESPERAN_RESULTADO = ("enviando", "enviado", "no_confirmado")
 
 ESPERA_LISTA_S = 30
 ESPERA_AVISO_S = 8
@@ -196,15 +200,25 @@ def _filas_de_la_lista(pagina, tipo, distinta_de=None):
     raise ErrorDeApelacion("lista_no_disponible", f"la lista de «{tipo}» no terminó de cargar")
 
 
-def candidatos(pagina, canal, tipo, registro):
-    """Los videos de la lista de `tipo` que todavía no están en el registro, página por página."""
+def espera_resultado(datos):
+    return datos.get("estado") in ESPERAN_RESULTADO and not datos.get("resultado")
+
+
+def candidatos(pagina, canal, tipo, registro, recorrido):
+    """Los videos de la lista de `tipo` sin registro o con la apelación esperando resultado.
+
+    Va página por página. `recorrido["vistos"]` junta todos los videos de la lista, y
+    `recorrido["completo"]` queda en True solo si se llegó a la última página.
+    """
     url = URL_LISTA.format(canal=canal, filtro=quote(FILTROS[tipo], safe=""))
     pagina.goto(url, wait_until="domcontentloaded")
     _comprobar_sesion(pagina)
     filas = _filas_de_la_lista(pagina, tipo)
     for _ in range(MAX_PAGINAS):
+        recorrido["vistos"].update(fila["video_id"] for fila in filas)
         for fila in filas:
-            if f"{tipo}:{fila['video_id']}" in registro:
+            datos = registro.get(f"{tipo}:{fila['video_id']}")
+            if datos is not None and not espera_resultado(datos):
                 continue
             # Un video con restricción de edad también sale en la lista de anuncios: su
             # apelación es la de edad.
@@ -215,6 +229,7 @@ def candidatos(pagina, canal, tipo, registro):
             yield fila
         siguiente = pagina.get_by_role("button", name=P_SIGUIENTE).first
         if not siguiente.count() or siguiente.get_attribute("aria-disabled") == "true":
+            recorrido["completo"] = True
             return
         siguiente.click()
         filas = _filas_de_la_lista(pagina, tipo, distinta_de=filas[0]["video_id"])
@@ -272,10 +287,8 @@ def cerrar_dialogos(pagina):
         raise ErrorDeApelacion("dialogo_abierto", "Studio dejó un diálogo abierto")
 
 
-def _apelar_edad(pagina, fila, sin_enviar, anotar):
-    # Algunos globos traen "Revisar y tomar medidas" en lugar de la causa (visto en vivo en
-    # apelaciones ya rechazadas): abre el diálogo del problema, que `estado` clasifica igual.
-    botones = abrir_aviso(pagina, fila["video_id"], CAUSA_EDAD, REVISAR_Y_TOMAR_MEDIDAS)
+def _leer_problema(pagina):
+    """"apelable" si el diálogo del problema deja apelar; si no, su primer renglón ("Apelación …")."""
 
     def estado():
         if _boton(pagina, VER_TODAS_LAS_OPCIONES):
@@ -288,6 +301,14 @@ def _apelar_edad(pagina, fila, sin_enviar, anotar):
     visto = _esperar(estado, ESPERA_DIALOGO_S)
     if visto is None:
         raise ErrorDeApelacion("dialogo_desconocido", (_dialogo(pagina) or "no se abrió")[:150])
+    return visto
+
+
+def _apelar_edad(pagina, fila, sin_enviar, anotar):
+    # Algunos globos traen "Revisar y tomar medidas" en lugar de la causa (visto en vivo en
+    # apelaciones ya rechazadas): abre el diálogo del problema, que se clasifica igual.
+    botones = abrir_aviso(pagina, fila["video_id"], CAUSA_EDAD, REVISAR_Y_TOMAR_MEDIDAS)
+    visto = _leer_problema(pagina)
     if visto != "apelable":
         # "Apelación rechazada" o una ya enviada: Studio no deja apelar otra vez.
         return {"estado": "ya_apelado", "detalle": visto}
@@ -380,7 +401,18 @@ def _apelar_anuncios(pagina, fila, sin_enviar, anotar):
     return {"estado": "no_confirmado"}
 
 
+def _revisar_edad(pagina, fila):
+    """Lo que dice Studio de una apelación de edad ya mandada. Solo lee el diálogo: no pulsa nada en él."""
+    abrir_aviso(pagina, fila["video_id"], CAUSA_EDAD, REVISAR_Y_TOMAR_MEDIDAS)
+    visto = _leer_problema(pagina)
+    if P_RECHAZADA.search(visto):
+        return {"resultado": "rechazada", "detalle": visto}
+    return None  # en revisión, o algo que no es un resultado
+
+
 APELAR = {"edad": _apelar_edad, "anuncios": _apelar_anuncios}
+# Los anuncios no tienen rechazo formal: su único resultado es salir de la lista.
+REVISAR = {"edad": _revisar_edad}
 
 
 def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=None):
@@ -390,35 +422,68 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
     botón de envío, así un corte a mitad nunca hace que se mande dos veces. `limite` es
     cuántos envíos hace como máximo; `sin_enviar` llena el primer formulario de cada tipo
     y lo cierra sin enviarlo. `capturar(nombre)` guarda una captura y devuelve su ruta.
+
+    Las apelaciones ya mandadas se miran en el mismo recorrido, también después del límite:
+    "Apelación rechazada" es un rechazo, y un video que ya no está en una lista recorrida
+    hasta el final es una aceptada. Cada resultado se anota y sale una sola vez en
+    `resumen["resultados"]`.
     """
-    resumen = {"videos": [], "fallos": []}
+    resumen = {"videos": [], "fallos": [], "resultados": []}
     inicio = time.monotonic()
     enviados = 0
     fallos_seguidos = 0
+
+    def anotar_resultado(clave, base, resultado, detalle=None):
+        resumen["resultados"].append({**base, "resultado": resultado, "detalle": detalle})
+        if not sin_enviar:
+            fecha = time.strftime("%Y-%m-%dT%H:%M:%S")
+            anotar(clave, {**registro[clave], "resultado": resultado, "detalle_resultado": detalle,
+                           "fecha_resultado": fecha})
+        print(f"{clave}: {resultado}")
+
     try:
         canal = canal_de_studio(pagina)
         for tipo in TIPOS:
-            for fila in candidatos(pagina, canal, tipo, registro):
-                if (not sin_enviar and enviados >= limite) or time.monotonic() - inicio > TIEMPO_MAXIMO_S:
+            recorrido = {"vistos": set(), "completo": False}
+            for fila in candidatos(pagina, canal, tipo, registro, recorrido):
+                if time.monotonic() - inicio > TIEMPO_MAXIMO_S:
                     return resumen
                 clave = f"{tipo}:{fila['video_id']}"
                 base = {"tipo": tipo, "video_id": fila["video_id"], "titulo": fila["titulo"]}
+                seguimiento = clave in registro
+                if seguimiento and tipo not in REVISAR:
+                    continue
+                if not seguimiento and not sin_enviar and enviados >= limite:
+                    continue  # hoy no se manda nada más, pero la lista se sigue mirando por los resultados
                 fecha = time.strftime("%Y-%m-%dT%H:%M:%S")
                 try:
-                    hecho = APELAR[tipo](
-                        pagina, fila, sin_enviar, lambda datos: anotar(clave, {**base, **datos, "fecha": fecha})
-                    )
+                    if seguimiento:
+                        hecho = REVISAR[tipo](pagina, fila)
+                    else:
+                        hecho = APELAR[tipo](
+                            pagina, fila, sin_enviar, lambda datos: anotar(clave, {**base, **datos, "fecha": fecha})
+                        )
                 except ErrorDeApelacion as exc:
                     if exc.motivo in ("sin_sesion_en_studio", "lista_no_disponible", "dialogo_abierto"):
                         raise
                     captura = capturar(f"apelar_{fila['video_id']}") if capturar else None
-                    resumen["fallos"].append({**base, "motivo": exc.motivo, "detalle": exc.detalle, "captura": captura})
-                    print(f"No se pudo apelar {clave}: {exc}")
+                    fallo = {**base, "motivo": exc.motivo, "detalle": exc.detalle, "captura": captura}
+                    if seguimiento:
+                        fallo["revision"] = True  # no se pudo leer el resultado; no se mandó nada
+                    resumen["fallos"].append(fallo)
+                    print(f"No se pudo {'revisar' if seguimiento else 'apelar'} {clave}: {exc}")
                     cerrar_dialogos(pagina)
+                    if seguimiento:
+                        continue  # no poder leer un resultado no frena las apelaciones nuevas
                     fallos_seguidos += 1
                     if fallos_seguidos >= MAX_FALLOS:
                         resumen["motivo"] = "demasiados_fallos"
                         return resumen
+                    continue
+                if seguimiento:
+                    if hecho:
+                        anotar_resultado(clave, base, hecho["resultado"], hecho["detalle"])
+                    cerrar_dialogos(pagina)
                     continue
                 fallos_seguidos = 0
                 if hecho["estado"] in ("enviado", "no_confirmado"):
@@ -432,6 +497,13 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
                 cerrar_dialogos(pagina)
                 if hecho["estado"] == "listo":
                     break  # la prueba en seco llena un solo formulario de cada tipo
+            # Sin filas no hay prueba de que la lista cargó: nada se da por aceptado.
+            if recorrido["completo"] and recorrido["vistos"]:
+                for clave, datos in list(registro.items()):
+                    tipo_de_clave, video_id = clave.split(":", 1)
+                    if tipo_de_clave == tipo and espera_resultado(datos) and video_id not in recorrido["vistos"]:
+                        base = {"tipo": tipo, "video_id": video_id, "titulo": datos.get("titulo")}
+                        anotar_resultado(clave, base, "aceptada")
     except ErrorDeApelacion as exc:
         resumen.update(motivo=exc.motivo, detalle=exc.detalle)
     except PlaywrightError as exc:

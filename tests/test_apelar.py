@@ -278,6 +278,10 @@ class TestApelar(unittest.TestCase):
     def anotados(self):
         return json.loads(self.registro.read_text(encoding="utf-8"))
 
+    def registrar(self, registro):
+        self.registro.parent.mkdir(parents=True, exist_ok=True)
+        self.registro.write_text(json.dumps(registro), encoding="utf-8")
+
     def test_apela_la_restriccion_de_edad_con_el_texto_en_hebreo_y_la_anota(self):
         # Defecto: otro texto, la casilla sin marcar, "Entendido" pulsado o el video sin anotar.
         studio = StudioFalso([video("videoID0001", edad="apelable")])
@@ -367,6 +371,107 @@ class TestApelar(unittest.TestCase):
         self.assertEqual((studio.apelaciones, studio.comentarios, studio.entendidos), ([], [], []))
         self.assertEqual([v["estado"] for v in resultado["videos"]], ["listo", "listo"])
         self.assertFalse(self.registro.exists())
+
+    def test_una_apelacion_enviada_que_youtube_rechazo_se_avisa_una_vez_y_se_anota(self):
+        # Defecto: una apelación mandada no se volvía a mirar y su rechazo nunca se avisaba.
+        self.registrar({"edad:videoID0001": {"estado": "enviado", "tipo": "edad", "video_id": "videoID0001"}})
+        studio = StudioFalso([video("videoID0001", edad="rechazada")])
+        primero = self.apelar(studio)
+        segundo = self.apelar(studio)
+        self.assertEqual((studio.apelaciones, studio.entendidos), ([], []))
+        self.assertEqual(
+            [(r["video_id"], r["resultado"]) for r in primero["resultados"]], [("videoID0001", "rechazada")]
+        )
+        self.assertEqual(segundo["resultados"], [])
+        anotado = self.anotados()["edad:videoID0001"]
+        self.assertEqual((anotado["estado"], anotado["resultado"]), ("enviado", "rechazada"))
+
+    def test_una_apelacion_en_revision_no_es_un_resultado(self):
+        # Defecto: tomar cualquier diálogo que nombra la apelación como un rechazo.
+        self.registrar({"edad:videoID0001": {"estado": "enviado"}})
+        resultado = self.apelar(StudioFalso([video("videoID0001", edad="enviada")]))
+        self.assertEqual(resultado["resultados"], [])
+        self.assertNotIn("resultado", self.anotados()["edad:videoID0001"])
+
+    def test_al_llegar_al_limite_sigue_mirando_las_apelaciones_ya_enviadas(self):
+        # Defecto: al llegar al límite la corrida terminaba y no miraba las que estaban más abajo.
+        self.registrar({"edad:videoID0003": {"estado": "enviado"}})
+        studio = StudioFalso([
+            video("videoID0001", edad="apelable"),
+            video("videoID0002", edad="apelable"),
+            video("videoID0003", edad="rechazada"),
+        ])
+        resultado = self.apelar(studio, limite=1)
+        self.assertEqual([a["id"] for a in studio.apelaciones], ["videoID0001"])
+        self.assertEqual([r["video_id"] for r in resultado["resultados"]], ["videoID0003"])
+
+    def test_una_apelacion_cuyo_video_salio_de_la_lista_se_avisa_como_aceptada(self):
+        # Defecto: YouTube acepta una apelación sacando el video de la lista, y eso nunca se avisaba.
+        self.registrar({
+            "edad:videoID0001": {"estado": "enviado", "tipo": "edad", "video_id": "videoID0001", "titulo": "Uno"},
+            "anuncios:videoID0002": {"estado": "enviado", "tipo": "anuncios", "video_id": "videoID0002", "titulo": "Dos"},
+        })
+        studio = StudioFalso([video("videoID0003", edad="rechazada"), video("videoID0004", anuncios="otro")])
+        resultado = self.apelar(studio)
+        self.assertEqual(
+            [(r["tipo"], r["video_id"], r["titulo"], r["resultado"]) for r in resultado["resultados"]],
+            [("edad", "videoID0001", "Uno", "aceptada"), ("anuncios", "videoID0002", "Dos", "aceptada")],
+        )
+        self.assertEqual(self.anotados()["anuncios:videoID0002"]["resultado"], "aceptada")
+
+    def test_una_lista_sin_recorrer_hasta_el_final_no_da_nada_por_aceptado(self):
+        # Defecto: dar por aceptada una apelación porque su video no estaba en las páginas vistas.
+        self.registrar({"edad:videoID0003": {"estado": "enviado"}})
+        studio = StudioFalso([video(i, edad="rechazada") for i in ("videoID0001", "videoID0002")], por_pagina=1)
+        with mock.patch.object(sa, "MAX_PAGINAS", 1):
+            resultado = self.apelar(studio)
+        self.assertEqual(resultado["resultados"], [])
+        self.assertNotIn("resultado", self.anotados()["edad:videoID0003"])
+
+    def test_una_lista_vacia_no_da_nada_por_aceptado(self):
+        # Defecto: una lista que no llegó a cargar (sin filas) daba por aceptado todo lo pendiente.
+        self.registrar({"edad:videoID0001": {"estado": "enviado"}})
+        resultado = self.apelar(StudioFalso([]))
+        self.assertEqual(resultado["resultados"], [])
+        self.assertNotIn("resultado", self.anotados()["edad:videoID0001"])
+
+    def test_un_resultado_que_no_se_puede_leer_es_un_fallo_de_revision_sin_tocar_el_registro(self):
+        # Defecto: un seguimiento que falla se perdía en silencio o se avisaba como "no pude apelar".
+        self.registrar({"edad:videoID0001": {"estado": "enviado"}})
+        sin_causa = {**video("videoID0001", edad="rechazada"), "botones": ["Otra cosa"]}
+        resultado = self.apelar(StudioFalso([sin_causa]))
+        self.assertEqual([(f["video_id"], f.get("revision")) for f in resultado["fallos"]], [("videoID0001", True)])
+        self.assertEqual(self.anotados(), {"edad:videoID0001": {"estado": "enviado"}})
+
+    def test_seguimientos_que_no_se_pueden_leer_no_frenan_las_apelaciones_nuevas(self):
+        # Defecto: tres apelaciones ya mandadas con un aviso ilegible cortaban la corrida
+        # (demasiados_fallos) antes de mandar las nuevas, y eso se repetía todos los días.
+        pendientes = ("videoID0001", "videoID0002", "videoID0003")
+        self.registrar({f"edad:{v}": {"estado": "enviado"} for v in pendientes})
+        ilegibles = [{**video(v, edad="rechazada"), "botones": ["Otra cosa"]} for v in pendientes]
+        studio = StudioFalso(ilegibles + [video("videoID0004", edad="apelable"),
+                                          video("videoID0005", anuncios="comentarios")])
+        resultado = self.apelar(studio)
+        self.assertEqual([a["id"] for a in studio.apelaciones], ["videoID0004"])
+        self.assertEqual([c["id"] for c in studio.comentarios], ["videoID0005"])
+        self.assertNotIn("motivo", resultado)
+        self.assertEqual([f.get("revision") for f in resultado["fallos"]], [True, True, True])
+
+    def test_un_resultado_leido_entre_envios_fallidos_no_reinicia_la_cuenta(self):
+        # Defecto: un resultado leído entre dos envíos fallidos ponía la cuenta en cero, y un
+        # formulario roto se volvía a probar con cada video del atraso.
+        self.registrar({"edad:videoID0002": {"estado": "enviado"}, "edad:videoID0004": {"estado": "enviado"}})
+
+        def roto(video_id):
+            return {**video(video_id, edad="apelable"), "botones": ["Otra cosa"]}
+
+        studio = StudioFalso([
+            roto("videoID0001"), video("videoID0002", edad="rechazada"), roto("videoID0003"),
+            video("videoID0004", edad="rechazada"), roto("videoID0005"), video("videoID0006", edad="apelable"),
+        ])
+        resultado = self.apelar(studio)
+        self.assertEqual(resultado["motivo"], "demasiados_fallos")
+        self.assertEqual(studio.apelaciones, [])
 
     def test_sin_sesion_en_studio_no_manda_nada_y_lo_dice(self):
         studio = StudioFalso([video("videoID0001", edad="apelable")], sin_sesion=True)

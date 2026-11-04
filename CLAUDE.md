@@ -88,6 +88,7 @@ env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim che
 env/bin/python pipeline_agente.py eliminar_video --video-id ID  # deletes the video from YouTube (irreversible; the service only runs it from a Telegram button)
 env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # disputes every claim of the video in Studio (a legal statement in the user's name); --sin-enviar fills the first form and closes it without sending
 env/bin/python pipeline_agente.py apelar [--sin-enviar] [--limite N]  # appeals age restrictions and limited ads in Hebrew (in the user's name); --sin-enviar fills one form of each kind and closes it
+env/bin/python pipeline_agente.py seguir_impugnaciones  # reads /claims of the disputed videos and reports what changed (read-only)
 env/bin/python pipeline_agente.py estado [--esperar-render]  # unscheduled uploads, rendered albums awaiting approval, render running
 env/bin/python pipeline_agente.py sembrar_publicados  # loads the channel titles (1 quota unit per 50 videos) and the albums the service deleted or uploaded into the published registry
 ```
@@ -172,6 +173,22 @@ failure stops the run, and the
 JSON reports `reclamos`, `impugnados`, `fallos` and a `captura` of `/claims`. A
 video with no disputable claims returns `motivo = sin_reclamos_impugnables`.
 
+`seguir_impugnaciones` follows the disputes once a day; the service launches it right after
+`apelar`. It takes the videos from the `servicio_impugnar_*.out` logs with at least one claim
+disputed, opens their `/claims` and only reads it (it never presses anything). Each claim is
+a `ytcr-video-content-list-row`: its name is the song and the artist, and its status is the
+text of `#impact-container` without its buttons. The first read of a video is the baseline,
+kept in `data/agente/impugnaciones.json`. After that, a status that changed (the day count
+of "Caduca dentro de N días" does not count) or a claim that is no longer listed is a change:
+it is written there and reported once in one Telegram message, with the old and new text and
+the `/claims` link. A page with neither the list nor Studio's "no claims" notice, or with
+rows that do not match the "Ver detalles" buttons, is a failure and changes nothing. The list
+draws in parts and Studio may show the "no claims" notice for a moment first, so a read
+with a claim missing, or with none, counts only when a re-read of the same page
+`PAUSA_RELECTURA_RECLAMOS_S` (10 s) later sees the same; two re-reads that keep changing are
+a failure. A video with no claim "en proceso" is no longer followed. The run holds the `programar` lock, looks
+first at the videos checked longest ago and stops after 30 min (`TIEMPO_MAXIMO_SEGUIMIENTO_S`).
+
 Monetization (`studio_monetizacion.py`) turns ads on at
 `/video/<id>/monetization`. After opening it, Studio navigates several times and ends
 on `/monetization/ads`; a read of the ads state caught in one of those navigations
@@ -210,12 +227,24 @@ characters):
 
 `data/agente/apelaciones.json` keeps one entry per `<tipo>:<video_id>`. Each one is
 written before the send button is pressed (`enviando`), so a cut or crash never sends
-twice, and a video in that file is never touched again. A send whose form does not
-close is `no_confirmado`. It sends at most `LIMITE_APELACIONES` (10) per run, age
+twice, and nothing is ever sent twice to a video in that file. A send whose form does
+not close is `no_confirmado`. It sends at most `LIMITE_APELACIONES` (10) per run, age
 first. It runs under the `programar` lock and stops after 3 failures in a row. The
 "Revisar un problema" dialog does not close with Escape: it is closed with its X and
 then "Salir". The service reports what was sent, what was not confirmed and what failed
 in one Telegram message, and stays silent when there was nothing to appeal.
+
+The same daily walk follows up what was sent (`enviando`, `enviado`, `no_confirmado`
+with no `resultado`), also after the send limit is reached. For age, it opens the
+problem dialog and only reads it: a first line "Apelación rechazada" is `rechazada`.
+Limited ads have no formal rejection. A followed-up video that is no longer in a list
+walked to its last page is `aceptada` (an empty list proves nothing, so nothing is
+accepted from it). The result is written to the entry (`resultado`, `detalle_resultado`,
+`fecha_resultado`) and reported once in the same Telegram message, with the Studio link.
+A follow-up that cannot be read is listed apart ("No pude ver cómo va la apelación") and
+does not count toward the 3 failures that stop the run. The follow-up opens the tooltip's
+cause or "Revisar y tomar medidas", which only opens the problem dialog (not the "Tomar
+medidas" of `/claims`), and presses nothing in it.
 
 ### Common commands
 
