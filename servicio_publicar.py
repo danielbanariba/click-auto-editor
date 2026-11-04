@@ -654,6 +654,11 @@ class Servicio:
         for estado, encabezado in (
             ("enviado", "✅ Apelé en hebreo:"),
             ("no_confirmado", "⚠️ Lo envié pero Studio no mostró que llegó (revísalo):"),
+            (
+                "revisar_a_mano",
+                "🔎 Studio solo ofrece «Revisar y tomar medidas» y el formulario no dice de qué "
+                "problema es, así que no mandé nada (revísalos a mano):",
+            ),
         ):
             hechos = [v for v in videos if v.get("estado") == estado]
             if hechos:
