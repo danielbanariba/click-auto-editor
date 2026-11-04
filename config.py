@@ -58,6 +58,8 @@ DIR_NO_TIENEN_PORTADA = BASE_DIR / "no_tienen_portada"
 DIR_NO_TIENEN_DESCRIPCION = BASE_DIR / "no_tienen_descripcion"
 DIR_YA = BASE_DIR / "Ya"
 DIR_YA_SUBIDOS = BASE_DIR / "Ya subidos"
+# Álbumes que el servicio apartó sin renderizar porque ya están en el registro de publicados.
+DIR_YA_PUBLICADOS = BASE_DIR / "Ya publicados"
 DIR_RARO = BASE_DIR / "raro"
 DIR_NEED_CENSURED = BASE_DIR / "need_censured"
 DIR_CORREGIR_EDICION = BASE_DIR / "corregir_edicion"

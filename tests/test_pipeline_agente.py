@@ -30,6 +30,7 @@ from googleapiclient.discovery import build_from_document
 from googleapiclient.errors import HttpError
 
 import pipeline_agente as pa
+import registro_publicados as rp
 
 TZ = timezone(timedelta(hours=-6))
 HAY_FFMPEG = shutil.which("ffmpeg") and shutil.which("ffprobe")
@@ -317,10 +318,30 @@ class TestOrigenes(unittest.TestCase):
             mock.patch.object(pa, "RENDER_SSD_DIR", Path("/")),
             mock.patch.object(pa, "MIN_FREE_SPACE_GB", 0),
             mock.patch.object(pa, "render_en_curso", return_value=False),
+            mock.patch.object(pa, "REGISTRO_PUBLICADOS", self.tmp / "ya_publicados.tsv"),
+            mock.patch.object(pa, "DIR_YA_PUBLICADOS", self.tmp / "Ya publicados"),
         ]
         for parche in parches:
             parche.start()
             self.addCleanup(parche.stop)
+
+    def renderizar(self, carpeta=None):
+        """Corre renderizar con un render falso; devuelve el resultado y los álbumes renderizados."""
+        renderizados = []
+
+        def render_falso(comando, **kwargs):
+            origen = Path(comando[-1])
+            renderizados.append(origen)
+            destino = self.tmp / "Renderizando" / origen.name
+            destino.mkdir(parents=True)
+            (destino / f"{origen.name}.mp4").write_bytes(b"video")
+            shutil.rmtree(origen)
+
+        uploader = SimpleNamespace(encontrar_video=lambda c: next(c.glob("*.mp4"), None))
+        with mock.patch.object(pa.subprocess, "run", side_effect=render_falso), mock.patch.object(
+            pa, "uploader_real", return_value=uploader
+        ):
+            return pa.renderizar(carpeta), renderizados
 
     def test_siguiente_album_sigue_el_orden_de_las_carpetas_y_los_mas_nuevos_primero(self):
         for nombre in ("Banda B - Viejo (2019)", "Banda A - Nuevo (2021)", "Banda C - Sin anio"):
@@ -365,6 +386,76 @@ class TestOrigenes(unittest.TestCase):
         self.assertTrue(resultado["ok"])
         self.assertEqual(resultado["album"], nombre)
         self.assertEqual(resultado["restantes"], 0)
+
+    def test_renderizar_aparta_lo_ya_publicado_y_renderiza_el_siguiente(self):
+        # Defecto: se renderiza 12 minutos un álbum que ya está en el canal, o al apartarlo
+        # se mete adentro de la carpeta con el mismo nombre que ya estaba en Ya publicados/.
+        titulo = "🇺🇸 BANDA A - NUEVO (2021) • [Death Metal] ⟨FULL ALBUM⟩"
+        rp.anotar(pa.REGISTRO_PUBLICADOS, [(titulo, "canal", "vid00000001")])
+        for nombre in ("Banda A - Nuevo (2021)", "Banda B - Viejo (2019)"):
+            (self.album / nombre).mkdir()
+        anterior = pa.DIR_YA_PUBLICADOS / "Banda A - Nuevo (2021)"
+        anterior.mkdir(parents=True)
+
+        resultado, renderizados = self.renderizar()
+
+        self.assertEqual(renderizados, [self.album / "Banda B - Viejo (2019)"])
+        self.assertTrue(resultado["ok"], resultado)
+        apartado = pa.DIR_YA_PUBLICADOS / "Banda A - Nuevo (2021)__2"
+        self.assertTrue(apartado.is_dir())
+        self.assertEqual(list(anterior.iterdir()), [])
+        self.assertFalse((self.album / "Banda A - Nuevo (2021)").exists())
+        self.assertEqual(resultado["ya_publicados"], [
+            {"album": "Banda A - Nuevo (2021)", "origen": "canal", "como": titulo, "destino": str(apartado)},
+        ])
+
+    def test_renderizar_con_carpeta_renderiza_aunque_este_en_el_registro(self):
+        # Defecto: un álbum pedido a mano con --carpeta se aparta en lugar de renderizarse.
+        nombre = "Banda A - Nuevo (2021)"
+        rp.anotar(pa.REGISTRO_PUBLICADOS, [(nombre, "eliminar", "")])
+        (self.album / nombre).mkdir()
+
+        resultado, renderizados = self.renderizar(nombre)
+
+        self.assertEqual(renderizados, [self.album / nombre])
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertFalse(pa.DIR_YA_PUBLICADOS.exists())
+
+    def test_si_todo_esta_publicado_lo_aparta_y_no_renderiza(self):
+        # Defecto: con todo lo que queda ya publicado, se renderiza igual uno o no se aparta nada
+        # y el servicio vuelve a lanzar el render en cada vuelta.
+        nombres = ("Banda A - Nuevo (2021)", "Banda B - Viejo (2019)")
+        rp.anotar(pa.REGISTRO_PUBLICADOS, [(n, "subir", "") for n in nombres])
+        (self.cola / nombres[0]).mkdir()
+        (self.ep / nombres[1]).mkdir()
+
+        with mock.patch.object(pa.subprocess, "run", side_effect=AssertionError("lanzó un render")):
+            resultado = pa.renderizar()
+
+        self.assertEqual(resultado["motivo"], "sin_albumes")
+        self.assertEqual([a["album"] for a in resultado["ya_publicados"]], list(nombres))
+        self.assertEqual(pa.listar_carpetas(pa.DIR_YA_PUBLICADOS), sorted(nombres))
+        self.assertIsNone(pa.siguiente_album())
+
+    def test_un_album_publicado_que_no_se_puede_apartar_no_se_renderiza_ni_se_copia(self):
+        # Defecto: si moverlo falla, se renderiza igual el álbum ya publicado; o el movimiento
+        # cae en copiarlo y, cuando el original no se puede borrar, cada vuelta deja otra copia
+        # entera en Ya publicados/.
+        rp.anotar(pa.REGISTRO_PUBLICADOS, [("Banda A - Nuevo (2021)", "canal", "")])
+        for nombre in ("Banda A - Nuevo (2021)", "Banda B - Viejo (2019)"):
+            (self.album / nombre).mkdir()
+        (self.album / "Banda A - Nuevo (2021)" / "01. pista.flac").write_bytes(b"audio")
+
+        with mock.patch.object(pa.os, "rename", side_effect=PermissionError("sin permiso")):
+            resultado, renderizados = self.renderizar()
+
+        self.assertEqual(renderizados, [self.album / "Banda B - Viejo (2019)"])
+        self.assertTrue((self.album / "Banda A - Nuevo (2021)" / "01. pista.flac").is_file())
+        self.assertEqual(pa.listar_carpetas(pa.DIR_YA_PUBLICADOS), [])
+        self.assertEqual(resultado["ya_publicados"], [
+            {"album": "Banda A - Nuevo (2021)", "origen": "canal", "como": "Banda A - Nuevo (2021)",
+             "error": "sin permiso"},
+        ])
 
 
 class TestRetomar(unittest.TestCase):
@@ -450,6 +541,7 @@ class TestSubir(unittest.TestCase):
             mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "pendientes.json"),
             mock.patch.object(pa, "DIR_CAPTURAS", self.tmp / "capturas"),
             mock.patch.object(pa, "DIR_LOGS", self.tmp / "logs"),
+            mock.patch.object(pa, "REGISTRO_PUBLICADOS", self.tmp / "ya_publicados.tsv"),
         ]
         for parche in self.parches:
             parche.start()
@@ -501,6 +593,9 @@ class TestSubir(unittest.TestCase):
         self.assertFalse(self.carpeta.exists())
         pendientes = json.loads(pa.PENDIENTES_JSON.read_text(encoding="utf-8"))
         self.assertEqual([p["video_id"] for p in pendientes], ["abc123"])
+        # Defecto: el álbum subido no queda anotado y se vuelve a descargar o renderizar.
+        fila = rp.leer(pa.REGISTRO_PUBLICADOS).buscar("Banda - Album (2020) [EP]")
+        self.assertEqual((fila["origen"], fila["video_id"]), ("subir", "abc123"))
 
     def test_limite_del_canal_conserva_la_carpeta(self):
         uploader = None
@@ -513,6 +608,8 @@ class TestSubir(unittest.TestCase):
         self.assertEqual(resultado["motivo"], "limite_canal")
         self.assertTrue(self.carpeta.exists())
         self.assertFalse(pa.PENDIENTES_JSON.exists())
+        # Defecto: anotarlo antes de que la subida funcione aparta un álbum que nunca se publicó.
+        self.assertFalse(pa.REGISTRO_PUBLICADOS.exists())
 
     def test_eliminar_borra_la_carpeta_y_su_captura(self):
         captura = pa.DIR_CAPTURAS / f"{pa.slug(self.carpeta.name)}.jpg"
@@ -524,6 +621,9 @@ class TestSubir(unittest.TestCase):
         self.assertTrue(resultado["ok"], resultado)
         self.assertFalse(self.carpeta.exists())
         self.assertFalse(captura.exists())
+        # Defecto: el álbum eliminado por ya publicado no queda anotado y se vuelve a renderizar.
+        fila = rp.leer(pa.REGISTRO_PUBLICADOS).buscar("Banda - Album")
+        self.assertEqual((fila["nombre"], fila["origen"]), ("Banda - Album", "eliminar"))
 
     def test_eliminar_fuera_de_las_raices_no_borra_nada(self):
         afuera = self.tmp / "otra" / "Banda - Album"
@@ -533,6 +633,7 @@ class TestSubir(unittest.TestCase):
 
         self.assertEqual(resultado["motivo"], "carpeta_fuera_de_raiz")
         self.assertTrue(afuera.exists())
+        self.assertFalse(pa.REGISTRO_PUBLICADOS.exists())
 
     def test_carpeta_fuera_de_las_raices_no_se_sube_ni_se_borra(self):
         afuera = self.tmp / "otra" / "Banda - Album"
@@ -824,6 +925,111 @@ def uploader_para_programar(youtube, programados=()):
         is_invalid_grant_error=lambda exc: False,
         authenticate_next=lambda prefix: None,
     )
+
+
+class SubidasPaginadas:
+    """La lista de subidas del canal en páginas: [(título, video_id), ...] por página."""
+
+    def __init__(self, paginas, falla_en=None):
+        self.paginas = paginas
+        self.falla_en = falla_en
+        self.pedidas = []
+
+    def list(self, part, playlistId, maxResults, pageToken=None):
+        numero = int(pageToken or 0)
+        self.pedidas.append(numero)
+        if numero == self.falla_en:
+            raise HttpError(httplib2.Response({"status": "500"}), b"backend error")
+        respuesta = {
+            "items": [
+                {"snippet": {"title": titulo, "resourceId": {"videoId": video_id}}}
+                for titulo, video_id in self.paginas[numero]
+            ]
+        }
+        if numero + 1 < len(self.paginas):
+            respuesta["nextPageToken"] = str(numero + 1)
+        return Llamada(respuesta)
+
+
+class TestSembrarPublicados(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        parches = [
+            mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "pendientes.json"),
+            mock.patch.object(pa, "DIR_LOGS", self.tmp / "logs"),
+            mock.patch.object(pa, "DIR_AGENTE", self.tmp),
+            mock.patch.object(pa, "REGISTRO_PUBLICADOS", self.tmp / "ya_publicados.tsv"),
+        ]
+        for parche in parches:
+            parche.start()
+            self.addCleanup(parche.stop)
+        pa.DIR_LOGS.mkdir()
+        resultados = {
+            "servicio_eliminar_20261102-101010_aaaaaa.out": {"ok": True, "album": "Banda C - Tres (2019)"},
+            "servicio_eliminar_20261102-111111_bbbbbb.out": {
+                "ok": False, "motivo": "no_se_pudo_borrar", "album": "Banda D - Cuatro (2018)"},
+            "servicio_eliminar_video_20261102-121212_cccccc.out": {
+                "ok": True, "video_id": "vidZ", "titulo": "Banda Z - Borrado (2017)"},
+        }
+        for nombre, resultado in resultados.items():
+            (pa.DIR_LOGS / nombre).write_text(json.dumps(resultado) + "\n", encoding="utf-8")
+        (self.tmp / "servicio.json").write_text(
+            json.dumps({"subidos": ["Banda E - Cinco (2021)"], "rechazados": ["Banda F - Seis (2016)"]}),
+            encoding="utf-8",
+        )
+
+    def sembrar(self, subidas):
+        youtube = SimpleNamespace(playlistItems=lambda: subidas)
+        return pa.sembrar_publicados(uploader=uploader_para_programar(youtube))
+
+    def canal(self, falla_en=None):
+        return SubidasPaginadas([
+            [("🇺🇸 BANDA A - UNO (2020) • [Death Metal] ⟨FULL ALBUM⟩", "vidA"), ("Deleted video", "vidX")],
+            [("Banda B - Dos (Full Album)", "vidB")],
+        ], falla_en=falla_en)
+
+    def test_carga_todas_las_paginas_del_canal_los_eliminados_y_los_subidos(self):
+        # Defecto: leer solo la primera página del canal, o no cargar lo que el servicio ya
+        # eliminó o subió; también, anotar un eliminar que falló, un video borrado o un rechazo.
+        subidas = self.canal()
+        resultado = self.sembrar(subidas)
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(subidas.pedidas, [0, 1])
+        self.assertEqual(resultado["agregados"], 4)
+        registro = rp.leer(pa.REGISTRO_PUBLICADOS)
+        esperado = {
+            "Banda A - Uno (2020)": ("canal", "vidA"),
+            "Banda B - Dos (2015) [EP]": ("canal", "vidB"),
+            "Banda C - Tres (2019)": ("eliminar", ""),
+            "Banda E - Cinco (2021)": ("subir", ""),
+        }
+        for album, (origen, video_id) in esperado.items():
+            with self.subTest(album=album):
+                fila = registro.buscar(album)
+                self.assertEqual((fila["origen"], fila["video_id"]), (origen, video_id))
+        for album in ("Banda D - Cuatro (2018)", "Banda Z - Borrado (2017)", "Banda F - Seis (2016)"):
+            with self.subTest(album=album):
+                self.assertIsNone(registro.buscar(album))
+
+    def test_sembrar_otra_vez_no_duplica_ni_repite_un_video_ya_anotado(self):
+        # Defecto: cada corrida vuelve a agregar las mismas filas, o el video ya anotado por
+        # Subir se anota de nuevo con el título del canal.
+        rp.anotar(pa.REGISTRO_PUBLICADOS, [("Banda A - Uno (2020)", "subir", "vidA")])
+
+        primera = self.sembrar(self.canal())
+        segunda = self.sembrar(self.canal())
+
+        self.assertEqual((primera["agregados"], segunda["agregados"]), (3, 0))
+        self.assertEqual(len(rp.leer(pa.REGISTRO_PUBLICADOS).filas), 4)
+
+    def test_un_error_de_la_api_se_informa_y_no_anota_nada(self):
+        # Defecto: la corrida termina con un traceback sin JSON, o informa ok con medio canal.
+        resultado = self.sembrar(self.canal(falla_en=1))
+
+        self.assertEqual((resultado["ok"], resultado["motivo"]), (False, "error_api"))
+        self.assertFalse(pa.REGISTRO_PUBLICADOS.exists())
 
 
 class TestProgramar(unittest.TestCase):

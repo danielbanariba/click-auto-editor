@@ -40,6 +40,7 @@ from config import (
     DIR_ERROR404,
     DIR_RENDERIZANDO,
     DIR_UPLOAD,
+    DIR_YA_PUBLICADOS,
     DIRS_ORIGEN_RENDER,
     INTRO_DURATION,
     MIN_FREE_SPACE_GB,
@@ -48,9 +49,12 @@ from config import (
     VIDEO_HEIGHT,
     VIDEO_WIDTH,
 )
+import registro_publicados
 
 DIR_AGENTE = PROJECT_ROOT / "data" / "agente"
 PENDIENTES_JSON = DIR_AGENTE / "pendientes.json"
+# Los álbumes ya publicados (eliminados, subidos o en el canal): no se vuelven a renderizar.
+REGISTRO_PUBLICADOS = DIR_AGENTE / "ya_publicados.tsv"
 PROGRAMADOS_JSONL = DIR_AGENTE / "programados.jsonl"
 DIR_CAPTURAS = DIR_AGENTE / "capturas"
 LISTA_NEGRA_RECLAMANTES = PROJECT_ROOT / "lista_negra_reclamantes.txt"
@@ -188,6 +192,48 @@ def siguiente_album():
         if nombres:
             return origen / ordenar_por_anio(nombres)[0]
     return None
+
+
+def anotar_publicados(filas):
+    """Agrega al registro las filas (nombre, origen, video_id)."""
+    with bloqueo("publicados"):
+        return registro_publicados.anotar(REGISTRO_PUBLICADOS, filas)
+
+
+def destino_libre(directorio, nombre):
+    """`directorio/nombre`, o con sufijo `__N` si ya existe: rename pisaría una carpeta vacía."""
+    destino, n = directorio / nombre, 2
+    while destino.exists():
+        destino, n = directorio / f"{nombre}__{n}", n + 1
+    return destino
+
+
+def siguiente_sin_publicar():
+    """Como siguiente_album, pero aparta en DIR_YA_PUBLICADOS los que están en el registro.
+
+    Devuelve el álbum (o None) y los apartados; uno que no se pudo mover lleva `error` y
+    queda en su carpeta sin renderizar.
+    """
+    registro = registro_publicados.leer(REGISTRO_PUBLICADOS)
+    apartados = []
+    for origen in DIRS_ORIGEN_RENDER:
+        for nombre in ordenar_por_anio(listar_carpetas(origen)):
+            fila = registro.buscar(nombre)
+            if fila is None:
+                return origen / nombre, apartados
+            apartado = {"album": nombre, "origen": fila["origen"], "como": fila["nombre"]}
+            try:
+                DIR_YA_PUBLICADOS.mkdir(parents=True, exist_ok=True)
+                destino = destino_libre(DIR_YA_PUBLICADOS, nombre)
+                # rename y no shutil.move: los orígenes y Ya publicados/ están en BASE_DIR, y si
+                # rename falla, shutil.move copia el álbum y, sin poder borrar el original, deja
+                # una copia entera en cada vuelta.
+                (origen / nombre).rename(destino)
+                apartado["destino"] = str(destino)
+            except OSError as exc:
+                apartado["error"] = str(exc)
+            apartados.append(apartado)
+    return None, apartados
 
 
 def slug(texto):
@@ -438,6 +484,7 @@ def renderizar(carpeta=None):
     if libre_gb < MIN_FREE_SPACE_GB:
         return {"ok": False, "motivo": "sin_espacio", "libre_gb": round(libre_gb, 1)}
 
+    apartados = []
     if carpeta:
         # Solo un álbum listado: "..", por ejemplo, haría mover la carpeta madre entera.
         candidatas = [o / carpeta for o in DIRS_ORIGEN_RENDER if carpeta in listar_carpetas(o)]
@@ -445,9 +492,9 @@ def renderizar(carpeta=None):
             return {"ok": False, "motivo": "album_no_encontrado", "album": carpeta}
         origen = candidatas[0]
     else:
-        origen = siguiente_album()
+        origen, apartados = siguiente_sin_publicar()
         if origen is None:
-            return {"ok": False, "motivo": "sin_albumes"}
+            return {"ok": False, "motivo": "sin_albumes", "ya_publicados": apartados}
 
     renderizando_antes = set(listar_carpetas(DIR_RENDERIZANDO))
     error_antes = set(listar_carpetas(DIR_ERROR404))
@@ -473,6 +520,7 @@ def renderizar(carpeta=None):
                 "carpeta": str(destino),
                 "video": str(video),
                 "restantes": restantes,
+                "ya_publicados": apartados,
                 "log": str(log),
             }
 
@@ -484,6 +532,7 @@ def renderizar(carpeta=None):
         "album": album,
         "movido_a_error404": bool(con_error),
         "restantes": restantes,
+        "ya_publicados": apartados,
         "log": str(log),
         "log_final": cola_de_log(log),
     }
@@ -791,6 +840,8 @@ def eliminar(carpeta, uploader=None, raices=RAICES_BORRABLES):
     raiz = raiz_borrable(carpeta, raices)
     if raiz is None:
         return {"ok": False, "motivo": "carpeta_fuera_de_raiz", "carpeta": str(carpeta)}
+    # Antes de borrar: si el proceso muere a mitad, el álbum ya quedó anotado.
+    anotar_publicados([(carpeta.name, "eliminar", "")])
     uploader = uploader or uploader_real()
     log = ruta_log("eliminar")
     with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
@@ -842,6 +893,7 @@ def subir(carpeta, uploader=None, sin_deathgrind=False, raices=RAICES_BORRABLES)
     registrar_pendiente(
         video_id, metadata["title"], carpeta.name, datetime.now().astimezone()
     )
+    anotar_publicados([(carpeta.name, "subir", video_id)])
     with open(log, "a", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
         borrada = borrar_album(uploader, carpeta, raiz)
     return {
@@ -1796,6 +1848,115 @@ def eliminar_video(video_id, uploader=None):
 
 
 # ---------------------------------------------------------------------------
+# sembrar_publicados
+# ---------------------------------------------------------------------------
+
+
+def subidas_del_canal(uploader, yt):
+    """(título, video_id) de todas las subidas del canal: 50 por llamada, 1 unidad de cuota cada una."""
+    lista = ejecutar_api(uploader, yt, uploader.get_uploads_playlist_id)
+    if not lista:
+        return []
+    subidas, pagina = [], None
+    while True:
+        respuesta = ejecutar_api(
+            uploader,
+            yt,
+            lambda c: c.playlistItems()
+            .list(part="snippet", playlistId=lista, maxResults=50, pageToken=pagina)
+            .execute(),
+        )
+        for item in respuesta.get("items", []):
+            snippet = item.get("snippet", {})
+            video_id = snippet.get("resourceId", {}).get("videoId")
+            if video_id:
+                subidas.append((snippet.get("title", ""), video_id))
+        pagina = respuesta.get("nextPageToken")
+        if not pagina:
+            return subidas
+
+
+def eliminados_por_el_servicio():
+    """Los álbumes que el servicio eliminó, según el JSON final de cada `servicio_eliminar_*.out`."""
+    albumes = []
+    # El dígito deja afuera los servicio_eliminar_video_*.out, que borran videos de YouTube.
+    for salida in sorted(DIR_LOGS.glob("servicio_eliminar_[0-9]*.out")):
+        lineas = salida.read_text(encoding="utf-8", errors="replace").splitlines()
+        for linea in reversed(lineas):
+            if not linea.startswith("{"):
+                continue
+            try:
+                resultado = json.loads(linea)
+            except json.JSONDecodeError:
+                continue
+            if resultado.get("ok") and resultado.get("album"):
+                albumes.append(resultado["album"])
+            break
+    return albumes
+
+
+def subidos_por_el_servicio():
+    try:
+        estado = json.loads((DIR_AGENTE / "servicio.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    return list(estado.get("subidos", []))
+
+
+def sembrar_publicados(uploader=None):
+    """Carga en el registro los títulos del canal y lo que el servicio ya eliminó o subió.
+
+    Se puede repetir: saltea los video_id y los pares (origen, nombre) que ya están.
+    """
+    uploader = uploader or uploader_real()
+    log = ruta_log("sembrar_publicados")
+    with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
+        uploader.cargar_env()
+        youtube, *_ = uploader.probar_credenciales_disponibles(prefix="upload")
+        if not youtube:
+            return {"ok": False, "motivo": "sin_credenciales", "log": str(log)}
+        try:
+            canal = subidas_del_canal(uploader, {"cliente": youtube})
+        except SinCredenciales:
+            return {"ok": False, "motivo": "sin_credenciales", "log": str(log)}
+        except HttpError as exc:
+            print(f"Error YouTube API: {exc}")
+            return {"ok": False, "motivo": "error_api", "detalle": str(exc)[:200], "log": str(log)}
+        except ERRORES_DE_CONEXION as exc:
+            detalle = f"{type(exc).__name__}: {exc}"[:200]
+            print(f"Sin conexion con YouTube tras {REINTENTOS_CONEXION} reintentos: {detalle}")
+            return {"ok": False, "motivo": "sin_conexion", "detalle": detalle, "log": str(log)}
+
+    eliminados = eliminados_por_el_servicio()
+    subidos = subidos_por_el_servicio()
+    filas = (
+        [(titulo, "canal", video_id) for titulo, video_id in canal]
+        + [(nombre, "eliminar", "") for nombre in eliminados]
+        + [(nombre, "subir", "") for nombre in subidos]
+    )
+    with bloqueo("publicados"):
+        registro = registro_publicados.leer(REGISTRO_PUBLICADOS)
+        video_ids = registro.video_ids()
+        vistos = {(f["origen"], f["nombre"]) for f in registro.filas}
+        nuevas = []
+        for nombre, origen, video_id in filas:
+            if (video_id and video_id in video_ids) or (origen, nombre) in vistos:
+                continue
+            if video_id:
+                video_ids.add(video_id)
+            vistos.add((origen, nombre))
+            nuevas.append((nombre, origen, video_id))
+        agregados = registro_publicados.anotar(REGISTRO_PUBLICADOS, nuevas)
+    return {
+        "ok": True,
+        "agregados": agregados,
+        "leidos": {"canal": len(canal), "eliminar": len(eliminados), "subir": len(subidos)},
+        "registro": str(REGISTRO_PUBLICADOS),
+        "log": str(log),
+    }
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1859,6 +2020,11 @@ def parse_args(argv=None):
     )
     p.add_argument("--limite", type=int, default=LIMITE_APELACIONES, help="Envíos como máximo.")
 
+    sub.add_parser(
+        "sembrar_publicados",
+        help="Carga en el registro de publicados los títulos del canal y lo eliminado o subido.",
+    )
+
     p = sub.add_parser(
         "estado", help="Videos sin programar, álbumes sin aprobar y si hay un render corriendo."
     )
@@ -1890,6 +2056,8 @@ def main(argv=None):
         return responder(impugnar(args.video_id, sin_enviar=args.sin_enviar))
     if args.comando == "apelar":
         return responder(apelar(sin_enviar=args.sin_enviar, limite=args.limite))
+    if args.comando == "sembrar_publicados":
+        return responder(sembrar_publicados())
     return responder(estado(esperar_render=args.esperar_render))
 
 

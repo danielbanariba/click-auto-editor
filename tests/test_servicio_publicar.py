@@ -1143,6 +1143,85 @@ class TestAvisos(BaseServicio):
         self.assertNotIn("la cola", pregunta["texto"])
         self.assertIn("🔁 Reintentar", dict(pregunta["botones"]))
 
+    def test_avisa_los_albumes_que_el_render_aparto_por_ya_publicados(self):
+        # Defecto: el render mueve álbumes a Ya publicados/ en silencio, y una reedición
+        # legítima apartada por error no se ve nunca.
+        apartados = [
+            {"album": f"Banda {n} - Disco (2020)", "origen": "canal",
+             "como": f"🇺🇸 BANDA {n} - DISCO (2020) ⟨FULL ALBUM⟩", "destino": "x"}
+            for n in range(12)
+        ] + [{"album": "Banda - Roto (2020)", "origen": "eliminar", "como": "Banda - Roto (2020)",
+              "error": "sin permiso"}]
+        self.album_en_cola("Banda - Disco")
+        self.servicio.paso()
+        carpeta = self.album_renderizado("Banda - Disco")
+        self.lanzador.terminar(
+            "renderizar",
+            {"ok": True, "album": "Banda - Disco", "carpeta": carpeta, "ya_publicados": apartados},
+        )
+        self.servicio.paso()
+
+        movidos, no_movido = (m["texto"] for m in self.telegram.mensajes)
+        self.assertIn("Ya publicados", movidos)
+        self.assertIn("Banda 0 - Disco (2020) → 🇺🇸 BANDA 0 - DISCO (2020) ⟨FULL ALBUM⟩", movidos)
+        self.assertIn("Banda 9 - Disco (2020)", movidos)
+        self.assertNotIn("Banda 10 - Disco (2020)", movidos)
+        self.assertIn("y 2 más", movidos)
+        self.assertNotIn("Banda - Roto", movidos)
+        self.assertIn("Banda - Roto (2020): sin permiso", no_movido)
+        self.assertEqual(self.lanzador.lanzados("verificar"), [["verificar", "--carpeta", carpeta]])
+
+    def test_sin_albumes_que_renderizar_igual_avisa_lo_que_aparto(self):
+        # Defecto: el aviso sale solo cuando hay render, y cuando todo lo que quedaba ya estaba
+        # publicado no se entera nadie.
+        self.album_en_cola("Banda - Disco (2020)")
+        self.servicio.paso()
+        self.lanzador.terminar(
+            "renderizar",
+            {"ok": False, "motivo": "sin_albumes", "ya_publicados": [
+                {"album": "Banda - Disco (2020)", "origen": "subir", "como": "Banda - Disco (2020)",
+                 "destino": "x"},
+            ]},
+        )
+        self.servicio.paso()
+
+        self.assertEqual(len(self.telegram.mensajes), 1)
+        self.assertIn("Banda - Disco (2020) → Banda - Disco (2020)", self.telegram.mensajes[0]["texto"])
+
+    def test_un_album_que_no_se_pudo_apartar_no_relanza_el_render_en_cada_vuelta(self):
+        # Defecto: el álbum sigue en la cola, el render se relanza en cada vuelta del servicio
+        # (recorriendo miles de carpetas del disco) y el mismo aviso llega una y otra vez.
+        self.album_en_cola("Banda - Roto (2020)")
+        self.servicio.paso()
+        self.lanzador.terminar(
+            "renderizar",
+            {"ok": False, "motivo": "sin_albumes", "ya_publicados": [
+                {"album": "Banda - Roto (2020)", "origen": "canal", "como": "Banda - Roto (2020)",
+                 "error": "sin permiso"},
+            ]},
+        )
+        for _ in range(3):
+            self.servicio.paso()
+
+        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 1)
+        self.assertEqual(len(self.telegram.mensajes), 1)
+        self.assertIn("Banda - Roto (2020): sin permiso", self.telegram.mensajes[0]["texto"])
+
+    def test_un_album_que_no_se_pudo_apartar_se_avisa_una_sola_vez(self):
+        # Defecto: el álbum sigue al frente de la cola, cada render vuelve a intentar moverlo y
+        # el mismo aviso llega después de cada render.
+        no_movido = {"album": "Banda - Roto (2020)", "origen": "canal", "como": "Banda - Roto (2020)",
+                     "error": "sin permiso"}
+        for nombre in ("Banda - Uno", "Banda - Dos"):
+            carpeta = self.album_renderizado(nombre)
+            self.servicio.tras_renderizar(
+                {"ok": True, "album": nombre, "carpeta": carpeta, "ya_publicados": [no_movido]},
+                ["renderizar"],
+            )
+
+        avisos = [m for m in self.telegram.mensajes if "sin permiso" in m["texto"]]
+        self.assertEqual(len(avisos), 1)
+
     def test_error_de_red_en_telegram_no_frena_el_servicio(self):
         self.album_en_cola("Banda - Disco")
         self.telegram.falla = sp.ErrorTelegram("sin red")
