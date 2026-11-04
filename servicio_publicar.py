@@ -46,6 +46,9 @@ PAUSA_TELEGRAM_MAX_S = 60
 REINTENTO_S = 30 * 60
 INTENTOS_PROGRAMAR = 3  # fallos seguidos de `programar` antes de preguntar
 INTERVALO_APELACIONES_S = 24 * 3600
+# Cuántos álbumes apartados por ya publicados lista el aviso; del resto solo dice cuántos son.
+MAX_APARTADOS_EN_AVISO = 10
+ORIGEN_PUBLICADO = {"canal": "en el canal", "eliminar": "lo eliminaste", "subir": "lo subiste"}
 LIMITE_LEYENDA = 1024
 LIMITE_TEXTO = 4096
 SIN_CONFIGURACION = 78  # EX_CONFIG: el unit de systemd no reinicia con este código
@@ -425,8 +428,36 @@ class Servicio:
 
     # -- resultados de cada paso -------------------------------------------
 
+    def avisar_apartados(self, apartados):
+        """Lo que el render movió a Ya publicados/ sin renderizar, y lo que no pudo mover."""
+        movidos = [a for a in apartados if "error" not in a]
+        if movidos:
+            lineas = [
+                f"• {a['album']} → {a['como']} ({ORIGEN_PUBLICADO.get(a['origen'], a['origen'])})"
+                for a in movidos[:MAX_APARTADOS_EN_AVISO]
+            ]
+            if len(movidos) > MAX_APARTADOS_EN_AVISO:
+                lineas.append(f"y {len(movidos) - MAX_APARTADOS_EN_AVISO} más.")
+            self.avisar(
+                f"📦 Ya estaban publicados: los moví a {pa.DIR_YA_PUBLICADOS.name}/ sin renderizar.\n"
+                + "\n".join(lineas)
+            )
+        for a in apartados:
+            if "error" in a:
+                self.avisar_una_vez(
+                    f"no_apartado_{a['album']}",
+                    f"⚠️ {a['album']}: {a['error']}\nYa está publicado y no pude moverlo a "
+                    f"{pa.DIR_YA_PUBLICADOS.name}/. Sigue en su carpeta y no lo renderizo.",
+                )
+
     def tras_renderizar(self, resultado, argumentos):
+        apartados = resultado.get("ya_publicados") or []
+        self.avisar_apartados(apartados)
         motivo = resultado.get("motivo")
+        if motivo == "sin_albumes" and any("error" in a for a in apartados):
+            # El álbum que no se pudo mover sigue en la cola: sin pausa, se relanzaría el render
+            # en cada vuelta.
+            self.album_pausado_hasta = self.reloj() + REINTENTO_S
         if resultado.get("ok"):
             self.avisos.clear()
             # Un render nuevo con el nombre de uno descartado antes se vuelve a preguntar.

@@ -30,6 +30,7 @@ from googleapiclient.discovery import build_from_document
 from googleapiclient.errors import HttpError
 
 import pipeline_agente as pa
+import registro_publicados as rp
 
 TZ = timezone(timedelta(hours=-6))
 HAY_FFMPEG = shutil.which("ffmpeg") and shutil.which("ffprobe")
@@ -317,10 +318,30 @@ class TestOrigenes(unittest.TestCase):
             mock.patch.object(pa, "RENDER_SSD_DIR", Path("/")),
             mock.patch.object(pa, "MIN_FREE_SPACE_GB", 0),
             mock.patch.object(pa, "render_en_curso", return_value=False),
+            mock.patch.object(pa, "REGISTRO_PUBLICADOS", self.tmp / "ya_publicados.tsv"),
+            mock.patch.object(pa, "DIR_YA_PUBLICADOS", self.tmp / "Ya publicados"),
         ]
         for parche in parches:
             parche.start()
             self.addCleanup(parche.stop)
+
+    def renderizar(self, carpeta=None):
+        """Corre renderizar con un render falso; devuelve el resultado y los álbumes renderizados."""
+        renderizados = []
+
+        def render_falso(comando, **kwargs):
+            origen = Path(comando[-1])
+            renderizados.append(origen)
+            destino = self.tmp / "Renderizando" / origen.name
+            destino.mkdir(parents=True)
+            (destino / f"{origen.name}.mp4").write_bytes(b"video")
+            shutil.rmtree(origen)
+
+        uploader = SimpleNamespace(encontrar_video=lambda c: next(c.glob("*.mp4"), None))
+        with mock.patch.object(pa.subprocess, "run", side_effect=render_falso), mock.patch.object(
+            pa, "uploader_real", return_value=uploader
+        ):
+            return pa.renderizar(carpeta), renderizados
 
     def test_siguiente_album_sigue_el_orden_de_las_carpetas_y_los_mas_nuevos_primero(self):
         for nombre in ("Banda B - Viejo (2019)", "Banda A - Nuevo (2021)", "Banda C - Sin anio"):
@@ -365,6 +386,72 @@ class TestOrigenes(unittest.TestCase):
         self.assertTrue(resultado["ok"])
         self.assertEqual(resultado["album"], nombre)
         self.assertEqual(resultado["restantes"], 0)
+
+    def test_renderizar_aparta_lo_ya_publicado_y_renderiza_el_siguiente(self):
+        # Defecto: se renderiza 12 minutos un álbum que ya está en el canal, o al apartarlo
+        # se mete adentro de la carpeta con el mismo nombre que ya estaba en Ya publicados/.
+        titulo = "🇺🇸 BANDA A - NUEVO (2021) • [Death Metal] ⟨FULL ALBUM⟩"
+        rp.anotar(pa.REGISTRO_PUBLICADOS, [(titulo, "canal", "vid00000001")])
+        for nombre in ("Banda A - Nuevo (2021)", "Banda B - Viejo (2019)"):
+            (self.album / nombre).mkdir()
+        anterior = pa.DIR_YA_PUBLICADOS / "Banda A - Nuevo (2021)"
+        anterior.mkdir(parents=True)
+
+        resultado, renderizados = self.renderizar()
+
+        self.assertEqual(renderizados, [self.album / "Banda B - Viejo (2019)"])
+        self.assertTrue(resultado["ok"], resultado)
+        apartado = pa.DIR_YA_PUBLICADOS / "Banda A - Nuevo (2021)__2"
+        self.assertTrue(apartado.is_dir())
+        self.assertEqual(list(anterior.iterdir()), [])
+        self.assertFalse((self.album / "Banda A - Nuevo (2021)").exists())
+        self.assertEqual(resultado["ya_publicados"], [
+            {"album": "Banda A - Nuevo (2021)", "origen": "canal", "como": titulo, "destino": str(apartado)},
+        ])
+
+    def test_renderizar_con_carpeta_renderiza_aunque_este_en_el_registro(self):
+        # Defecto: un álbum pedido a mano con --carpeta se aparta en lugar de renderizarse.
+        nombre = "Banda A - Nuevo (2021)"
+        rp.anotar(pa.REGISTRO_PUBLICADOS, [(nombre, "eliminar", "")])
+        (self.album / nombre).mkdir()
+
+        resultado, renderizados = self.renderizar(nombre)
+
+        self.assertEqual(renderizados, [self.album / nombre])
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertFalse(pa.DIR_YA_PUBLICADOS.exists())
+
+    def test_si_todo_esta_publicado_lo_aparta_y_no_renderiza(self):
+        # Defecto: con todo lo que queda ya publicado, se renderiza igual uno o no se aparta nada
+        # y el servicio vuelve a lanzar el render en cada vuelta.
+        nombres = ("Banda A - Nuevo (2021)", "Banda B - Viejo (2019)")
+        rp.anotar(pa.REGISTRO_PUBLICADOS, [(n, "subir", "") for n in nombres])
+        (self.cola / nombres[0]).mkdir()
+        (self.ep / nombres[1]).mkdir()
+
+        with mock.patch.object(pa.subprocess, "run", side_effect=AssertionError("lanzó un render")):
+            resultado = pa.renderizar()
+
+        self.assertEqual(resultado["motivo"], "sin_albumes")
+        self.assertEqual([a["album"] for a in resultado["ya_publicados"]], list(nombres))
+        self.assertEqual(pa.listar_carpetas(pa.DIR_YA_PUBLICADOS), sorted(nombres))
+        self.assertIsNone(pa.siguiente_album())
+
+    def test_un_album_publicado_que_no_se_puede_apartar_no_se_renderiza(self):
+        # Defecto: si moverlo falla, se renderiza igual el álbum ya publicado.
+        rp.anotar(pa.REGISTRO_PUBLICADOS, [("Banda A - Nuevo (2021)", "canal", "")])
+        for nombre in ("Banda A - Nuevo (2021)", "Banda B - Viejo (2019)"):
+            (self.album / nombre).mkdir()
+
+        with mock.patch.object(pa.shutil, "move", side_effect=PermissionError("sin permiso")):
+            resultado, renderizados = self.renderizar()
+
+        self.assertEqual(renderizados, [self.album / "Banda B - Viejo (2019)"])
+        self.assertTrue((self.album / "Banda A - Nuevo (2021)").is_dir())
+        self.assertEqual(resultado["ya_publicados"], [
+            {"album": "Banda A - Nuevo (2021)", "origen": "canal", "como": "Banda A - Nuevo (2021)",
+             "error": "sin permiso"},
+        ])
 
 
 class TestRetomar(unittest.TestCase):
@@ -450,6 +537,7 @@ class TestSubir(unittest.TestCase):
             mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "pendientes.json"),
             mock.patch.object(pa, "DIR_CAPTURAS", self.tmp / "capturas"),
             mock.patch.object(pa, "DIR_LOGS", self.tmp / "logs"),
+            mock.patch.object(pa, "REGISTRO_PUBLICADOS", self.tmp / "ya_publicados.tsv"),
         ]
         for parche in self.parches:
             parche.start()
@@ -501,6 +589,9 @@ class TestSubir(unittest.TestCase):
         self.assertFalse(self.carpeta.exists())
         pendientes = json.loads(pa.PENDIENTES_JSON.read_text(encoding="utf-8"))
         self.assertEqual([p["video_id"] for p in pendientes], ["abc123"])
+        # Defecto: el álbum subido no queda anotado y se vuelve a descargar o renderizar.
+        fila = rp.leer(pa.REGISTRO_PUBLICADOS).buscar("Banda - Album (2020) [EP]")
+        self.assertEqual((fila["origen"], fila["video_id"]), ("subir", "abc123"))
 
     def test_limite_del_canal_conserva_la_carpeta(self):
         uploader = None
@@ -513,6 +604,8 @@ class TestSubir(unittest.TestCase):
         self.assertEqual(resultado["motivo"], "limite_canal")
         self.assertTrue(self.carpeta.exists())
         self.assertFalse(pa.PENDIENTES_JSON.exists())
+        # Defecto: anotarlo antes de que la subida funcione aparta un álbum que nunca se publicó.
+        self.assertFalse(pa.REGISTRO_PUBLICADOS.exists())
 
     def test_eliminar_borra_la_carpeta_y_su_captura(self):
         captura = pa.DIR_CAPTURAS / f"{pa.slug(self.carpeta.name)}.jpg"
@@ -524,6 +617,9 @@ class TestSubir(unittest.TestCase):
         self.assertTrue(resultado["ok"], resultado)
         self.assertFalse(self.carpeta.exists())
         self.assertFalse(captura.exists())
+        # Defecto: el álbum eliminado por ya publicado no queda anotado y se vuelve a renderizar.
+        fila = rp.leer(pa.REGISTRO_PUBLICADOS).buscar("Banda - Album")
+        self.assertEqual((fila["nombre"], fila["origen"]), ("Banda - Album", "eliminar"))
 
     def test_eliminar_fuera_de_las_raices_no_borra_nada(self):
         afuera = self.tmp / "otra" / "Banda - Album"
@@ -533,6 +629,7 @@ class TestSubir(unittest.TestCase):
 
         self.assertEqual(resultado["motivo"], "carpeta_fuera_de_raiz")
         self.assertTrue(afuera.exists())
+        self.assertFalse(pa.REGISTRO_PUBLICADOS.exists())
 
     def test_carpeta_fuera_de_las_raices_no_se_sube_ni_se_borra(self):
         afuera = self.tmp / "otra" / "Banda - Album"

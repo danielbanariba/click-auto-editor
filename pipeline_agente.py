@@ -40,6 +40,7 @@ from config import (
     DIR_ERROR404,
     DIR_RENDERIZANDO,
     DIR_UPLOAD,
+    DIR_YA_PUBLICADOS,
     DIRS_ORIGEN_RENDER,
     INTRO_DURATION,
     MIN_FREE_SPACE_GB,
@@ -48,9 +49,12 @@ from config import (
     VIDEO_HEIGHT,
     VIDEO_WIDTH,
 )
+import registro_publicados
 
 DIR_AGENTE = PROJECT_ROOT / "data" / "agente"
 PENDIENTES_JSON = DIR_AGENTE / "pendientes.json"
+# Los álbumes ya publicados (eliminados, subidos o en el canal): no se vuelven a renderizar.
+REGISTRO_PUBLICADOS = DIR_AGENTE / "ya_publicados.tsv"
 PROGRAMADOS_JSONL = DIR_AGENTE / "programados.jsonl"
 DIR_CAPTURAS = DIR_AGENTE / "capturas"
 LISTA_NEGRA_RECLAMANTES = PROJECT_ROOT / "lista_negra_reclamantes.txt"
@@ -188,6 +192,45 @@ def siguiente_album():
         if nombres:
             return origen / ordenar_por_anio(nombres)[0]
     return None
+
+
+def anotar_publicados(filas):
+    """Agrega al registro las filas (nombre, origen, video_id)."""
+    with bloqueo("publicados"):
+        return registro_publicados.anotar(REGISTRO_PUBLICADOS, filas)
+
+
+def destino_libre(directorio, nombre):
+    """`directorio/nombre`, o con sufijo `__N` si ya existe: shutil.move lo metería adentro."""
+    destino, n = directorio / nombre, 2
+    while destino.exists():
+        destino, n = directorio / f"{nombre}__{n}", n + 1
+    return destino
+
+
+def siguiente_sin_publicar():
+    """Como siguiente_album, pero aparta en DIR_YA_PUBLICADOS los que están en el registro.
+
+    Devuelve el álbum (o None) y los apartados; uno que no se pudo mover lleva `error` y
+    queda en su carpeta sin renderizar.
+    """
+    registro = registro_publicados.leer(REGISTRO_PUBLICADOS)
+    apartados = []
+    for origen in DIRS_ORIGEN_RENDER:
+        for nombre in ordenar_por_anio(listar_carpetas(origen)):
+            fila = registro.buscar(nombre)
+            if fila is None:
+                return origen / nombre, apartados
+            apartado = {"album": nombre, "origen": fila["origen"], "como": fila["nombre"]}
+            try:
+                DIR_YA_PUBLICADOS.mkdir(parents=True, exist_ok=True)
+                destino = destino_libre(DIR_YA_PUBLICADOS, nombre)
+                shutil.move(origen / nombre, destino)
+                apartado["destino"] = str(destino)
+            except OSError as exc:
+                apartado["error"] = str(exc)
+            apartados.append(apartado)
+    return None, apartados
 
 
 def slug(texto):
@@ -438,6 +481,7 @@ def renderizar(carpeta=None):
     if libre_gb < MIN_FREE_SPACE_GB:
         return {"ok": False, "motivo": "sin_espacio", "libre_gb": round(libre_gb, 1)}
 
+    apartados = []
     if carpeta:
         # Solo un álbum listado: "..", por ejemplo, haría mover la carpeta madre entera.
         candidatas = [o / carpeta for o in DIRS_ORIGEN_RENDER if carpeta in listar_carpetas(o)]
@@ -445,9 +489,9 @@ def renderizar(carpeta=None):
             return {"ok": False, "motivo": "album_no_encontrado", "album": carpeta}
         origen = candidatas[0]
     else:
-        origen = siguiente_album()
+        origen, apartados = siguiente_sin_publicar()
         if origen is None:
-            return {"ok": False, "motivo": "sin_albumes"}
+            return {"ok": False, "motivo": "sin_albumes", "ya_publicados": apartados}
 
     renderizando_antes = set(listar_carpetas(DIR_RENDERIZANDO))
     error_antes = set(listar_carpetas(DIR_ERROR404))
@@ -473,6 +517,7 @@ def renderizar(carpeta=None):
                 "carpeta": str(destino),
                 "video": str(video),
                 "restantes": restantes,
+                "ya_publicados": apartados,
                 "log": str(log),
             }
 
@@ -484,6 +529,7 @@ def renderizar(carpeta=None):
         "album": album,
         "movido_a_error404": bool(con_error),
         "restantes": restantes,
+        "ya_publicados": apartados,
         "log": str(log),
         "log_final": cola_de_log(log),
     }
@@ -791,6 +837,8 @@ def eliminar(carpeta, uploader=None, raices=RAICES_BORRABLES):
     raiz = raiz_borrable(carpeta, raices)
     if raiz is None:
         return {"ok": False, "motivo": "carpeta_fuera_de_raiz", "carpeta": str(carpeta)}
+    # Antes de borrar: si el proceso muere a mitad, el álbum ya quedó anotado.
+    anotar_publicados([(carpeta.name, "eliminar", "")])
     uploader = uploader or uploader_real()
     log = ruta_log("eliminar")
     with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
@@ -842,6 +890,7 @@ def subir(carpeta, uploader=None, sin_deathgrind=False, raices=RAICES_BORRABLES)
     registrar_pendiente(
         video_id, metadata["title"], carpeta.name, datetime.now().astimezone()
     )
+    anotar_publicados([(carpeta.name, "subir", video_id)])
     with open(log, "a", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
         borrada = borrar_album(uploader, carpeta, raiz)
     return {
