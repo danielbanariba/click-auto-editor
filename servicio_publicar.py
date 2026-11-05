@@ -69,6 +69,7 @@ BOTONES = {
     "impugnar": [[("⚖️ Impugnar", "impugnar")], [("🗑️ Eliminar video", "eliminar_video")]],
     # Una copia retirada nunca se va a poder publicar: no hay nada que conservar ni reintentar.
     "copia_retirada": [[("🗑️ Eliminar video", "eliminar_video")]],
+    "impugnacion_rechazada": [[("Conservar", "conservar")], [("🗑️ Eliminar video", "eliminar_video")]],
 }
 AVISO_BOTON = {
     "subir": "Subiendo…",
@@ -770,7 +771,11 @@ class Servicio:
         self.avisar("\n".join(["📨 Apelaciones de hoy"] + lineas))
 
     def tras_seguir_impugnaciones(self, resultado, argumentos):
-        """Avisa qué reclamos impugnados cambiaron en Studio; si nada cambió, no manda nada."""
+        """Avisa qué reclamos impugnados cambiaron en Studio; si nada cambió, no manda nada.
+
+        Un video que quedó sin reclamos se vuelve a programar como uno sin reclamo; por uno
+        cuya impugnación terminó con algún reclamo pregunta si se borra.
+        """
         cambios = resultado.get("cambios") or []
         fallos = resultado.get("fallos") or []
         lineas = []
@@ -799,11 +804,29 @@ class Servicio:
         if motivo:
             causa = MOTIVOS_IMPUGNACION.get(motivo) or motivo
             lineas.append(f"❌ No terminé de mirar las impugnaciones: {causa}. Sigo mañana.")
-        if not lineas:
-            return
-        if motivo or fallos:
-            lineas.append(f"Log: {resultado.get('log')}")
-        self.avisar("\n".join(lineas))
+        if lineas:
+            if motivo or fallos:
+                lineas.append(f"Log: {resultado.get('log')}")
+            self.avisar("\n".join(lineas))
+        for liberado in resultado.get("liberados") or []:
+            # Studio ya lo leyó dos veces sin reclamos: sin la espera ni otra revisión.
+            self.lanzar_paso("programar", "--video-id", liberado["video_id"], "--reclamo", "no")
+        for rechazado in resultado.get("rechazados") or []:
+            self.preguntar_por_impugnacion_rechazada(rechazado)
+
+    def preguntar_por_impugnacion_rechazada(self, rechazado):
+        """La impugnación terminó y el video sigue con reclamo: ofrece borrarlo. Nunca lo borra solo."""
+        video_id = rechazado["video_id"]
+        titulo = rechazado.get("titulo") or video_id
+        reclamos = "".join(f"• {r['reclamo']}: {r['estado']}\n" for r in rechazado.get("reclamos") or [])
+        self.preguntar(
+            "impugnacion_rechazada",
+            f"❌ La impugnación de \"{titulo}\" terminó y el video sigue con reclamo:\n{reclamos}"
+            f"https://studio.youtube.com/video/{video_id}/claims\n\n"
+            "Sigue programado a dos años y sin ingresos. ¿Lo elimino de YouTube? No se puede deshacer.",
+            foto=rechazado.get("captura"),
+            video_id=video_id,
+        )
 
     def tras_eliminar_video(self, resultado, argumentos):
         video_id = valor(argumentos, "--video-id")
@@ -952,6 +975,11 @@ class Servicio:
     def respuesta_copia_retirada(self, accion, pregunta):
         # La API no lista un video retirado por copia: se borra sin la comprobación de siempre.
         self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"], "--retirado")
+
+    def respuesta_impugnacion_rechazada(self, accion, pregunta):
+        if accion == "eliminar_video":
+            self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"])
+        # Conservar: la pregunta ya se cerró y el video queda como está.
 
     def respuesta_reprogramar(self, accion, pregunta):
         self.fallos_programar.pop(pregunta["video_id"], None)

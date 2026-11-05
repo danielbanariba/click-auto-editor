@@ -1413,7 +1413,8 @@ def programar(
     leer_retiro=leer_retiro_en_studio,
 ):
     uploader = uploader or uploader_real()
-    titulo = (buscar_pendiente(video_id) or {}).get("titulo", video_id)
+    # Un video que se vuelve a programar (su reclamo se liberó) ya no está en pendientes.
+    titulo = (buscar_pendiente(video_id) or {}).get("titulo") or titulo_conocido(video_id)
     log = ruta_log("programar")
     with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
         uploader.cargar_env()
@@ -1982,7 +1983,9 @@ def seguir_impugnaciones(abrir_studio=pagina_de_studio):
     Solo abre /claims y lee: nunca pulsa nada. Los videos salen de los `servicio_impugnar_*.out`
     con algún reclamo impugnado. La primera lectura de cada uno es la base; después, cada
     cambio se anota en IMPUGNACIONES_JSON y sale una sola vez en `cambios`. Un video sin
-    reclamos "en proceso" deja de seguirse. Lo lanza el servicio una vez por día, tras `apelar`.
+    reclamos "en proceso" deja de seguirse, y en ese momento sale una sola vez en `liberados`
+    (Studio ya no muestra reclamos) o en `rechazados` (sigue con alguno: su estado y una
+    captura de /claims). Lo lanza el servicio una vez por día, tras `apelar`.
     """
     log = ruta_log("seguir_impugnaciones")
     base = {"log": str(log)}
@@ -1994,13 +1997,14 @@ def seguir_impugnaciones(abrir_studio=pagina_de_studio):
         (video_id for video_id, datos in registro.items() if not datos.get("terminado")),
         key=lambda video_id: registro[video_id].get("revisado", ""),
     )
-    cambios, fallos = [], []
+    cambios, fallos, liberados, rechazados = [], [], [], []
     inicio = time.monotonic()
     with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
         try:
             if seguidos:
                 # El mismo candado que `programar`, `impugnar` y `apelar`: comparten el perfil.
                 with bloqueo("programar"), abrir_studio() as pagina:
+                    DIR_CAPTURAS.mkdir(parents=True, exist_ok=True)
                     for video_id in seguidos:
                         if time.monotonic() - inicio > TIEMPO_MAXIMO_SEGUIMIENTO_S:
                             print("Se acabó el tiempo de la corrida: el resto se mira mañana.")
@@ -2017,19 +2021,32 @@ def seguir_impugnaciones(abrir_studio=pagina_de_studio):
                             continue
                         ahora, nuevos = comparar_reclamos(antes, reclamos)
                         cambios += [{"video_id": video_id, "titulo": datos.get("titulo"), **c} for c in nuevos]
+                        terminado = not any(P_IMPUGNACION_PENDIENTE.search(e) for e in ahora.values())
                         datos.update(
                             reclamos=ahora,
                             revisado=datetime.now().isoformat(timespec="seconds"),
-                            terminado=not any(P_IMPUGNACION_PENDIENTE.search(e) for e in ahora.values()),
+                            terminado=terminado,
                         )
                         guardar_impugnaciones(registro)
                         print(f"{video_id}: {len(ahora)} reclamos, {len(nuevos)} cambios")
+                        if terminado and not ahora:
+                            liberados.append({"video_id": video_id, "titulo": datos.get("titulo")})
+                        elif terminado:
+                            rechazados.append({
+                                "video_id": video_id,
+                                "titulo": datos.get("titulo"),
+                                "reclamos": [{"reclamo": n, "estado": e} for n, e in ahora.items()],
+                                "captura": capturar_pagina(pagina, DIR_CAPTURAS / f"reclamos_{video_id}.png"),
+                            })
         except errores_del_paso_de_studio() as exc:
             detalle = f"{type(exc).__name__}: {exc}"[:200]
             print(f"No se pudieron leer los reclamos en Studio: {detalle}")
             motivo = exc.motivo if isinstance(exc, NavegadorNoDisponible) else "error_navegador"
-            return {"ok": False, "motivo": motivo, "detalle": detalle, "cambios": cambios, "fallos": fallos, **base}
-    return {"ok": not fallos, "seguidos": len(seguidos), "cambios": cambios, "fallos": fallos, **base}
+            # Lo ya terminado no se vuelve a mirar: si no sale ahora, no sale nunca.
+            return {"ok": False, "motivo": motivo, "detalle": detalle, "cambios": cambios, "fallos": fallos,
+                    "liberados": liberados, "rechazados": rechazados, **base}
+    return {"ok": not fallos, "seguidos": len(seguidos), "cambios": cambios, "fallos": fallos,
+            "liberados": liberados, "rechazados": rechazados, **base}
 
 
 # ---------------------------------------------------------------------------

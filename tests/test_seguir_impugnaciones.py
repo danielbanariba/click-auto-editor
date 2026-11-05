@@ -109,6 +109,7 @@ class TestSeguirImpugnaciones(unittest.TestCase):
             mock.patch.object(pa, "DIR_LOGS", self.logs),
             mock.patch.object(pa, "IMPUGNACIONES_JSON", self.registro),
             mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "estado" / "pendientes.json"),
+            mock.patch.object(pa, "DIR_CAPTURAS", self.tmp / "capturas"),
             # Los tiempos de producción son los que Studio necesita; aquí la página es local.
             mock.patch.object(pa, "ESPERA_RESULTADO_RECLAMOS_S", 2),
             mock.patch.object(pa, "PAUSA_RELECTURA_RECLAMOS_S", 3),
@@ -171,6 +172,64 @@ class TestSeguirImpugnaciones(unittest.TestCase):
             [(c["reclamo"], c["ahora"]) for c in segundo["cambios"]], [("Canción A — Artista", None)]
         )
         self.assertEqual(studio.abiertos, ["V1", "V1"])
+
+    def test_un_video_que_se_queda_sin_reclamos_sale_una_vez_en_liberados(self):
+        # Defecto: un video liberado que no se vuelve a publicar, o que se relanza todos los días.
+        # V2 ya no tenía reclamos en la primera lectura: se liberó antes de que se lo siguiera.
+        self.impugnado("V1", 1, "Banda - Uno")
+        self.impugnado("V2", 1, "Banda - Dos")
+        studio = StudioFalso({"V1": [("Canción A", "Artista", EN_REVISION.format(dias=29))]})
+        primero = self.seguir(studio)
+        studio.reclamos["V1"] = []
+        segundo = self.seguir(studio)
+        tercero = self.seguir(studio)
+        self.assertEqual(primero["liberados"], [{"video_id": "V2", "titulo": "Banda - Dos"}])
+        self.assertEqual(segundo["liberados"], [{"video_id": "V1", "titulo": "Banda - Uno"}])
+        self.assertEqual((tercero["liberados"], tercero["rechazados"]), ([], []))
+        self.assertEqual(primero["rechazados"] + segundo["rechazados"], [])
+
+    def test_una_impugnacion_que_termina_con_reclamo_sale_una_vez_en_rechazados(self):
+        # Defecto: un rechazo sin aviso, sin el estado que muestra Studio o sin captura; o un
+        # video que todavía está en revisión dado por rechazado.
+        self.impugnado("V1", 1, "Banda - Uno")
+        studio = StudioFalso({"V1": [("Canción A", "Artista", EN_REVISION.format(dias=29))]})
+        primero = self.seguir(studio)
+        studio.reclamos["V1"] = [("Canción A", "Artista", RECHAZADA)]
+        segundo = self.seguir(studio)
+        tercero = self.seguir(studio)
+        self.assertEqual((primero["liberados"], primero["rechazados"]), ([], []))
+        (rechazado,) = segundo["rechazados"]
+        captura = rechazado.pop("captura")
+        self.assertEqual(rechazado, {
+            "video_id": "V1", "titulo": "Banda - Uno",
+            "reclamos": [{"reclamo": "Canción A — Artista", "estado": RECHAZADA}],
+        })
+        self.assertTrue(Path(captura).is_file())
+        self.assertEqual(segundo["liberados"], [])
+        self.assertEqual(tercero["rechazados"], [])
+        self.assertEqual(studio.pulsados, [])
+
+    def test_una_corrida_que_se_corta_igual_devuelve_lo_que_ya_termino(self):
+        # Defecto: un video ya marcado como terminado que no sale en el resultado de una corrida
+        # cortada por un error de Studio, y como no se vuelve a mirar, no se publica nunca.
+        self.impugnado("V1", 1, "Banda - Uno")
+        self.impugnado("V2", 1, "Banda - Dos")
+        studio = StudioFalso({"V2": [("Canción A", "Artista", EN_REVISION.format(dias=29))]})
+        contexto = self.navegador.new_context()
+        self.addCleanup(contexto.close)
+        contexto.route("https://studio.youtube.com/**", studio.atender)
+        # La última ruta registrada atiende primero: /claims de V2 no carga y la corrida se corta.
+        contexto.route("https://studio.youtube.com/**/V2/claims", lambda ruta: ruta.abort())
+        pagina = contexto.new_page()
+
+        @contextlib.contextmanager
+        def abrir_studio():
+            yield pagina
+
+        resultado = pa.seguir_impugnaciones(abrir_studio=abrir_studio)
+        self.assertFalse(resultado["ok"])
+        self.assertEqual(resultado["liberados"], [{"video_id": "V1", "titulo": "Banda - Uno"}])
+        self.assertTrue(json.loads(self.registro.read_text(encoding="utf-8"))["V1"]["terminado"])
 
     def test_una_pagina_que_no_carga_es_un_fallo_y_no_da_nada_por_retirado(self):
         # Defecto: una /claims que no cargó se leía como "sin reclamos" y daba todo por retirado.

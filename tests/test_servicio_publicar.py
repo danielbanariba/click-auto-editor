@@ -867,6 +867,47 @@ class TestApelaciones(BaseServicio):
         self.servicio.paso()
         self.assertEqual(len(self.telegram.mensajes), antes)
 
+    def terminar_seguimiento(self, **resultado):
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar("apelar", {"ok": True, "videos": [], "fallos": []})
+        self.servicio.paso()
+        self.lanzador.terminar("seguir_impugnaciones", {"ok": True, "cambios": [], "fallos": [], **resultado})
+        self.servicio.paso()
+
+    def test_un_video_liberado_se_vuelve_a_programar_sin_reclamo_y_sin_preguntar(self):
+        # Defecto: un video que quedó sin reclamos sigue a dos años y sin ingresos, o se relanza
+        # con la espera de una hora y otra revisión, o pide un botón que nadie pidió.
+        self.terminar_seguimiento(liberados=[{"video_id": "V1", "titulo": "Banda - Uno"},
+                                             {"video_id": "V2", "titulo": "Banda - Dos"}])
+        self.assertEqual(self.lanzador.lanzados("programar"), [
+            ["programar", "--video-id", "V1", "--reclamo", "no"],
+            ["programar", "--video-id", "V2", "--reclamo", "no"],
+        ])
+        self.assertEqual([m for m in self.telegram.mensajes if m["botones"]], [])
+
+    def test_una_impugnacion_rechazada_pregunta_y_solo_borra_con_eliminar(self):
+        # Defecto: un rechazo sin pregunta o sin decir qué video, qué reclamo ni dónde mirarlo;
+        # "Conservar" que borra; o un "Eliminar" sin la comprobación de siempre (--retirado).
+        estado = "El reclamante ha rechazado tu impugnación."
+        self.terminar_seguimiento(rechazados=[
+            {"video_id": video_id, "titulo": titulo, "captura": str(self.tmp / f"{video_id}.png"),
+             "reclamos": [{"reclamo": "Canción A — Artista", "estado": estado}]}
+            for video_id, titulo in (("V1", "Banda - Uno"), ("V2", "Banda - Dos"))
+        ])
+        uno, dos = [m for m in self.telegram.mensajes if m["botones"]]
+        self.assertIn("Banda - Uno", uno["texto"])
+        self.assertIn(estado, uno["texto"].split("Canción A — Artista")[1])
+        self.assertIn("https://studio.youtube.com/video/V1/claims", uno["texto"])
+        self.assertEqual(uno["foto"], str(self.tmp / "V1.png"))
+        self.assertEqual([etiqueta for etiqueta, _ in uno["botones"]], ["Conservar", "🗑️ Eliminar video"])
+        self.assertEqual(self.lanzador.lanzados("programar"), [])
+
+        self.telegram.apretar(uno, "Conservar")
+        self.telegram.apretar(dos, "🗑️ Eliminar video")
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("eliminar_video"), [["eliminar_video", "--video-id", "V2"]])
+
     def test_sin_nada_que_apelar_no_manda_ningun_mensaje(self):
         # Defecto: un mensaje diario vacío.
         self.ahora = self.DIA

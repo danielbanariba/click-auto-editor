@@ -1356,6 +1356,14 @@ class TestProgramar(unittest.TestCase):
             datetime.fromisoformat(status["publishAt"]), publicado_el_primero + timedelta(hours=1)
         )
 
+    def test_un_video_que_ya_no_esta_en_pendientes_toma_el_titulo_de_su_ultima_programacion(self):
+        # Defecto: un video que se vuelve a programar al liberarse su reclamo (ya no está en
+        # pendientes) se anuncia con su id en lugar del título.
+        pa.registrar_programado("V1", "Banda - Album", momento("2028-11-04 18:00"), True)
+        resultado, _ = self.programar_sin_reclamo(YouTubeFalso(["succeeded"]))
+        self.assertEqual(resultado["titulo"], "Banda - Album")
+        self.assertTrue(resultado["resumen"].startswith("🎉✅ Banda - Album\n"), resultado["resumen"])
+
     def test_el_resumen_dice_publicado_ahora_o_programado_para(self):
         cuando = momento("2026-11-02 18:00")
         ahora = pa.armar_resumen_programado("T", cuando, False, [], publicado_ahora=True)
