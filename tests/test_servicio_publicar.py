@@ -878,10 +878,12 @@ class TestApelaciones(BaseServicio):
     def test_un_video_liberado_se_vuelve_a_programar_sin_reclamo_y_sin_preguntar(self):
         # Defecto: un video que quedó sin reclamos sigue a dos años y sin ingresos, o se relanza
         # con la espera de una hora y otra revisión, o pide un botón que nadie pidió.
-        self.terminar_seguimiento(liberados=[{"video_id": "V1", "titulo": "Banda - Uno"}])
-        self.assertEqual(
-            self.lanzador.lanzados("programar"), [["programar", "--video-id", "V1", "--reclamo", "no"]]
-        )
+        self.terminar_seguimiento(liberados=[{"video_id": "V1", "titulo": "Banda - Uno"},
+                                             {"video_id": "V2", "titulo": "Banda - Dos"}])
+        self.assertEqual(self.lanzador.lanzados("programar"), [
+            ["programar", "--video-id", "V1", "--reclamo", "no"],
+            ["programar", "--video-id", "V2", "--reclamo", "no"],
+        ])
         self.assertEqual([m for m in self.telegram.mensajes if m["botones"]], [])
 
     def test_una_impugnacion_rechazada_pregunta_y_solo_borra_con_eliminar(self):

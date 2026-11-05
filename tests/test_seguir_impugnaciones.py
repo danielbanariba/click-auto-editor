@@ -209,6 +209,28 @@ class TestSeguirImpugnaciones(unittest.TestCase):
         self.assertEqual(tercero["rechazados"], [])
         self.assertEqual(studio.pulsados, [])
 
+    def test_una_corrida_que_se_corta_igual_devuelve_lo_que_ya_termino(self):
+        # Defecto: un video ya marcado como terminado que no sale en el resultado de una corrida
+        # cortada por un error de Studio, y como no se vuelve a mirar, no se publica nunca.
+        self.impugnado("V1", 1, "Banda - Uno")
+        self.impugnado("V2", 1, "Banda - Dos")
+        studio = StudioFalso({"V2": [("Canción A", "Artista", EN_REVISION.format(dias=29))]})
+        contexto = self.navegador.new_context()
+        self.addCleanup(contexto.close)
+        contexto.route("https://studio.youtube.com/**", studio.atender)
+        # La última ruta registrada atiende primero: /claims de V2 no carga y la corrida se corta.
+        contexto.route("https://studio.youtube.com/**/V2/claims", lambda ruta: ruta.abort())
+        pagina = contexto.new_page()
+
+        @contextlib.contextmanager
+        def abrir_studio():
+            yield pagina
+
+        resultado = pa.seguir_impugnaciones(abrir_studio=abrir_studio)
+        self.assertFalse(resultado["ok"])
+        self.assertEqual(resultado["liberados"], [{"video_id": "V1", "titulo": "Banda - Uno"}])
+        self.assertTrue(json.loads(self.registro.read_text(encoding="utf-8"))["V1"]["terminado"])
+
     def test_una_pagina_que_no_carga_es_un_fallo_y_no_da_nada_por_retirado(self):
         # Defecto: una /claims que no cargó se leía como "sin reclamos" y daba todo por retirado.
         self.impugnado("V1", 1, "Banda - Uno")
