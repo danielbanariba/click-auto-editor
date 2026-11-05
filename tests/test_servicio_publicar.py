@@ -508,6 +508,50 @@ class TestListaNegra(BaseServicio):
                 self.lanzador.procesos.clear()
 
 
+class TestCopiaRetirada(BaseServicio):
+    ELIMINAR = "🗑️ Eliminar video"
+
+    def terminar_programar(self, resultado):
+        self.servicio.lanzar_paso("programar", "--video-id", "VID1", "--esperar")
+        self.lanzador.terminar("programar", resultado)
+        self.servicio.paso()
+
+    def test_una_copia_retirada_avisa_por_que_y_solo_ofrece_eliminarla(self):
+        # Defecto: el aviso genérico "rechazó o perdió", sin decir por qué ni ofrecer borrarlo; un
+        # botón de más (no hay nada que conservar ni que reintentar); o un "Eliminar" que corre la
+        # comprobación de siempre, que con este video dice "ya estaba borrado" sin borrar nada.
+        self.terminar_programar({
+            "ok": False,
+            "motivo": "copia_retirada",
+            "video_id": "VID1",
+            "titulo": "🇩🇪 Naked Whipper - Chapel Defilement (2025)",
+            "detalle": ["De: Naked Whipper Official", "Solicitud recibida: 2 feb 2025"],
+            "captura_studio": str(self.tmp / "retiro.png"),
+        })
+        (pregunta,) = [m for m in self.telegram.mensajes if m["botones"]]
+        self.assertEqual([etiqueta for etiqueta, _ in pregunta["botones"]], [self.ELIMINAR])
+        texto = pregunta["texto"]
+        self.assertIn("Naked Whipper - Chapel Defilement (2025)", texto)
+        self.assertIn("No se puede publicar porque es copia de otro", texto)
+        self.assertIn("De: Naked Whipper Official", texto)
+        self.assertIn("https://studio.youtube.com/video/VID1/edit", texto)
+        self.assertEqual(pregunta["foto"], str(self.tmp / "retiro.png"))
+        self.assertFalse(any("rechazó o perdió" in m["texto"] for m in self.telegram.mensajes))
+
+        self.telegram.apretar(pregunta, self.ELIMINAR)
+        self.servicio.paso()
+        self.assertEqual(
+            self.lanzador.lanzados("eliminar_video"), [["eliminar_video", "--video-id", "VID1", "--retirado"]]
+        )
+
+    def test_un_video_que_no_existe_sigue_con_el_aviso_de_siempre(self):
+        # Comportamiento previo: `no_existe` avisa una vez, sin pregunta.
+        self.terminar_programar({"ok": False, "motivo": "no_existe", "status": {}, "video_id": "VID1"})
+        self.assertEqual([m for m in self.telegram.mensajes if m["botones"]], [])
+        avisos = [m["texto"] for m in self.telegram.mensajes if "VID1" in m["texto"]]
+        self.assertEqual(avisos, ["❌ YouTube rechazó o perdió el video VID1 (no_existe)."])
+
+
 class TestImpugnarDesdeTelegram(BaseServicio):
     """Un video con reclamo fuera de la lista negra: pregunta con botón para impugnarlo.
 

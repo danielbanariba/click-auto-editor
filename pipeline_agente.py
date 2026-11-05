@@ -1197,6 +1197,96 @@ def revisar_reclamo_en_studio(video_id):
     }
 
 
+# Un video que YouTube retiró por ser copia de otro ya retirado por derechos de autor (visto en
+# vivo el 2026-11-04): la API no lo lista ni a su dueño, y en /video/<id>/edit el aviso
+# "Retirado" abre un globo ("...es un duplicado de otro que se ha retirado...") cuyo botón
+# "Revisar problemas" abre el diálogo con quién pidió la retirada.
+P_COPIA_RETIRADA = re.compile(
+    r"duplicado de otro que se ha retirado|copia de otro v[ií]deo que se retir", re.IGNORECASE
+)
+P_DATOS_DE_LA_RETIRADA = re.compile(
+    r"(Contenido cuyos derechos de autor se infringen|Solicitud recibida|De):\s*([^\n]+)"
+)
+ESPERA_AVISO_RETIRADO_MS = 30_000
+ESPERA_DIALOGO_RETIRADO_MS = 20_000
+
+
+def datos_de_la_retirada(texto):
+    """Las líneas "Contenido...", "Solicitud recibida" y "De" del diálogo, una vez cada una."""
+    encontrado = P_COPIA_RETIRADA.search(texto or "")
+    if not encontrado:
+        return []
+    datos = {}
+    for etiqueta, valor in P_DATOS_DE_LA_RETIRADA.findall(texto[encontrado.start():]):
+        datos.setdefault(etiqueta, f"{etiqueta}: {valor.strip()}")
+    return list(datos.values())
+
+
+def leer_retiro_en_studio(video_id, abrir_studio=None):
+    """Por qué YouTube retiró el video, según Studio.
+
+    Solo lee: pulsa el aviso "Retirado" y "Revisar problemas", que abren información, y nada
+    dentro del diálogo. Devuelve `estado` "copia_retirada" (con `detalle`, las líneas de quién
+    pidió la retirada, y `captura_studio`) solo cuando Studio dice que es una copia; cualquier
+    otra cosa, o una página que no se pudo leer, es "otro".
+    """
+    from playwright.sync_api import Error as PlaywrightError
+
+    captura = DIR_CAPTURAS / f"retiro_{video_id}.png"
+    captura.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with (abrir_studio or pagina_de_studio)() as pagina:
+            try:
+                pagina.goto(f"{URL_STUDIO}video/{video_id}/edit", wait_until="domcontentloaded")
+                aviso = pagina.get_by_text("Retirado", exact=True).first
+                try:
+                    aviso.wait_for(state="visible", timeout=ESPERA_AVISO_RETIRADO_MS)
+                except PlaywrightError:
+                    return {"estado": "otro", "motivo": "sin_aviso_de_retirado"}
+                aviso.click()
+                globo = pagina.locator("ytcp-video-notices-tooltip-body:visible").first
+                globo.wait_for(timeout=ESPERA_AVISO_RETIRADO_MS)
+                if not P_COPIA_RETIRADA.search(globo.inner_text()):
+                    return {"estado": "otro", "motivo": "otro_retiro"}
+                detalle = []
+                try:
+                    globo.get_by_role("button", name="Revisar problemas").first.click(timeout=10_000)
+                    pagina.get_by_text("Solicitud recibida").first.wait_for(
+                        state="visible", timeout=ESPERA_DIALOGO_RETIRADO_MS
+                    )
+                    detalle = datos_de_la_retirada(pagina.locator("body").inner_text())
+                except PlaywrightError as exc:
+                    # El globo ya dice que es una copia: sin el diálogo solo falta quién la pidió.
+                    print(f"No se pudo leer el diálogo del retiro: {exc}")
+                pagina.screenshot(path=str(captura))
+            except PlaywrightError as exc:
+                print(f"Error leyendo el retiro en Studio: {exc}")
+                return {"estado": "otro", "motivo": "error_navegador"}
+    except NavegadorNoDisponible as exc:
+        return {"estado": "otro", "motivo": exc.motivo}
+    return {"estado": "copia_retirada", "detalle": detalle, "captura_studio": str(captura)}
+
+
+def apartar_copia_retirada(video_id, titulo, retiro, log):
+    """Un video que nunca se va a poder publicar: sale de pendientes y su álbum queda registrado."""
+    album = (buscar_pendiente(video_id) or {}).get("album")
+    if album:
+        with bloqueo("publicados"):
+            if registro_publicados.leer(REGISTRO_PUBLICADOS).buscar(album) is None:
+                registro_publicados.anotar(REGISTRO_PUBLICADOS, [(album, "subir", video_id)])
+    with bloqueo("estado"):
+        guardar_pendientes([p for p in leer_pendientes() if p["video_id"] != video_id])
+    return {
+        "ok": False,
+        "motivo": "copia_retirada",
+        "video_id": video_id,
+        "titulo": titulo,
+        "detalle": retiro.get("detalle", []),
+        "captura_studio": retiro.get("captura_studio"),
+        "log": str(log),
+    }
+
+
 def activar_monetizacion_en_studio(video_id):
     """Activa la monetización del video; siempre devuelve un diccionario, nunca lanza."""
     import studio_monetizacion
@@ -1306,7 +1396,8 @@ def armar_resumen_programado(
         quienes = f" ({', '.join(reclamantes)})" if reclamantes else ""
         return f"⚠️ {titulo}\nTiene reclamo{quienes}: programado para {fecha} para apelar."
     cuando = "publicado ahora" if publicado_ahora else f"programado para {fecha}"
-    texto = f"✓ {titulo}\nSin reclamos: {cuando}."
+    marca = "🎉✅" if publicado_ahora else "✓"
+    texto = f"{marca} {titulo}\nSin reclamos: {cuando}."
     if (monetizacion or {}).get("estado") in ("activada", "ya_activa"):
         texto += "\nMonetización activada."
     return texto
@@ -1319,6 +1410,7 @@ def programar(
     revisar=revisar_reclamo_en_studio,
     activar=activar_monetizacion_en_studio,
     uploader=None,
+    leer_retiro=leer_retiro_en_studio,
 ):
     uploader = uploader or uploader_real()
     titulo = (buscar_pendiente(video_id) or {}).get("titulo", video_id)
@@ -1332,6 +1424,13 @@ def programar(
         try:
             while True:
                 estado, status = consultar_video(uploader, yt, video_id)
+                if estado == "no_existe":
+                    # Studio dice si YouTube lo retiró por ser copia de otro; comparte el perfil
+                    # del navegador con la revisión de reclamos.
+                    with bloqueo("programar"):
+                        retiro = leer_retiro(video_id)
+                    if retiro["estado"] == "copia_retirada":
+                        return apartar_copia_retirada(video_id, titulo, retiro, log)
                 if estado in ("no_existe", "fallo"):
                     return {"ok": False, "motivo": estado, "status": status, "video_id": video_id}
                 if estado == "listo":
@@ -1997,11 +2096,13 @@ def apelar(sin_enviar=False, limite=LIMITE_APELACIONES, abrir_studio=pagina_de_s
 # ---------------------------------------------------------------------------
 
 
-def eliminar_video(video_id, uploader=None):
+def eliminar_video(video_id, retirado=False, uploader=None):
     """Borra el video de YouTube. No se puede deshacer: solo lo lanza un botón del usuario.
 
     Antes de borrar consulta el video: confirma que existe en el canal y devuelve su
-    título, que es lo que se informa como borrado.
+    título, que es lo que se informa como borrado. Con `retirado` (YouTube lo retiró por ser
+    copia de otro) no lo consulta: la API no lista ese video ni a su dueño, y la consulta
+    respondería `no_existe` sin borrarlo. Si YouTube no lo deja borrar, lo dice el error.
     """
     uploader = uploader or uploader_real()
     log = ruta_log("eliminar_video")
@@ -2012,13 +2113,15 @@ def eliminar_video(video_id, uploader=None):
             return {"ok": False, "motivo": "sin_credenciales", "video_id": video_id, "log": str(log)}
         yt = {"cliente": youtube}
         try:
-            respuesta = ejecutar_api(
-                uploader, yt, lambda c: c.videos().list(part="snippet", id=video_id).execute()
-            )
-            items = respuesta.get("items", [])
-            if not items:
-                return {"ok": False, "motivo": "no_existe", "video_id": video_id, "log": str(log)}
-            titulo = items[0].get("snippet", {}).get("title") or video_id
+            titulo = video_id
+            if not retirado:
+                respuesta = ejecutar_api(
+                    uploader, yt, lambda c: c.videos().list(part="snippet", id=video_id).execute()
+                )
+                items = respuesta.get("items", [])
+                if not items:
+                    return {"ok": False, "motivo": "no_existe", "video_id": video_id, "log": str(log)}
+                titulo = items[0].get("snippet", {}).get("title") or video_id
             ejecutar_api(uploader, yt, lambda c: c.videos().delete(id=video_id).execute())
         except SinCredenciales:
             return {"ok": False, "motivo": "sin_credenciales", "video_id": video_id, "log": str(log)}
@@ -2194,6 +2297,12 @@ def parse_args(argv=None):
         "eliminar_video", help="Borra un video de YouTube (no se puede deshacer)."
     )
     p.add_argument("--video-id", required=True)
+    p.add_argument(
+        "--retirado",
+        action="store_true",
+        help="El video lo retiró YouTube por ser copia de otro: la API no lo lista, así que se "
+        "borra sin comprobar antes que existe.",
+    )
 
     p = sub.add_parser(
         "impugnar",
@@ -2253,7 +2362,7 @@ def main(argv=None):
         reclamo = None if args.reclamo is None else args.reclamo == "si"
         return responder(programar(args.video_id, esperar=args.esperar, reclamo=reclamo))
     if args.comando == "eliminar_video":
-        return responder(eliminar_video(args.video_id))
+        return responder(eliminar_video(args.video_id, retirado=args.retirado))
     if args.comando == "impugnar":
         return responder(impugnar(args.video_id, sin_enviar=args.sin_enviar))
     if args.comando == "apelar":
