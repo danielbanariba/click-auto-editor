@@ -533,10 +533,12 @@ def renderizar(carpeta=None):
         subprocess.run(
             comando, cwd=PROJECT_ROOT, stdout=salida, stderr=subprocess.STDOUT, check=False
         )
-    # Un render que falla deja su temporal, con el video a medias (decenas de GB).
-    limpiar_temporales_render()
+    # Un render que falla deja su temporal, con el video a medias (decenas de GB). Si mientras
+    # tanto alguien lanzó otro a mano, ese temporal es suyo: se limpia en el próximo render.
+    if not render_en_curso():
+        limpiar_temporales_render()
 
-    nuevas =[c for c in listar_carpetas(DIR_RENDERIZANDO) if c not in renderizando_antes]
+    nuevas = [c for c in listar_carpetas(DIR_RENDERIZANDO) if c not in renderizando_antes]
     restantes = sum(len(listar_carpetas(o)) for o in DIRS_ORIGEN_RENDER)
     for nombre in nuevas:
         destino = DIR_RENDERIZANDO / nombre

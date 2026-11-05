@@ -389,6 +389,24 @@ class TestOrigenes(unittest.TestCase):
         self.assertEqual(rescatado.read_bytes(), b"video")
         self.assertTrue(album.is_dir())
 
+    def test_un_render_lanzado_a_mano_durante_el_del_servicio_conserva_su_temporal(self):
+        temporal = self.tmp / "temp_render"
+        album = self.album / "Banda A - Largo (2024)"
+        album.mkdir()
+        a_mano = temporal / "Banda M - A mano (2024)"
+
+        def render_con_otro_a_mano(comando, **kwargs):
+            (temporal / album.name).mkdir(parents=True)
+            a_mano.mkdir()
+            (a_mano / "Banda M - A mano (2024)__video.mp4").write_bytes(b"medio video")
+
+        # Antes del render no corre ninguno; al terminar, sigue corriendo el lanzado a mano.
+        with mock.patch.object(pa, "render_en_curso", side_effect=[False, True]), mock.patch.object(
+            pa.subprocess, "run", side_effect=render_con_otro_a_mano
+        ):
+            self.assertEqual(pa.renderizar()["motivo"], "render_fallido")
+        self.assertEqual((a_mano / "Banda M - A mano (2024)__video.mp4").read_bytes(), b"medio video")
+
     def test_con_un_render_corriendo_no_borra_su_temporal(self):
         del_render = self.tmp / "temp_render" / "Banda A - Largo (2024)"
         del_render.mkdir(parents=True)

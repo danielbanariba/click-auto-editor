@@ -4170,7 +4170,7 @@ def process_folders_sequential(folders_override=None, staging_ctx=None):
     if FINALIZE_FAILED:
         print(
             f"[ADVERTENCIA] {FINALIZE_FAILED} finalización(es) en segundo plano "
-            f"fallaron; revisá los mensajes [FINALIZE] y {SSD_TEMP_DIR / '_rescate'}"
+            f"fallaron; revisá los mensajes [FINALIZE] y {SSD_TEMP_DIR / CARPETA_RESCATE_RENDER}"
         )
     print(f"Espacio libre: {format_size_gb(free_gb)}")
     print(f"{'=' * 60}\n")
