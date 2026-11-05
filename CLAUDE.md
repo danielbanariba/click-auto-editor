@@ -205,6 +205,14 @@ with a claim missing, or with none, counts only when a re-read of the same page
 a failure. A video with no claim "en proceso" is no longer followed. The run holds the `programar` lock, looks
 first at the videos checked longest ago and stops after 30 min (`TIEMPO_MAXIMO_SEGUIMIENTO_S`).
 
+When a video stops being followed, the run reports it once. If `/claims` shows no claims, it
+goes in `liberados` and the service runs `programar --video-id <id> --reclamo no` without
+asking: monetization on and published now or at the first free moment, like an unclaimed
+video (the title comes from `programados.jsonl`, since the video is no longer pending). If
+it still has a claim (the dispute was rejected, or another claim remains), it goes in
+`rechazados` with each claim's status and a `/claims` screenshot, and the service asks
+"Conservar" or "🗑️ Eliminar video"; Eliminar runs `eliminar_video` with its usual check.
+
 Monetization (`studio_monetizacion.py`) turns ads on at
 `/video/<id>/monetization`. After opening it, Studio navigates several times and ends
 on `/monetization/ads`; a read of the ads state caught in one of those navigations
