@@ -56,6 +56,7 @@ from config import (
     AUDIO_SAMPLE_RATE,
     NVENC_EXTRA_OPTS,
     SSD_TEMP_DIR,
+    CARPETA_RESCATE_RENDER,
     USE_SSD_TEMP,
     DEFAULT_BASE_DIR,
     STAGING_ENABLED,
@@ -989,7 +990,7 @@ def finalize_render_output(
         # Rescate ante CUALQUIER fallo del move: el video son horas de
         # render y cleanup_temp() borraría el temp al salir.
         if temp_folder_path and final_video.exists():
-            rescue_dir = SSD_TEMP_DIR / "_rescate"
+            rescue_dir = SSD_TEMP_DIR / CARPETA_RESCATE_RENDER
             try:
                 rescue_dir.mkdir(parents=True, exist_ok=True)
                 shutil.move(

@@ -317,6 +317,8 @@ class TestOrigenes(unittest.TestCase):
             mock.patch.object(pa, "DIR_RENDERIZANDO", self.tmp / "Renderizando"),
             mock.patch.object(pa, "DIR_ERROR404", self.tmp / "Error404"),
             mock.patch.object(pa, "RENDER_SSD_DIR", Path("/")),
+            # renderizar borra lo que hay ahí: nunca el temporal de un render real.
+            mock.patch.object(pa, "SSD_TEMP_DIR", self.tmp / "temp_render"),
             mock.patch.object(pa, "MIN_FREE_SPACE_GB", 0),
             mock.patch.object(pa, "render_en_curso", return_value=False),
             mock.patch.object(pa, "REGISTRO_PUBLICADOS", self.tmp / "ya_publicados.tsv"),
@@ -357,6 +359,45 @@ class TestOrigenes(unittest.TestCase):
     def test_sin_albumes_en_ninguna_carpeta_no_hay_siguiente(self):
         self.assertIsNone(pa.siguiente_album())
         self.assertEqual(pa.renderizar()["motivo"], "sin_albumes")
+
+    def test_renderizar_borra_lo_que_dejan_los_renders_y_conserva_los_videos_rescatados(self):
+        temporal = self.tmp / "temp_render"
+        cortado = temporal / "Banda V - Cortado (2010)"
+        cortado.mkdir(parents=True)
+        (cortado / "01 - Tema.mp3").write_bytes(b"audio")
+        (temporal / "suelto.tmp").write_bytes(b"x")
+        rescatado = temporal / pa.CARPETA_RESCATE_RENDER / "Banda R - Rescatado (2011).mp4"
+        rescatado.parent.mkdir()
+        rescatado.write_bytes(b"video")
+        album = self.album / "Banda A - Largo (2024)"
+        album.mkdir()
+        al_lanzar = []
+
+        def render_sin_espacio(comando, **kwargs):
+            al_lanzar.append(sorted(p.name for p in temporal.iterdir()))
+            # Un render que se queda sin espacio deja su copia y el video a medias.
+            copia = temporal / album.name
+            copia.mkdir()
+            (copia / f"{album.name}__video.mp4").write_bytes(b"medio video")
+
+        with mock.patch.object(pa.subprocess, "run", side_effect=render_sin_espacio):
+            resultado = pa.renderizar()
+
+        self.assertEqual(resultado["motivo"], "render_fallido")
+        self.assertEqual(al_lanzar, [[pa.CARPETA_RESCATE_RENDER]])
+        self.assertEqual([p.name for p in temporal.iterdir()], [pa.CARPETA_RESCATE_RENDER])
+        self.assertEqual(rescatado.read_bytes(), b"video")
+        self.assertTrue(album.is_dir())
+
+    def test_con_un_render_corriendo_no_borra_su_temporal(self):
+        del_render = self.tmp / "temp_render" / "Banda A - Largo (2024)"
+        del_render.mkdir(parents=True)
+        (self.album / "Banda B - Siguiente (2024)").mkdir()
+        with mock.patch.object(pa, "render_en_curso", return_value=True), mock.patch.object(
+            pa.subprocess, "run", side_effect=AssertionError("lanzó un render")
+        ):
+            self.assertEqual(pa.renderizar()["motivo"], "render_en_curso")
+        self.assertTrue(del_render.is_dir())
 
     def test_renderizar_con_un_nombre_que_no_es_un_album_listado_no_renderiza(self):
         (self.album / "Banda - Disco (2020)").mkdir()
@@ -468,6 +509,7 @@ class TestRetomar(unittest.TestCase):
         self.proceso = f"render_falso_{self.tmp.name}.py"
         self.parches = [
             mock.patch.object(pa, "PROCESO_RENDER", self.proceso),
+            mock.patch.object(pa, "SSD_TEMP_DIR", self.tmp / "temp_render"),
             mock.patch.object(pa, "DIR_RENDERIZANDO", self.tmp / "Renderizando"),
             mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "pendientes.json"),
         ]
