@@ -328,7 +328,7 @@ Central config for all scripts. Key settings:
 - `BASE_DIR`: root data directory (external drive at `/mnt/Entretenimiento/01_edicion_automatizada`)
 - `RENDER_SSD_DIR`: SSD (`/mnt/Render`, btrfs) that holds `Renderizando/`; rendered albums wait there for upload, and nothing renders while it is unmounted
 - `SSD_TEMP_DIR`: `/mnt/Render/temp_render`, the render's temp folder for albums that do not fit in the
-  20 GB ramdisk (a 100-minute album makes a ~68 GB video, and the mux needs a second copy). The render
+  20 GB ramdisk (a 100-minute album made a 31 GB video, and the mux writes a second copy). The render
   empties only the ramdisk when it exits, and a killed render cleans nothing, so `renderizar` deletes
   everything in `SSD_TEMP_DIR` before and after each render, except `_rescate/` (finished videos that
   could not be moved to `Renderizando/`). It only runs when no other render is running.
