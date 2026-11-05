@@ -335,20 +335,6 @@ def buscar_pendiente(video_id):
     return None
 
 
-def buscar_programado(video_id):
-    """La última vez que `programar` fechó el video, según PROGRAMADOS_JSONL."""
-    if not PROGRAMADOS_JSONL.exists():
-        return None
-    encontrado = None
-    with open(PROGRAMADOS_JSONL, "r", encoding="utf-8") as f:
-        for linea in f:
-            if linea.strip():
-                registro = json.loads(linea)
-                if registro["video_id"] == video_id:
-                    encontrado = registro
-    return encontrado
-
-
 def registrar_programado(video_id, titulo, publica_en, con_reclamo):
     PROGRAMADOS_JSONL.parent.mkdir(parents=True, exist_ok=True)
     with open(PROGRAMADOS_JSONL, "a", encoding="utf-8") as f:
@@ -1428,7 +1414,7 @@ def programar(
 ):
     uploader = uploader or uploader_real()
     # Un video que se vuelve a programar (su reclamo se liberó) ya no está en pendientes.
-    titulo = (buscar_pendiente(video_id) or buscar_programado(video_id) or {}).get("titulo", video_id)
+    titulo = (buscar_pendiente(video_id) or {}).get("titulo") or titulo_conocido(video_id)
     log = ruta_log("programar")
     with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
         uploader.cargar_env()
