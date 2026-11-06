@@ -87,6 +87,8 @@ AVISO_BOTON = {
     "eliminar_video": "Borrando el video…",
     "impugnar": "Impugnando…",
 }
+# El menú de comandos del bot.
+COMANDOS = [{"command": "aleatorio", "description": "Prende o apaga la elección al azar del próximo álbum"}]
 # Mientras haya una de estas preguntas abiertas no se renderiza otro álbum.
 # "reprogramar" no frena: el video ya está subido y no depende del render.
 PREGUNTAS_QUE_FRENAN = ("renderizar", "subir", "reintentar")
@@ -205,8 +207,11 @@ class Telegram:
             limite_s=espera + 15,
             offset=offset,
             timeout=espera,
-            allowed_updates=["callback_query"],
+            allowed_updates=["callback_query", "message"],
         )
+
+    def registrar_comandos(self):
+        self.llamar("setMyCommands", commands=COMANDOS)
 
     def mandar(self, texto, botones=None, foto=None):
         datos = {"chat_id": self.chat_id}
@@ -327,7 +332,10 @@ class Servicio:
         self.ahora = ahora  # hora del reloj de pared: la de la última apelación sobrevive reinicios
         # rechazados y subidos: álbumes que siguen en Renderizando/ pero no se vuelven a ofrecer.
         # aceptados: álbumes que el usuario mandó renderizar; se suben sin volver a preguntar.
-        self.estado = {"offset": 0, "preguntas": {}, "rechazados": [], "subidos": [], "aceptados": []}
+        # aleatorio: el /aleatorio de Telegram; el próximo álbum se elige al azar.
+        self.estado = {
+            "offset": 0, "preguntas": {}, "rechazados": [], "subidos": [], "aceptados": [], "aleatorio": False
+        }
         self.tareas = []
         self.inicios = {}  # proceso -> momento en que se lanzó
         self.largos_avisados = set()  # procesos que pasaron su límite y ya se avisó
@@ -453,7 +461,7 @@ class Servicio:
             self.guardar()
         if pa.siguiente_album() is not None:
             self.avisos.discard("sin_albumes")
-            self.lanzar_paso("buscar")
+            self.lanzar_paso("buscar", *(["--aleatorio"] if self.estado["aleatorio"] else []))
         else:
             self.avisar_una_vez(
                 "sin_albumes",
@@ -966,6 +974,8 @@ class Servicio:
             self.guardar()
             if "callback_query" in actualizacion:
                 self.atender_boton(actualizacion["callback_query"])
+            elif "message" in actualizacion:
+                self.atender_mensaje(actualizacion["message"])
 
     def fallo_telegram(self, exc):
         """Avisa solo el primer fallo de una caída; los siguientes no llenan el log."""
@@ -1003,6 +1013,19 @@ class Servicio:
         except ERRORES_TELEGRAM as exc:
             log.warning("No se pudieron quitar los botones: %s", exc)
         getattr(self, f"respuesta_{pregunta['tipo']}")(accion, pregunta)
+
+    def atender_mensaje(self, mensaje):
+        """Lo que se escribe en el chat: solo /aleatorio, que prende o apaga la elección al azar."""
+        if str(mensaje.get("from", {}).get("id")) != self.telegram.chat_id:
+            log.warning("Mensaje de un usuario no autorizado: %s", mensaje.get("from"))
+            return
+        palabras = (mensaje.get("text") or "").split()
+        # En un grupo, Telegram manda el comando como /aleatorio@NombreDelBot.
+        if not palabras or palabras[0].split("@")[0] != "/aleatorio":
+            return
+        self.estado["aleatorio"] = not self.estado["aleatorio"]
+        self.guardar()
+        self.avisar("🔀 Aleatorio activado" if self.estado["aleatorio"] else "Aleatorio desactivado")
 
     def responder_boton(self, consulta, texto):
         try:
@@ -1068,7 +1091,13 @@ def main():
     if not token or not chat_id:
         log.error("Faltan PUBLICAR_TELEGRAM_TOKEN o PUBLICAR_TELEGRAM_CHAT_ID en .env")
         return SIN_CONFIGURACION
-    servicio = Servicio(Telegram(token, chat_id), Proceso)
+    telegram = Telegram(token, chat_id)
+    try:
+        telegram.registrar_comandos()
+    except ERRORES_TELEGRAM as exc:
+        # Sin el menú, /aleatorio igual funciona escrito a mano.
+        log.warning("No se pudo registrar el menú de comandos: %s", exc)
+    servicio = Servicio(telegram, Proceso)
     servicio.iniciar()
     log.info("Servicio en marcha")
     while True:

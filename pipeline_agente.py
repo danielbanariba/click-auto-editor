@@ -20,6 +20,7 @@ import functools
 import importlib.util
 import json
 import os
+import random
 import re
 import shutil
 import ssl
@@ -208,31 +209,40 @@ def destino_libre(directorio, nombre):
     return destino
 
 
-def siguiente_sin_publicar():
+def siguiente_sin_publicar(aleatorio=False):
     """Como siguiente_album, pero aparta en DIR_YA_PUBLICADOS los que están en el registro.
 
     Devuelve el álbum (o None) y los apartados; uno que no se pudo mover lleva `error` y
-    queda en su carpeta sin renderizar.
+    queda en su carpeta sin renderizar. Con `aleatorio`, el orden es al azar entre todas las
+    carpetas de origen.
     """
     registro = registro_publicados.leer(REGISTRO_PUBLICADOS)
     apartados = []
-    for origen in DIRS_ORIGEN_RENDER:
-        for nombre in ordenar_por_anio(listar_carpetas(origen)):
-            fila = registro.buscar(nombre)
-            if fila is None:
-                return origen / nombre, apartados
-            apartado = {"album": nombre, "origen": fila["origen"], "como": fila["nombre"]}
-            try:
-                DIR_YA_PUBLICADOS.mkdir(parents=True, exist_ok=True)
-                destino = destino_libre(DIR_YA_PUBLICADOS, nombre)
-                # rename y no shutil.move: los orígenes y Ya publicados/ están en BASE_DIR, y si
-                # rename falla, shutil.move copia el álbum y, sin poder borrar el original, deja
-                # una copia entera en cada vuelta.
-                (origen / nombre).rename(destino)
-                apartado["destino"] = str(destino)
-            except OSError as exc:
-                apartado["error"] = str(exc)
-            apartados.append(apartado)
+    # En orden se listan de a una: un origen se recorre solo si los anteriores no tienen nada.
+    candidatos = (
+        (origen, nombre)
+        for origen in DIRS_ORIGEN_RENDER
+        for nombre in ordenar_por_anio(listar_carpetas(origen))
+    )
+    if aleatorio:
+        candidatos = list(candidatos)
+        random.shuffle(candidatos)
+    for origen, nombre in candidatos:
+        fila = registro.buscar(nombre)
+        if fila is None:
+            return origen / nombre, apartados
+        apartado = {"album": nombre, "origen": fila["origen"], "como": fila["nombre"]}
+        try:
+            DIR_YA_PUBLICADOS.mkdir(parents=True, exist_ok=True)
+            destino = destino_libre(DIR_YA_PUBLICADOS, nombre)
+            # rename y no shutil.move: los orígenes y Ya publicados/ están en BASE_DIR, y si
+            # rename falla, shutil.move copia el álbum y, sin poder borrar el original, deja
+            # una copia entera en cada vuelta.
+            (origen / nombre).rename(destino)
+            apartado["destino"] = str(destino)
+        except OSError as exc:
+            apartado["error"] = str(exc)
+        apartados.append(apartado)
     return None, apartados
 
 
@@ -844,14 +854,15 @@ def portada_del_album(carpeta):
     return next(iter(sin_sombra or imagenes), None)
 
 
-def buscar(uploader=None):
+def buscar(uploader=None, aleatorio=False):
     """Elige el próximo álbum sin renderizarlo y captura su búsqueda en YouTube.
 
     El servicio pregunta con esa captura y la portada antes de renderizar: un álbum que ya está
     publicado se borra sin gastar el render. Los que están en el registro se apartan como en
     `renderizar`. Sin portada en la carpeta (puede venir dentro del audio), va solo la búsqueda.
+    Con `aleatorio` (el /aleatorio del servicio), elige al azar entre las carpetas de origen.
     """
-    origen, apartados = siguiente_sin_publicar()
+    origen, apartados = siguiente_sin_publicar(aleatorio)
     if origen is None:
         return {"ok": False, "motivo": "sin_albumes", "ya_publicados": apartados}
     captura, busqueda = capturar_busqueda(origen, uploader)
@@ -2330,9 +2341,10 @@ def parse_args(argv=None):
     p = sub.add_parser("renderizar", help="Renderiza el próximo álbum (o uno puntual).")
     p.add_argument("--carpeta", help="Nombre de la carpeta en 01_limpieza_de_impurezas, Album/ o EP/.")
 
-    sub.add_parser(
+    p = sub.add_parser(
         "buscar", help="Elige el próximo álbum y captura su búsqueda en YouTube, sin renderizarlo."
     )
+    p.add_argument("--aleatorio", action="store_true", help="Elige al azar entre las carpetas de origen.")
 
     p = sub.add_parser("verificar", help="Tests del video renderizado y captura.")
     p.add_argument("--carpeta", required=True, help="Carpeta devuelta por renderizar.")
@@ -2417,7 +2429,7 @@ def main(argv=None):
     if args.comando == "renderizar":
         return responder(renderizar(args.carpeta))
     if args.comando == "buscar":
-        return responder(buscar())
+        return responder(buscar(aleatorio=args.aleatorio))
     if args.comando == "verificar":
         return responder(verificar(args.carpeta))
     if args.comando == "subir":

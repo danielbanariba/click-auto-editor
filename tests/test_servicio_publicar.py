@@ -64,6 +64,16 @@ class TelegramFalso:
         self.siguiente_update += 1
 
 
+def escribir_en(telegram, texto, de=USUARIO):
+    telegram.updates.append(
+        {
+            "update_id": telegram.siguiente_update,
+            "message": {"message_id": 900, "from": {"id": de}, "chat": {"id": de}, "text": texto},
+        }
+    )
+    telegram.siguiente_update += 1
+
+
 class ProcesoFalso:
     def __init__(self, argumentos):
         self.argumentos = argumentos
@@ -449,6 +459,37 @@ class TestAntesDeRenderizar(BaseServicio):
 
         self.assertEqual(len(self.lanzador.lanzados("renderizar")), 1)
         self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"], ["buscar"]])
+
+
+class TestAleatorio(BaseServicio):
+    """/aleatorio prende y apaga la elección al azar del próximo álbum."""
+
+    def test_aleatorio_se_prende_y_se_apaga_contesta_y_sobrevive_un_reinicio(self):
+        escribir_en(self.telegram, "/aleatorio")
+        self.servicio.paso()
+        self.assertEqual(self.telegram.mensajes[-1]["texto"], "🔀 Aleatorio activado")
+
+        self.servicio = self.nuevo_servicio()
+        self.album_en_cola("Banda - Disco")
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar", "--aleatorio"]])
+
+        escribir_en(self.telegram, "/aleatorio@PublicarBot")
+        self.servicio.paso()
+        self.assertEqual(self.telegram.mensajes[-1]["texto"], "Aleatorio desactivado")
+        self.lanzador.terminar("buscar", {"ok": False, "motivo": "sin_albumes", "ya_publicados": []})
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar", "--aleatorio"], ["buscar"]])
+
+    def test_aleatorio_de_otro_usuario_u_otro_texto_no_cambia_nada(self):
+        escribir_en(self.telegram, "/aleatorio", de=999)
+        escribir_en(self.telegram, "hola")
+        self.album_en_cola("Banda - Disco")
+        self.servicio.paso()
+        self.servicio.paso()
+
+        self.assertEqual(self.telegram.mensajes, [])
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
 
 
 class TestReclamos(BaseServicio):

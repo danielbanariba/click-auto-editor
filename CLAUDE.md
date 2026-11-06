@@ -53,7 +53,13 @@ uploaded: the service asks with the video screenshot and the Subir / Rechazar /
 Eliminar buttons, as it does for an album rendered before this flow. The next
 album's question goes out once the upload ends. An accepted album still in its
 source folder after a restart is rendered again without asking; one that is gone
-(moved to Error404) is dropped from `aceptados`. It needs `PUBLICAR_TELEGRAM_TOKEN` and
+(moved to Error404) is dropped from `aceptados`. `/aleatorio`, written in the chat
+or picked from the bot's command menu (registered with `setMyCommands` at start),
+toggles random choice and answers "🔀 Aleatorio activado" or "Aleatorio
+desactivado"; while it is on, `buscar --aleatorio` picks at random among the three
+source folders, still moving registered albums aside. It starts off and the
+setting (`aleatorio`) survives restarts. Messages from anyone else, or any other
+text, are ignored. It needs `PUBLICAR_TELEGRAM_TOKEN` and
 `PUBLICAR_TELEGRAM_CHAT_ID` in `.env` (its own bot: Hermes keeps
 `@banar_precios_bot`). Open questions survive restarts in
 `data/agente/servicio.json`.
@@ -89,7 +95,7 @@ Each step is a `pipeline_agente.py` subcommand that prints one JSON line;
 logs, screenshots and state go to `data/agente/` (gitignored).
 
 ```bash
-env/bin/python pipeline_agente.py buscar                 # next album (cola, Album/, EP/) without rendering: its folder, cover and YouTube search screenshot; already published ones → Ya publicados/
+env/bin/python pipeline_agente.py buscar [--aleatorio]   # next album (or a random one) (cola, Album/, EP/) without rendering: its folder, cover and YouTube search screenshot; already published ones → Ya publicados/
 env/bin/python pipeline_agente.py renderizar             # next album (cola, Album/, EP/) → Renderizando/; already published ones → Ya publicados/
 env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/4K checks, screenshot + YouTube search screenshot
 env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, then deletes the album folder
