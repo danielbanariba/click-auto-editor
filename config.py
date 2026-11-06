@@ -34,7 +34,12 @@ DIR_VERIFICACION = BASE_DIR / "verificacion"
 # Directorio temporal para renderizado rápido
 # Opciones: RAM (tmpfs) > SSD NVMe > HDD
 # Con 64GB RAM, usar ramdisk es ~7x más rápido que NVMe
-SSD_TEMP_DIR = Path("/home/banar/temp_render")
+# Lo que no entra en el ramdisk va al SSD, junto a Renderizando/: en el disco del
+# sistema los temporales de los álbumes largos lo llenaban, y en el mismo disco el
+# video llega a Renderizando/ sin copiarse.
+SSD_TEMP_DIR = RENDER_SSD_DIR / "temp_render"
+# Videos terminados que no se pudieron mover a Renderizando/; la limpieza no los toca.
+CARPETA_RESCATE_RENDER = "_rescate"
 USE_SSD_TEMP = True  # Copiar a almacenamiento rápido antes de renderizar
 
 # Ramdisk (tmpfs) - Máxima velocidad de I/O

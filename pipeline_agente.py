@@ -37,6 +37,7 @@ from googleapiclient.errors import HttpError
 
 from config import (
     AUDIO_FORMATS,
+    CARPETA_RESCATE_RENDER,
     DIR_ERROR404,
     DIR_RENDERIZANDO,
     DIR_UPLOAD,
@@ -46,6 +47,7 @@ from config import (
     MIN_FREE_SPACE_GB,
     PROJECT_ROOT,
     RENDER_SSD_DIR,
+    SSD_TEMP_DIR,
     VIDEO_HEIGHT,
     VIDEO_WIDTH,
 )
@@ -466,6 +468,28 @@ def render_en_curso():
     return False
 
 
+def limpiar_temporales_render():
+    """Borra lo que los renders dejaron en su carpeta temporal del SSD, menos los videos rescatados.
+
+    Al salir, el render vacía solo el ramdisk, y uno cortado no limpia nada: cada álbum fallido
+    dejaba ahí su copia y su video a medias. Son copias (el álbum sigue en su carpeta de origen),
+    pero borrarlas con un render corriendo lo rompería: solo se llama cuando no hay ninguno.
+    """
+    if not SSD_TEMP_DIR.is_dir():
+        return
+    for entrada in SSD_TEMP_DIR.iterdir():
+        if entrada.name == CARPETA_RESCATE_RENDER:
+            continue
+        # Lo que no se puede borrar ahora se intenta de nuevo en el próximo render.
+        try:
+            if entrada.is_dir() and not entrada.is_symlink():
+                shutil.rmtree(entrada)
+            else:
+                entrada.unlink()
+        except OSError:
+            continue
+
+
 def renderizar(carpeta=None):
     # Dos renders 4K a la vez llenan el disco y la GPU.
     if render_en_curso():
@@ -477,6 +501,8 @@ def renderizar(carpeta=None):
             "motivo": "disco_no_disponible",
             "detalle": f"el SSD {RENDER_SSD_DIR} no está montado",
         }
+    # Antes de medir el espacio: lo que dejó un render cortado no cuenta como ocupado.
+    limpiar_temporales_render()
     try:
         libre_gb = shutil.disk_usage(RENDER_SSD_DIR).free / 1024**3
     except OSError as exc:
@@ -507,6 +533,10 @@ def renderizar(carpeta=None):
         subprocess.run(
             comando, cwd=PROJECT_ROOT, stdout=salida, stderr=subprocess.STDOUT, check=False
         )
+    # Un render que falla deja su temporal, con el video a medias (decenas de GB). Si mientras
+    # tanto alguien lanzó otro a mano, ese temporal es suyo: se limpia en el próximo render.
+    if not render_en_curso():
+        limpiar_temporales_render()
 
     nuevas = [c for c in listar_carpetas(DIR_RENDERIZANDO) if c not in renderizando_antes]
     restantes = sum(len(listar_carpetas(o)) for o in DIRS_ORIGEN_RENDER)
