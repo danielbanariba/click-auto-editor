@@ -518,6 +518,113 @@ class TestOrigenes(unittest.TestCase):
         ])
 
 
+class TestPreguntarAntesDeRenderizar(unittest.TestCase):
+    """`buscar` elige el álbum sin renderizarlo; `eliminar` borra uno que sigue en su origen."""
+
+    def setUp(self):
+        TestOrigenes.setUp(self)
+        for parche in (
+            mock.patch.object(pa, "DIR_CAPTURAS", self.tmp / "capturas"),
+            mock.patch.object(pa, "DIR_LOGS", self.tmp / "logs"),
+        ):
+            parche.start()
+            self.addCleanup(parche.stop)
+
+    def uploader_que_borra(self, raiz):
+        def borrar(carpeta, raiz_recibida):
+            self.assertEqual(Path(raiz_recibida), raiz.resolve())
+            shutil.rmtree(carpeta)
+            return True
+
+        return SimpleNamespace(safe_delete_folder=borrar)
+
+    def test_buscar_aparta_lo_publicado_y_devuelve_la_busqueda_y_la_portada_sin_renderizar(self):
+        rp.anotar(pa.REGISTRO_PUBLICADOS, [("Banda A - Nuevo (2021)", "eliminar", "")])
+        (self.album / "Banda A - Nuevo (2021)").mkdir()
+        siguiente = self.album / "Banda B - Viejo (2019)"
+        siguiente.mkdir()
+        for archivo in ("aaa_shadow.png", "Arte.jpg", "cover.jpg", "01. pista.flac"):
+            (siguiente / archivo).write_bytes(b"x")
+        captura = self.tmp / "busqueda.png"
+        buscadas = []
+
+        def capturar(carpeta, uploader=None):
+            buscadas.append(Path(carpeta))
+            return captura, "Banda B - Viejo (2019) (Full Album)"
+
+        with mock.patch.object(pa.subprocess, "run", side_effect=AssertionError("lanzó un render")), \
+                mock.patch.object(pa, "capturar_busqueda", side_effect=capturar):
+            resultado = pa.buscar()
+
+        self.assertEqual(buscadas, [siguiente])
+        self.assertEqual(resultado["ok"], True)
+        self.assertEqual(resultado["album"], "Banda B - Viejo (2019)")
+        self.assertEqual(resultado["carpeta"], str(siguiente))
+        self.assertEqual(resultado["portada"], str(siguiente / "cover.jpg"))
+        self.assertEqual(resultado["captura_busqueda"], str(captura))
+        self.assertEqual(resultado["busqueda"], "Banda B - Viejo (2019) (Full Album)")
+        self.assertEqual([a["album"] for a in resultado["ya_publicados"]], ["Banda A - Nuevo (2021)"])
+        self.assertTrue((pa.DIR_YA_PUBLICADOS / "Banda A - Nuevo (2021)").is_dir())
+        self.assertTrue(siguiente.is_dir())
+
+    def test_buscar_al_azar_elige_entre_las_tres_carpetas_y_sigue_apartando_los_publicados(self):
+        for carpeta, nombre in ((self.cola, "Banda A - Cola (2024)"), (self.album, "Banda B - Album (2023)"),
+                                (self.ep, "Banda C - Corto (2010) [EP]"), (self.ep, "Banda D - Publicado (2001) [EP]")):
+            (carpeta / nombre).mkdir()
+        rp.anotar(pa.REGISTRO_PUBLICADOS, [("Banda D - Publicado (2001) [EP]", "canal", "")])
+        captura = (self.tmp / "busqueda.png", "titulo")
+
+        # El azar falso da vuelta la lista: lo último de EP/ queda primero.
+        with mock.patch.object(pa.random, "shuffle", side_effect=lambda lista: lista.reverse()), \
+                mock.patch.object(pa, "capturar_busqueda", return_value=captura):
+            al_azar = pa.buscar(aleatorio=True)
+            en_orden = pa.buscar()
+
+        self.assertEqual(al_azar["album"], "Banda C - Corto (2010) [EP]")
+        self.assertEqual([a["album"] for a in al_azar["ya_publicados"]], ["Banda D - Publicado (2001) [EP]"])
+        self.assertTrue((pa.DIR_YA_PUBLICADOS / "Banda D - Publicado (2001) [EP]").is_dir())
+        self.assertEqual(en_orden["album"], "Banda A - Cola (2024)")
+
+    def test_buscar_sin_albumes_no_captura_nada(self):
+        with mock.patch.object(pa, "capturar_busqueda", side_effect=AssertionError("capturó")):
+            self.assertEqual(pa.buscar()["motivo"], "sin_albumes")
+
+    def test_sin_cover_la_portada_es_otra_imagen_que_no_sea_la_sombra(self):
+        carpeta = self.album / "Banda - Disco (2020)"
+        carpeta.mkdir()
+        self.assertIsNone(pa.portada_del_album(carpeta))
+        (carpeta / "aaa_shadow.png").write_bytes(b"x")
+        self.assertEqual(pa.portada_del_album(carpeta), carpeta / "aaa_shadow.png")
+        (carpeta / "Arte.JPG").write_bytes(b"x")
+        self.assertEqual(pa.portada_del_album(carpeta), carpeta / "Arte.JPG")
+
+    def test_eliminar_borra_un_album_de_su_carpeta_de_origen_y_lo_anota(self):
+        carpeta = self.ep / "Banda - Corto (2025) [EP]"
+        carpeta.mkdir()
+        (carpeta / "01. pista.flac").write_bytes(b"audio")
+
+        resultado = pa.eliminar(carpeta, uploader=self.uploader_que_borra(self.ep))
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertFalse(carpeta.exists())
+        fila = rp.leer(pa.REGISTRO_PUBLICADOS).buscar("Banda - Corto (2025) [EP]")
+        self.assertEqual(fila["origen"], "eliminar")
+
+    def test_eliminar_no_borra_la_carpeta_de_origen_ni_una_parte_de_un_album(self):
+        # Defecto: con las carpetas de origen como raíces, una ruta mal pasada borra parte de la
+        # única copia de un álbum.
+        album = self.album / "Banda - Doble (2020)"
+        (album / "CD1").mkdir(parents=True)
+        uploader = SimpleNamespace(safe_delete_folder=lambda c, r: self.fail(f"borró {c}"))
+
+        for carpeta in (self.album, album / "CD1"):
+            resultado = pa.eliminar(carpeta, uploader=uploader)
+            self.assertEqual(resultado["motivo"], "carpeta_fuera_de_raiz", carpeta)
+
+        self.assertTrue((album / "CD1").is_dir())
+        self.assertFalse(pa.REGISTRO_PUBLICADOS.exists())
+
+
 class TestRetomar(unittest.TestCase):
     """Una sesión nueva retoma lo que dejó otra: renders en curso y álbumes sin aprobar."""
 
