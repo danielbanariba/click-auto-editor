@@ -39,12 +39,21 @@ Scripts are numbered but **not all are sequential**. The active pipeline is:
 ### Publishing service (Telegram approval)
 
 `servicio_publicar.py` runs as a systemd user service
-(`systemd/publicar-albumes.service`) and publishes one album at a time:
-render → checks → a YouTube search screenshot, then one Telegram message
-with the video screenshot and the Subir / Rechazar / Eliminar buttons → on
-Subir, private upload and folder deletion (Eliminar deletes without uploading) →
-claim check → monetization → publish or schedule. Nothing is uploaded and no other album is rendered
-until the user presses a button. It needs `PUBLICAR_TELEGRAM_TOKEN` and
+(`systemd/publicar-albumes.service`) and publishes one album at a time. It asks
+before rendering: `buscar` picks the next album and screenshots its YouTube
+search, which goes as one message; then one question with the album cover
+(`cover.*` first, else another image that is not a shadow) and the buttons
+"✅ Renderizar y subir" / "🗑 Eliminar (ya está publicado)". Eliminar deletes the
+album's source folder (`eliminar` records it in the published registry first) and
+the service asks about the next one; nothing is rendered. Renderizar y subir
+records the album in `aceptados` (`data/agente/servicio.json`), renders it, runs
+the checks, uploads it privately with no other question and deletes the folder →
+claim check → monetization → publish or schedule. If a check fails, nothing is
+uploaded: the service asks with the video screenshot and the Subir / Rechazar /
+Eliminar buttons, as it does for an album rendered before this flow. The next
+album's question goes out once the upload ends. An accepted album still in its
+source folder after a restart is rendered again without asking; one that is gone
+(moved to Error404) is dropped from `aceptados`. It needs `PUBLICAR_TELEGRAM_TOKEN` and
 `PUBLICAR_TELEGRAM_CHAT_ID` in `.env` (its own bot: Hermes keeps
 `@banar_precios_bot`). Open questions survive restarts in
 `data/agente/servicio.json`.
@@ -63,10 +72,10 @@ upload got a video id. `sembrar_publicados` loads the channel titles and the
 albums the service already deleted or uploaded, and it can run again without
 duplicating rows. The key is "band|album": no case, accents, signs, year, type
 tag or `__N` suffix. A censored title ("C**") matches any letter of the same
-length. `renderizar` without `--carpeta` moves every registered album it finds
-on its way to `Ya publicados/` (under `BASE_DIR`, with `__N` when the name is
-taken) and renders the next one. A move that fails leaves that album in place,
-unrendered. With `--carpeta` the registry is not checked. The service lists by
+length. `buscar` (and `renderizar` without `--carpeta`) moves every registered
+album it finds on its way to `Ya publicados/` (under `BASE_DIR`, with `__N` when
+the name is taken) and returns (or renders) the next one. A move that fails leaves
+that album in place, unrendered. With `--carpeta` the registry is not checked. The service lists by
 Telegram what was moved (up to 10 names and how many more) and, once per album,
 what could not be moved. It is a name match, not proof: a reissue with the same
 name is moved too, which is why nothing is deleted.
@@ -80,10 +89,11 @@ Each step is a `pipeline_agente.py` subcommand that prints one JSON line;
 logs, screenshots and state go to `data/agente/` (gitignored).
 
 ```bash
+env/bin/python pipeline_agente.py buscar                 # next album (cola, Album/, EP/) without rendering: its folder, cover and YouTube search screenshot; already published ones → Ya publicados/
 env/bin/python pipeline_agente.py renderizar             # next album (cola, Album/, EP/) → Renderizando/; already published ones → Ya publicados/
 env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/4K checks, screenshot + YouTube search screenshot
 env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, then deletes the album folder
-env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the album folder without uploading (already published)
+env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the album folder without uploading (already published); a direct child of Renderizando/, upload_video/ or a source folder
 env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → monetization on → public now / first free moment, or +2 years if claimed
 env/bin/python pipeline_agente.py eliminar_video --video-id ID [--retirado]  # deletes the video from YouTube (irreversible; the service only runs it from a Telegram button); --retirado skips the existence check for a video YouTube removed as a copy
 env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # disputes every claim of the video in Studio (a legal statement in the user's name); --sin-enviar fills the first form and closes it without sending

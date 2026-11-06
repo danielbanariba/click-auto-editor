@@ -135,27 +135,59 @@ class BaseServicio(unittest.TestCase):
         (carpeta / f"{nombre}.mp4").write_bytes(b"video")
         return str(carpeta)
 
+    def verificado(self, nombre, ok=True):
+        return {
+            "ok": ok,
+            "album": nombre,
+            "captura": str(self.tmp / "captura.jpg"),
+            "captura_busqueda": str(self.tmp / "busqueda.png"),
+            "busqueda": f"{nombre} (Full Album)",
+            "resumen": f"{nombre} · 45:00\n✓ tiene sonido: sí",
+        }
+
     def pedir_aprobacion(self, nombre="Banda - Disco"):
-        """Lleva un álbum de la cola hasta el mensaje con los botones."""
-        self.album_en_cola(nombre)
+        """Lleva un álbum renderizado sin aceptar antes hasta el mensaje con Subir."""
+        carpeta = self.album_renderizado(nombre)
         self.servicio.paso()
+        self.lanzador.terminar("verificar", self.verificado(nombre))
+        self.servicio.paso()
+        return carpeta, self.telegram.mensajes[-1]
+
+    def preguntar_antes_de_renderizar(self, nombre="Banda - Disco", apartados=()):
+        """Lleva un álbum de la cola hasta la pregunta de antes del render."""
+        if not (self.cola / nombre).is_dir():
+            self.album_en_cola(nombre)
+        self.servicio.paso()
+        self.lanzador.terminar(
+            "buscar",
+            {
+                "ok": True,
+                "album": nombre,
+                "carpeta": str(self.cola / nombre),
+                "portada": str(self.tmp / "cover.jpg"),
+                "captura_busqueda": str(self.tmp / "busqueda.png"),
+                "busqueda": f"{nombre} (Full Album)",
+                "ya_publicados": list(apartados),
+            },
+        )
+        self.servicio.paso()
+        return str(self.cola / nombre), self.ultima_pregunta()
+
+    def aceptar(self, nombre="Banda - Disco"):
+        """Acepta el álbum antes del render; devuelve su carpeta en la cola."""
+        carpeta, pregunta = self.preguntar_antes_de_renderizar(nombre)
+        self.telegram.apretar(pregunta, "✅ Renderizar y subir")
+        self.servicio.paso()
+        return carpeta
+
+    def renderizar_aceptado(self, nombre="Banda - Disco"):
+        """Acepta el álbum y simula su render: queda en Renderizando/ y se lanza verificar."""
+        self.aceptar(nombre)
         carpeta = self.album_renderizado(nombre)
         shutil.rmtree(self.cola / nombre)
         self.lanzador.terminar("renderizar", {"ok": True, "album": nombre, "carpeta": carpeta})
         self.servicio.paso()
-        self.lanzador.terminar(
-            "verificar",
-            {
-                "ok": True,
-                "album": nombre,
-                "captura": str(self.tmp / "captura.jpg"),
-                "captura_busqueda": str(self.tmp / "busqueda.png"),
-                "busqueda": f"{nombre} (Full Album)",
-                "resumen": f"{nombre} · 45:00\n✓ tiene sonido: sí",
-            },
-        )
-        self.servicio.paso()
-        return carpeta, self.telegram.mensajes[-1]
+        return carpeta
 
 
 class TestAprobacion(BaseServicio):
@@ -182,7 +214,7 @@ class TestAprobacion(BaseServicio):
             self.servicio.paso()
 
         self.assertEqual(self.lanzador.lanzados("subir"), [])
-        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 1)
+        self.assertEqual(self.lanzador.lanzados("buscar"), [])
 
     def test_boton_de_otro_usuario_no_sube_nada(self):
         _, mensaje = self.pedir_aprobacion()
@@ -217,7 +249,7 @@ class TestAprobacion(BaseServicio):
         self.assertEqual(
             self.lanzador.lanzados("programar"), [["programar", "--video-id", "VID1", "--esperar"]]
         )
-        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 2)
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
         self.assertIn("Banda - Disco", self.telegram.mensajes[-1]["texto"])
 
     def test_si_falla_la_subida_vuelve_a_preguntar(self):
@@ -269,14 +301,14 @@ class TestAprobacion(BaseServicio):
 
         self.telegram.apretar(mensaje, "🗑 Eliminar (ya está publicado)")
         self.servicio.paso()
-        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 1)
+        self.assertEqual(self.lanzador.lanzados("buscar"), [])
         shutil.rmtree(carpeta)
         self.lanzador.terminar("eliminar", {"ok": True, "album": "Banda - Disco"})
         self.servicio.paso()
 
         self.assertEqual(self.lanzador.lanzados("eliminar"), [["eliminar", "--carpeta", carpeta]])
         self.assertEqual(self.lanzador.lanzados("subir"), [])
-        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 2)
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
 
     def test_si_no_se_puede_eliminar_no_se_vuelve_a_ofrecer(self):
         _, mensaje = self.pedir_aprobacion()
@@ -300,7 +332,123 @@ class TestAprobacion(BaseServicio):
 
         self.assertEqual(self.lanzador.lanzados("subir"), [])
         self.assertEqual(len(self.lanzador.lanzados("verificar")), 1)
-        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 2)
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
+
+
+class TestAntesDeRenderizar(BaseServicio):
+    """El álbum se pregunta con la búsqueda y la portada antes de gastar el render."""
+
+    def test_manda_la_busqueda_y_pregunta_con_la_portada_sin_renderizar(self):
+        _, pregunta = self.preguntar_antes_de_renderizar()
+        for _ in range(3):
+            self.servicio.paso()
+
+        busqueda, mensaje = self.telegram.mensajes
+        self.assertEqual(busqueda["foto"], str(self.tmp / "busqueda.png"))
+        self.assertIn("Banda - Disco (Full Album)", busqueda["texto"])
+        self.assertEqual(busqueda["botones"], [])
+        self.assertIs(mensaje, pregunta)
+        self.assertEqual(mensaje["foto"], str(self.tmp / "cover.jpg"))
+        self.assertIn("Banda - Disco", mensaje["texto"])
+        self.assertEqual(
+            [etiqueta for etiqueta, _ in mensaje["botones"]],
+            ["✅ Renderizar y subir", "🗑 Eliminar (ya está publicado)"],
+        )
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [])
+
+    def test_eliminar_borra_el_album_de_la_cola_sin_renderizar_y_pregunta_por_el_siguiente(self):
+        carpeta, pregunta = self.preguntar_antes_de_renderizar()
+        self.album_en_cola("Banda - Siguiente")
+
+        self.telegram.apretar(pregunta, "🗑 Eliminar (ya está publicado)")
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("eliminar"), [["eliminar", "--carpeta", carpeta]])
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
+        shutil.rmtree(carpeta)
+        self.lanzador.terminar("eliminar", {"ok": True, "album": "Banda - Disco"})
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [])
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"], ["buscar"]])
+        self.assertTrue(any("Borré Banda - Disco" in m["texto"] for m in self.telegram.mensajes))
+
+    def test_si_no_se_puede_eliminar_avisa_que_quedo_en_la_cola(self):
+        _, pregunta = self.preguntar_antes_de_renderizar()
+
+        self.telegram.apretar(pregunta, "🗑 Eliminar (ya está publicado)")
+        self.servicio.paso()
+        self.lanzador.terminar("eliminar", {"ok": False, "motivo": "no_se_pudo_borrar"})
+        self.servicio.paso()
+
+        aviso = self.telegram.mensajes[-1]["texto"]
+        self.assertIn("No pude borrar Banda - Disco", aviso)
+        self.assertIn(f"Quedó en {self.cola.name}/", aviso)
+
+    def test_aceptar_renderiza_verifica_y_sube_sin_volver_a_preguntar(self):
+        carpeta_cola = self.aceptar()
+        self.assertEqual(
+            self.lanzador.lanzados("renderizar"), [["renderizar", "--carpeta", Path(carpeta_cola).name]]
+        )
+        carpeta = self.album_renderizado("Banda - Disco")
+        shutil.rmtree(carpeta_cola)
+        self.lanzador.terminar("renderizar", {"ok": True, "album": "Banda - Disco", "carpeta": carpeta})
+        self.servicio.paso()
+        self.lanzador.terminar("verificar", self.verificado("Banda - Disco"))
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("subir"), [["subir", "--carpeta", carpeta]])
+        self.assertEqual(len([m for m in self.telegram.mensajes if m["botones"]]), 1)
+
+    def test_si_un_chequeo_falla_no_sube_y_pregunta_con_la_captura_del_video(self):
+        self.renderizar_aceptado()
+        self.lanzador.terminar("verificar", self.verificado("Banda - Disco", ok=False))
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("subir"), [])
+        pregunta = self.ultima_pregunta()
+        self.assertEqual(pregunta["foto"], str(self.tmp / "captura.jpg"))
+        self.assertIn("Hay tests fallidos", pregunta["texto"])
+        self.assertIn("✅ Subir", dict(pregunta["botones"]))
+
+    def test_la_pregunta_del_siguiente_sale_cuando_termina_la_subida(self):
+        carpeta = self.renderizar_aceptado()
+        self.album_en_cola("Banda - Siguiente")
+        self.lanzador.terminar("verificar", self.verificado("Banda - Disco"))
+        self.servicio.paso()
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
+
+        shutil.rmtree(carpeta)
+        self.lanzador.terminar(
+            "subir", {"ok": True, "video_id": "VID1", "titulo": "Banda - Disco", "carpeta_borrada": True}
+        )
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"], ["buscar"]])
+
+    def test_un_reinicio_a_mitad_del_render_aceptado_lo_renderiza_sin_volver_a_preguntar(self):
+        carpeta_cola = self.aceptar()
+
+        self.lanzador = LanzadorFalso()
+        self.servicio = self.nuevo_servicio()
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados(), [["renderizar", "--carpeta", Path(carpeta_cola).name]])
+        self.assertEqual(len([m for m in self.telegram.mensajes if m["botones"]]), 1)
+
+    def test_un_album_aceptado_que_ya_no_esta_en_la_cola_no_se_vuelve_a_renderizar(self):
+        carpeta_cola = self.aceptar()
+        shutil.rmtree(carpeta_cola)
+        self.lanzador.terminar(
+            "renderizar", {"ok": False, "motivo": "render_fallido", "album": "Banda - Disco",
+                           "movido_a_error404": True, "log_final": ""}
+        )
+        self.album_en_cola("Banda - Siguiente")
+        self.servicio.paso()
+
+        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 1)
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"], ["buscar"]])
 
 
 class TestReclamos(BaseServicio):
@@ -1034,7 +1182,7 @@ class TestProgramarFallido(BaseServicio):
         self.album_en_cola("Banda - Disco")
         self.servicio.paso()
 
-        self.assertEqual(self.lanzador.lanzados("renderizar"), [["renderizar"]])
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
 
     def test_reinicio_con_la_pregunta_abierta_no_relanza_programar(self):
         pa.guardar_pendientes([{"video_id": "VID1", "titulo": "T"}])
@@ -1162,6 +1310,24 @@ class TestTiempoMaximo(BaseServicio):
         self.assertIn("Banda - Disco", aviso["texto"])
         self.assertIn(str(proceso.salida), aviso["texto"])
 
+    def test_buscar_colgado_se_corta_avisa_y_se_reintenta_al_pasar_la_pausa(self):
+        self.album_en_cola("Banda - Disco")
+        proceso = self.paso_lanzado("buscar")
+
+        self.correr(sp.limite_del_paso("buscar") + 1)
+        self.assertIsNotNone(proceso.popen.poll())
+        self.assertEqual(self.servicio.tareas, [])
+        aviso = self.telegram.mensajes[-1]
+        self.assertEqual(aviso["botones"], [])
+        self.assertIn("No pude buscar el próximo álbum", aviso["texto"])
+
+        self.servicio.lanzar = self.lanzador
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("buscar"), [])
+        self.ahora += sp.REINTENTO_S + 1
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
+
     def test_verificar_cortado_se_reintenta_al_pasar_la_pausa(self):
         carpeta = self.album_renderizado("Banda - Disco")
         self.servicio.lanzar = self.lanzador
@@ -1264,12 +1430,12 @@ class TestTiempoMaximo(BaseServicio):
 
 
 class TestAvisos(BaseServicio):
-    def test_con_la_cola_vacia_renderiza_desde_album_o_ep(self):
+    def test_con_la_cola_vacia_busca_desde_album_o_ep(self):
         album = self.tmp / "Album"
         (album / "Banda - Disco (2020)").mkdir(parents=True)
         with mock.patch.object(pa, "DIRS_ORIGEN_RENDER", (self.cola, album)):
             self.servicio.paso()
-        self.assertEqual(self.lanzador.lanzados("renderizar"), [["renderizar"]])
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
 
     def test_sin_albumes_avisa_una_sola_vez(self):
         origenes = tuple(self.tmp / nombre for nombre in ("01_limpieza_de_impurezas", "Album", "EP"))
@@ -1285,8 +1451,7 @@ class TestAvisos(BaseServicio):
         self.assertEqual(self.lanzador.lanzados(), [])
 
     def test_render_fallido_sin_error404_no_manda_a_una_cola_que_no_existe(self):
-        self.album_en_cola("Banda - Disco")
-        self.servicio.paso()
+        self.aceptar("Banda - Disco")
         self.lanzador.terminar(
             "renderizar",
             {"ok": False, "motivo": "render_fallido", "album": "Banda - Disco",
@@ -1300,8 +1465,8 @@ class TestAvisos(BaseServicio):
         self.assertNotIn("la cola", pregunta["texto"])
         self.assertIn("🔁 Reintentar", dict(pregunta["botones"]))
 
-    def test_avisa_los_albumes_que_el_render_aparto_por_ya_publicados(self):
-        # Defecto: el render mueve álbumes a Ya publicados/ en silencio, y una reedición
+    def test_avisa_los_albumes_que_buscar_aparto_por_ya_publicados(self):
+        # Defecto: buscar mueve álbumes a Ya publicados/ en silencio, y una reedición
         # legítima apartada por error no se ve nunca.
         apartados = [
             {"album": f"Banda {n} - Disco (2020)", "origen": "canal",
@@ -1309,16 +1474,9 @@ class TestAvisos(BaseServicio):
             for n in range(12)
         ] + [{"album": "Banda - Roto (2020)", "origen": "eliminar", "como": "Banda - Roto (2020)",
               "error": "sin permiso"}]
-        self.album_en_cola("Banda - Disco")
-        self.servicio.paso()
-        carpeta = self.album_renderizado("Banda - Disco")
-        self.lanzador.terminar(
-            "renderizar",
-            {"ok": True, "album": "Banda - Disco", "carpeta": carpeta, "ya_publicados": apartados},
-        )
-        self.servicio.paso()
+        _, pregunta = self.preguntar_antes_de_renderizar("Banda - Disco", apartados=apartados)
 
-        movidos, no_movido = (m["texto"] for m in self.telegram.mensajes)
+        movidos, no_movido, _busqueda, _pregunta = (m["texto"] for m in self.telegram.mensajes)
         self.assertIn("Ya publicados", movidos)
         self.assertIn("Banda 0 - Disco (2020) → 🇺🇸 BANDA 0 - DISCO (2020) ⟨FULL ALBUM⟩", movidos)
         self.assertIn("Banda 9 - Disco (2020)", movidos)
@@ -1326,15 +1484,15 @@ class TestAvisos(BaseServicio):
         self.assertIn("y 2 más", movidos)
         self.assertNotIn("Banda - Roto", movidos)
         self.assertIn("Banda - Roto (2020): sin permiso", no_movido)
-        self.assertEqual(self.lanzador.lanzados("verificar"), [["verificar", "--carpeta", carpeta]])
+        self.assertIn("Banda - Disco", pregunta["texto"])
 
-    def test_sin_albumes_que_renderizar_igual_avisa_lo_que_aparto(self):
-        # Defecto: el aviso sale solo cuando hay render, y cuando todo lo que quedaba ya estaba
-        # publicado no se entera nadie.
+    def test_sin_albumes_que_preguntar_igual_avisa_lo_que_aparto(self):
+        # Defecto: el aviso sale solo cuando hay un álbum que preguntar, y cuando todo lo que
+        # quedaba ya estaba publicado no se entera nadie.
         self.album_en_cola("Banda - Disco (2020)")
         self.servicio.paso()
         self.lanzador.terminar(
-            "renderizar",
+            "buscar",
             {"ok": False, "motivo": "sin_albumes", "ya_publicados": [
                 {"album": "Banda - Disco (2020)", "origen": "subir", "como": "Banda - Disco (2020)",
                  "destino": "x"},
@@ -1345,13 +1503,13 @@ class TestAvisos(BaseServicio):
         self.assertEqual(len(self.telegram.mensajes), 1)
         self.assertIn("Banda - Disco (2020) → Banda - Disco (2020)", self.telegram.mensajes[0]["texto"])
 
-    def test_un_album_que_no_se_pudo_apartar_no_relanza_el_render_en_cada_vuelta(self):
-        # Defecto: el álbum sigue en la cola, el render se relanza en cada vuelta del servicio
+    def test_un_album_que_no_se_pudo_apartar_no_relanza_la_busqueda_en_cada_vuelta(self):
+        # Defecto: el álbum sigue en la cola, la búsqueda se relanza en cada vuelta del servicio
         # (recorriendo miles de carpetas del disco) y el mismo aviso llega una y otra vez.
         self.album_en_cola("Banda - Roto (2020)")
         self.servicio.paso()
         self.lanzador.terminar(
-            "renderizar",
+            "buscar",
             {"ok": False, "motivo": "sin_albumes", "ya_publicados": [
                 {"album": "Banda - Roto (2020)", "origen": "canal", "como": "Banda - Roto (2020)",
                  "error": "sin permiso"},
@@ -1360,20 +1518,19 @@ class TestAvisos(BaseServicio):
         for _ in range(3):
             self.servicio.paso()
 
-        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 1)
+        self.assertEqual(len(self.lanzador.lanzados("buscar")), 1)
         self.assertEqual(len(self.telegram.mensajes), 1)
         self.assertIn("Banda - Roto (2020): sin permiso", self.telegram.mensajes[0]["texto"])
 
     def test_un_album_que_no_se_pudo_apartar_se_avisa_una_sola_vez(self):
-        # Defecto: el álbum sigue al frente de la cola, cada render vuelve a intentar moverlo y
-        # el mismo aviso llega después de cada render.
+        # Defecto: el álbum sigue al frente de la cola, cada búsqueda vuelve a intentar moverlo y
+        # el mismo aviso llega después de cada una.
         no_movido = {"album": "Banda - Roto (2020)", "origen": "canal", "como": "Banda - Roto (2020)",
                      "error": "sin permiso"}
         for nombre in ("Banda - Uno", "Banda - Dos"):
-            carpeta = self.album_renderizado(nombre)
-            self.servicio.tras_renderizar(
-                {"ok": True, "album": nombre, "carpeta": carpeta, "ya_publicados": [no_movido]},
-                ["renderizar"],
+            self.servicio.tras_buscar(
+                {"ok": True, "album": nombre, "carpeta": str(self.cola / nombre), "ya_publicados": [no_movido]},
+                ["buscar"],
             )
 
         avisos = [m for m in self.telegram.mensajes if "sin permiso" in m["texto"]]
@@ -1385,7 +1542,7 @@ class TestAvisos(BaseServicio):
 
         self.servicio.paso()
 
-        self.assertEqual(self.lanzador.lanzados("renderizar"), [["renderizar"]])
+        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
 
 
 class TestTelegramCaido(BaseServicio):

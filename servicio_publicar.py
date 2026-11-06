@@ -55,6 +55,10 @@ SIN_CONFIGURACION = 78  # EX_CONFIG: el unit de systemd no reinicia con este có
 
 # Filas de botones. Eliminar va en su propia fila, lejos de Subir, para no apretarlo sin querer.
 BOTONES = {
+    "renderizar": [
+        [("✅ Renderizar y subir", "renderizar")],
+        [("🗑 Eliminar (ya está publicado)", "eliminar")],
+    ],
     "subir": [
         [("✅ Subir", "subir"), ("❌ Rechazar", "rechazar")],
         [("🗑 Eliminar (ya está publicado)", "eliminar")],
@@ -72,6 +76,7 @@ BOTONES = {
     "impugnacion_rechazada": [[("Conservar", "conservar")], [("🗑️ Eliminar video", "eliminar_video")]],
 }
 AVISO_BOTON = {
+    "renderizar": "Lo renderizo y lo subo",
     "subir": "Subiendo…",
     "rechazar": "No lo subo",
     "eliminar": "Borrando…",
@@ -84,8 +89,8 @@ AVISO_BOTON = {
 }
 # Mientras haya una de estas preguntas abiertas no se renderiza otro álbum.
 # "reprogramar" no frena: el video ya está subido y no depende del render.
-PREGUNTAS_QUE_FRENAN = ("subir", "reintentar")
-PASOS_DEL_ALBUM = ("renderizar", "verificar", "subir", "eliminar")
+PREGUNTAS_QUE_FRENAN = ("renderizar", "subir", "reintentar")
+PASOS_DEL_ALBUM = ("buscar", "renderizar", "verificar", "subir", "eliminar")
 # Tiempo máximo de cada paso. Los cortables son idempotentes; los demás mueven o
 # borran carpetas y cortarlos a medias dejaría un álbum a medio mover: solo se avisa.
 LIMITE_PASO_S = 30 * 60  # verificar, eliminar y cualquier paso que no esté abajo
@@ -97,8 +102,9 @@ LIMITES_PASO_S = {
     "seguir_impugnaciones": 45 * 60,  # también; corta solo a los 30 min y sigue al otro día
 }
 # `apelar` anota cada video antes de pulsar el envío: cortarlo nunca hace que se repita uno.
-# `seguir_impugnaciones` solo lee Studio.
-PASOS_CORTABLES = ("verificar", "programar", "apelar", "seguir_impugnaciones")
+# `seguir_impugnaciones` solo lee Studio. `buscar` aparta los publicados con un rename, que no
+# queda a medias.
+PASOS_CORTABLES = ("buscar", "verificar", "programar", "apelar", "seguir_impugnaciones")
 GRACIA_CORTE_S = 10  # entre SIGTERM y SIGKILL
 MOTIVOS_SUBIDA = {
     "limite_canal": "YouTube no deja subir más videos por hoy",
@@ -294,6 +300,16 @@ def valor(argumentos, opcion):
     return argumentos[list(argumentos).index(opcion) + 1]
 
 
+def busqueda_en_youtube(resultado):
+    """La captura de la búsqueda va en un mensaje antes de la pregunta; sin captura, el enlace."""
+    busqueda = resultado.get("busqueda")
+    if resultado.get("captura_busqueda"):
+        return [{"texto": f"🔎 Búsqueda en YouTube: {busqueda}", "foto": resultado["captura_busqueda"]}], ""
+    if busqueda:
+        return [], f"\n\n🔎 https://www.youtube.com/results?search_query={quote(busqueda)}"
+    return [], ""
+
+
 def carpetas_de_origen():
     """Las carpetas de donde toma álbumes el servicio: «a/, b/ ni c/»."""
     nombres = [f"{origen.name}/" for origen in pa.DIRS_ORIGEN_RENDER]
@@ -310,7 +326,8 @@ class Servicio:
         self.reloj = reloj
         self.ahora = ahora  # hora del reloj de pared: la de la última apelación sobrevive reinicios
         # rechazados y subidos: álbumes que siguen en Renderizando/ pero no se vuelven a ofrecer.
-        self.estado = {"offset": 0, "preguntas": {}, "rechazados": [], "subidos": []}
+        # aceptados: álbumes que el usuario mandó renderizar; se suben sin volver a preguntar.
+        self.estado = {"offset": 0, "preguntas": {}, "rechazados": [], "subidos": [], "aceptados": []}
         self.tareas = []
         self.inicios = {}  # proceso -> momento en que se lanzó
         self.largos_avisados = set()  # procesos que pasaron su límite y ya se avisó
@@ -424,9 +441,19 @@ class Servicio:
         listos = [c for c in pa.albumes_por_aprobar() if Path(c).name not in descartados]
         if listos:
             self.lanzar_paso("verificar", "--carpeta", listos[0])
-        elif pa.siguiente_album() is not None:
+            return
+        # Un álbum aceptado que sigue en su carpeta de origen se renderiza sin volver a preguntar
+        # (por ejemplo, después de un reinicio a mitad del render).
+        for nombre in list(self.estado["aceptados"]):
+            if any((origen / nombre).is_dir() for origen in pa.DIRS_ORIGEN_RENDER):
+                self.lanzar_paso("renderizar", "--carpeta", nombre)
+                return
+            # Ya no está: el render lo movió a Error404 o alguien lo sacó de la carpeta.
+            self.estado["aceptados"].remove(nombre)
+            self.guardar()
+        if pa.siguiente_album() is not None:
             self.avisos.discard("sin_albumes")
-            self.lanzar_paso("renderizar")
+            self.lanzar_paso("buscar")
         else:
             self.avisar_una_vez(
                 "sin_albumes",
@@ -457,6 +484,32 @@ class Servicio:
                     f"{pa.DIR_YA_PUBLICADOS.name}/. Sigue en su carpeta y no lo renderizo."
                 )
 
+    def tras_buscar(self, resultado, argumentos):
+        apartados = resultado.get("ya_publicados") or []
+        self.avisar_apartados(apartados)
+        motivo = resultado.get("motivo")
+        if resultado.get("ok"):
+            self.avisos.clear()
+            previas, enlace = busqueda_en_youtube(resultado)
+            self.preguntar(
+                "renderizar",
+                f"{resultado['album']}{enlace}\n\n¿Ya está publicado? Si no, lo renderizo y lo subo.",
+                foto=resultado.get("portada"),
+                carpeta=resultado["carpeta"],
+                previas=previas,
+            )
+        elif motivo == "sin_albumes":
+            if any("error" in a for a in apartados):
+                # El álbum que no se pudo mover sigue en la cola: sin pausa, se relanzaría la
+                # búsqueda en cada vuelta.
+                self.album_pausado_hasta = self.reloj() + REINTENTO_S
+        else:
+            texto = f"⚠️ No pude buscar el próximo álbum ({motivo}). Reintento en 30 min."
+            if resultado.get("log"):
+                texto += f"\nLog: {resultado['log']}"
+            self.avisar_una_vez(f"buscar_{motivo}", texto)
+            self.album_pausado_hasta = self.reloj() + REINTENTO_S
+
     def tras_renderizar(self, resultado, argumentos):
         apartados = resultado.get("ya_publicados") or []
         self.avisar_apartados(apartados)
@@ -476,6 +529,8 @@ class Servicio:
             self.lanzar_paso("verificar", "--carpeta", resultado["carpeta"])
         elif motivo in ("sin_albumes", "render_en_curso"):
             return
+        elif motivo == "album_no_encontrado":
+            self.avisar(f"⚠️ No encontré {resultado.get('album')} en {carpetas_de_origen()}; sigo con el próximo.")
         elif motivo == "render_fallido":
             texto = f"❌ Falló el render de {resultado.get('album')}."
             if resultado.get("log_final"):
@@ -497,12 +552,8 @@ class Servicio:
     def tras_verificar(self, resultado, argumentos):
         carpeta = valor(argumentos, "--carpeta")
         album = Path(carpeta).name
-        if resultado.get("motivo") == "sin_video":
-            self.estado["rechazados"].append(album)
-            self.guardar()
-            self.avisar(f"⚠️ {album}: el render no dejó el mp4. Lo dejo de lado.")
-            return
         if resultado.get("motivo") == "tiempo_agotado":
+            # Sigue aceptado: al pasar la pausa se verifica otra vez y, si pasa, se sube.
             self.avisar(
                 f"⚠️ No pude verificar {album}: el paso pasó los "
                 f"{duracion_legible(limite_del_paso('verificar'))} y lo corté. "
@@ -510,17 +561,24 @@ class Servicio:
             )
             self.album_pausado_hasta = self.reloj() + REINTENTO_S
             return
+        aceptado = album in self.estado["aceptados"]
+        if aceptado:
+            self.estado["aceptados"].remove(album)
+            self.guardar()
+        if resultado.get("motivo") == "sin_video":
+            self.estado["rechazados"].append(album)
+            self.guardar()
+            self.avisar(f"⚠️ {album}: el render no dejó el mp4. Lo dejo de lado.")
+            return
+        if aceptado and resultado.get("ok"):
+            # El usuario ya dijo que no está publicado y los chequeos pasaron.
+            self.lanzar_paso("subir", "--carpeta", carpeta)
+            return
         texto = resultado.get("resumen") or album
         if not resultado.get("ok"):
             texto += "\n\n⚠️ Hay tests fallidos."
-        previas = []
-        busqueda = resultado.get("busqueda")
-        if resultado.get("captura_busqueda"):
-            previas.append(
-                {"texto": f"🔎 Búsqueda en YouTube: {busqueda}", "foto": resultado["captura_busqueda"]}
-            )
-        elif busqueda:
-            texto += f"\n\n🔎 https://www.youtube.com/results?search_query={quote(busqueda)}"
+        previas, enlace = busqueda_en_youtube(resultado)
+        texto += enlace
         self.preguntar(
             "subir",
             f"{texto}\n\n¿Lo subo?",
@@ -569,7 +627,10 @@ class Servicio:
         # Que no se vuelva a ofrecer: la carpeta sigue ahí y el usuario ya decidió.
         self.estado["rechazados"].append(album)
         self.guardar()
-        self.avisar(f"❌ No pude borrar {album} ({resultado.get('motivo')}). Quedó en Renderizando/.")
+        self.avisar(
+            f"❌ No pude borrar {album} ({resultado.get('motivo')}). "
+            f"Quedó en {Path(valor(argumentos, '--carpeta')).parent.name}/."
+        )
 
     def tras_programar(self, resultado, argumentos):
         video_id = valor(argumentos, "--video-id")
@@ -948,6 +1009,15 @@ class Servicio:
             self.telegram.responder_boton(consulta.get("id"), texto)
         except ERRORES_TELEGRAM as exc:
             log.warning("No se pudo responder el botón: %s", exc)
+
+    def respuesta_renderizar(self, accion, pregunta):
+        if accion == "eliminar":
+            self.lanzar_paso("eliminar", "--carpeta", pregunta["carpeta"])
+            return
+        nombre = Path(pregunta["carpeta"]).name
+        self.estado["aceptados"].append(nombre)
+        self.guardar()
+        self.lanzar_paso("renderizar", "--carpeta", nombre)
 
     def respuesta_subir(self, accion, pregunta):
         if accion in ("subir", "eliminar"):
