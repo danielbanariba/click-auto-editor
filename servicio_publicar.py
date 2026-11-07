@@ -59,6 +59,15 @@ BOTONES = {
         [("✅ Renderizar y subir", "renderizar")],
         [("🗑 Eliminar (ya está publicado)", "eliminar")],
     ],
+    # La del modo lista: ➕ guarda el álbum sin renderizarlo y ▶️ renderiza la lista entera.
+    # {n} es cuántos álbumes hay en la lista.
+    "lista": [
+        [("➕ A la lista", "a_la_lista")],
+        [("🗑 Eliminar (ya está publicado)", "eliminar")],
+        [("▶️ Renderizar la lista ({n})", "renderizar_lista")],
+    ],
+    # No quedan álbumes para sumar: solo queda renderizar la lista.
+    "fin_lista": [[("▶️ Renderizar la lista ({n})", "renderizar_lista")]],
     "subir": [
         [("✅ Subir", "subir"), ("❌ Rechazar", "rechazar")],
         [("🗑 Eliminar (ya está publicado)", "eliminar")],
@@ -77,6 +86,8 @@ BOTONES = {
 }
 AVISO_BOTON = {
     "renderizar": "Lo renderizo y lo subo",
+    "a_la_lista": "Va a la lista",
+    "renderizar_lista": "Renderizo la lista",
     "subir": "Subiendo…",
     "rechazar": "No lo subo",
     "eliminar": "Borrando…",
@@ -88,10 +99,13 @@ AVISO_BOTON = {
     "impugnar": "Impugnando…",
 }
 # El menú de comandos del bot.
-COMANDOS = [{"command": "aleatorio", "description": "Prende o apaga la elección al azar del próximo álbum"}]
+COMANDOS = [
+    {"command": "aleatorio", "description": "Prende o apaga la elección al azar del próximo álbum"},
+    {"command": "crear_lista", "description": "Junta los álbumes que apruebes y los renderiza todos juntos"},
+]
 # Mientras haya una de estas preguntas abiertas no se renderiza otro álbum.
 # "reprogramar" no frena: el video ya está subido y no depende del render.
-PREGUNTAS_QUE_FRENAN = ("renderizar", "subir", "reintentar")
+PREGUNTAS_QUE_FRENAN = ("renderizar", "subir", "reintentar", "lista", "fin_lista")
 PASOS_DEL_ALBUM = ("buscar", "renderizar", "verificar", "subir", "eliminar")
 # Tiempo máximo de cada paso. Los cortables son idempotentes; los demás mueven o
 # borran carpetas y cortarlos a medias dejaría un álbum a medio mover: solo se avisa.
@@ -315,6 +329,10 @@ def busqueda_en_youtube(resultado):
     return [], ""
 
 
+def cantidad_de_albumes(n):
+    return f"{n} álbum" if n == 1 else f"{n} álbumes"
+
+
 def carpetas_de_origen():
     """Las carpetas de donde toma álbumes el servicio: «a/, b/ ni c/»."""
     nombres = [f"{origen.name}/" for origen in pa.DIRS_ORIGEN_RENDER]
@@ -333,8 +351,11 @@ class Servicio:
         # rechazados y subidos: álbumes que siguen en Renderizando/ pero no se vuelven a ofrecer.
         # aceptados: álbumes que el usuario mandó renderizar; se suben sin volver a preguntar.
         # aleatorio: el /aleatorio de Telegram; el próximo álbum se elige al azar.
+        # modo_lista y lista: el /crear_lista; lo aprobado con ➕ espera ahí hasta que se toca ▶️.
+        # despues_de_lista: el álbum que estaba en pantalla al tocar ▶️; se pregunta al terminar.
         self.estado = {
-            "offset": 0, "preguntas": {}, "rechazados": [], "subidos": [], "aceptados": [], "aleatorio": False
+            "offset": 0, "preguntas": {}, "rechazados": [], "subidos": [], "aceptados": [],
+            "aleatorio": False, "modo_lista": False, "lista": [], "despues_de_lista": None,
         }
         self.tareas = []
         self.inicios = {}  # proceso -> momento en que se lanzó
@@ -437,7 +458,10 @@ class Servicio:
     def avanzar_album(self):
         if any(argumentos[0] in PASOS_DEL_ALBUM for argumentos, _ in self.tareas):
             return
-        if any(p["tipo"] in PREGUNTAS_QUE_FRENAN for p in self.estado["preguntas"].values()):
+        abiertas = [p for p in self.estado["preguntas"].values() if p["tipo"] in PREGUNTAS_QUE_FRENAN]
+        # Un chequeo que falló en un álbum aceptado pregunta sin frenar al resto de la lista.
+        sigue_la_lista = self.estado["aceptados"]
+        if any(p["tipo"] != "subir" or not p.get("aceptado") or not sigue_la_lista for p in abiertas):
             return
         if self.reloj() < self.album_pausado_hasta:
             return
@@ -446,6 +470,7 @@ class Servicio:
         if pa.render_en_curso():
             return
         descartados = set(self.estado["rechazados"]) | set(self.estado["subidos"])
+        descartados |= {Path(p["carpeta"]).name for p in abiertas if p.get("carpeta")}
         listos = [c for c in pa.albumes_por_aprobar() if Path(c).name not in descartados]
         if listos:
             self.lanzar_paso("verificar", "--carpeta", listos[0])
@@ -459,9 +484,17 @@ class Servicio:
             # Ya no está: el render lo movió a Error404 o alguien lo sacó de la carpeta.
             self.estado["aceptados"].remove(nombre)
             self.guardar()
+        # La lista terminó: lo nuevo espera a que se conteste la pregunta que quedó abierta.
+        if abiertas:
+            return
+        if self.preguntar_despues_de_lista():
+            return
         if pa.siguiente_album() is not None:
             self.avisos.discard("sin_albumes")
-            self.lanzar_paso("buscar", *(["--aleatorio"] if self.estado["aleatorio"] else []))
+            argumentos = ["--aleatorio"] if self.estado["aleatorio"] else []
+            # Con "=": un nombre que empieza con "-" no se lee como otra opción.
+            argumentos += [f"--excluir={nombre}" for nombre in self.estado["lista"]]
+            self.lanzar_paso("buscar", *argumentos)
         else:
             self.avisar_una_vez(
                 "sin_albumes",
@@ -499,18 +532,18 @@ class Servicio:
         if resultado.get("ok"):
             self.avisos.clear()
             previas, enlace = busqueda_en_youtube(resultado)
-            self.preguntar(
-                "renderizar",
-                f"{resultado['album']}{enlace}\n\n¿Ya está publicado? Si no, lo renderizo y lo subo.",
-                foto=resultado.get("portada"),
-                carpeta=resultado["carpeta"],
-                previas=previas,
+            self.preguntar_por_album(
+                resultado["album"], resultado["carpeta"], resultado.get("portada"), previas, enlace
             )
         elif motivo == "sin_albumes":
             if any("error" in a for a in apartados):
                 # El álbum que no se pudo mover sigue en la cola: sin pausa, se relanzaría la
                 # búsqueda en cada vuelta.
                 self.album_pausado_hasta = self.reloj() + REINTENTO_S
+            if self.estado["modo_lista"] and self.estado["lista"]:
+                # Los que quedan ya están en la lista: esta pregunta frena la búsqueda.
+                cantidad = cantidad_de_albumes(len(self.estado["lista"]))
+                self.preguntar("fin_lista", f"📭 No quedan más álbumes. En la lista hay {cantidad}.")
         else:
             texto = f"⚠️ No pude buscar el próximo álbum ({motivo}). Reintento en 30 min."
             if resultado.get("log"):
@@ -593,6 +626,7 @@ class Servicio:
             foto=resultado.get("captura"),
             carpeta=carpeta,
             previas=previas,
+            aceptado=aceptado,
         )
 
     def tras_subir(self, resultado, argumentos):
@@ -943,8 +977,9 @@ class Servicio:
         for qid, pregunta in self.estado["preguntas"].items():
             if pregunta["message_id"] is not None:
                 continue
+            en_lista = str(len(self.estado["lista"]))
             botones = [
-                [(etiqueta, f"{accion}:{qid}") for etiqueta, accion in fila]
+                [(etiqueta.replace("{n}", en_lista), f"{accion}:{qid}") for etiqueta, accion in fila]
                 for fila in BOTONES[pregunta["tipo"]]
             ]
             try:
@@ -1021,17 +1056,87 @@ class Servicio:
         getattr(self, f"respuesta_{pregunta['tipo']}")(accion, pregunta)
 
     def atender_mensaje(self, mensaje):
-        """Lo que se escribe en el chat: solo /aleatorio, que prende o apaga la elección al azar."""
+        """Lo que se escribe en el chat: /aleatorio y /crear_lista; lo demás se ignora."""
         if str(mensaje.get("from", {}).get("id")) != self.telegram.chat_id:
             log.warning("Mensaje de un usuario no autorizado: %s", mensaje.get("from"))
             return
         palabras = (mensaje.get("text") or "").split()
         # En un grupo, Telegram manda el comando como /aleatorio@NombreDelBot.
-        if not palabras or palabras[0].split("@")[0] != "/aleatorio":
+        comando = palabras[0].split("@")[0] if palabras else ""
+        if comando == "/aleatorio":
+            self.estado["aleatorio"] = not self.estado["aleatorio"]
+            self.guardar()
+            self.avisar("🔀 Aleatorio activado" if self.estado["aleatorio"] else "Aleatorio desactivado")
+        # El menú de Telegram no acepta guiones: /crear_lista. Escrito con guion también vale.
+        elif comando in ("/crear_lista", "/crear-lista"):
+            self.crear_lista()
+
+    def crear_lista(self):
+        if self.estado["modo_lista"]:
+            # No es un interruptor: escribirlo otra vez no tira lo ya elegido.
+            self.avisar(
+                f"📝 Ya estás armando una lista: {cantidad_de_albumes(len(self.estado['lista']))}. "
+                "Tocá ▶️ en la pregunta para renderizarla."
+            )
             return
-        self.estado["aleatorio"] = not self.estado["aleatorio"]
+        self.estado["modo_lista"] = True
         self.guardar()
-        self.avisar("🔀 Aleatorio activado" if self.estado["aleatorio"] else "Aleatorio desactivado")
+        self.avisar(
+            "📝 Modo lista: lo que apruebes con ➕ queda guardado y no se renderiza. "
+            "Cuando quieras, tocá ▶️ y renderizo y subo toda la lista sin preguntarte."
+        )
+        # La pregunta que ya estaba abierta vuelve con los botones de la lista.
+        for qid, pregunta in list(self.estado["preguntas"].items()):
+            if pregunta["tipo"] != "renderizar":
+                continue
+            del self.estado["preguntas"][qid]
+            self.guardar()
+            if pregunta["message_id"] is not None:
+                try:
+                    self.telegram.quitar_botones(pregunta["message_id"])
+                except ERRORES_TELEGRAM as exc:
+                    log.warning("No se pudieron quitar los botones: %s", exc)
+            self.preguntar_por_album(
+                pregunta.get("album") or Path(pregunta["carpeta"]).name,
+                pregunta["carpeta"],
+                pregunta["foto"],
+                pregunta.get("previas", []),
+                pregunta.get("enlace", ""),
+            )
+
+    def preguntar_por_album(self, album, carpeta, foto, previas, enlace):
+        """La pregunta de antes del render; en modo lista, con los botones de la lista."""
+        if self.estado["modo_lista"]:
+            tipo, cierre = "lista", "Si no, lo sumo a la lista."
+        else:
+            tipo, cierre = "renderizar", "Si no, lo renderizo y lo subo."
+        self.preguntar(
+            tipo,
+            f"{album}{enlace}\n\n¿Ya está publicado? {cierre}",
+            foto=foto,
+            carpeta=carpeta,
+            previas=previas,
+            album=album,
+            enlace=enlace,
+        )
+
+    def preguntar_despues_de_lista(self):
+        """Cuando la lista terminó, pregunta por el álbum que estaba en pantalla al tocar ▶️."""
+        pendiente = self.estado["despues_de_lista"]
+        if not pendiente:
+            return False
+        self.estado["despues_de_lista"] = None
+        self.guardar()
+        if not Path(pendiente["carpeta"]).is_dir():
+            return False
+        self.preguntar_por_album(
+            pendiente["album"],
+            pendiente["carpeta"],
+            pendiente["foto"],
+            pendiente["previas"],
+            pendiente["enlace"],
+        )
+        return True
 
     def responder_boton(self, consulta, texto):
         try:
@@ -1047,6 +1152,43 @@ class Servicio:
         self.estado["aceptados"].append(nombre)
         self.guardar()
         self.lanzar_paso("renderizar", "--carpeta", nombre)
+
+    def respuesta_lista(self, accion, pregunta):
+        if accion == "eliminar":
+            self.lanzar_paso("eliminar", "--carpeta", pregunta["carpeta"])
+        elif accion == "a_la_lista":
+            self.estado["lista"].append(Path(pregunta["carpeta"]).name)
+            self.guardar()
+        else:
+            self.renderizar_lista(pregunta)
+
+    def respuesta_fin_lista(self, accion, pregunta):
+        self.renderizar_lista(None)
+
+    def renderizar_lista(self, en_pantalla):
+        """▶️: la lista pasa a aceptados, que se renderizan y se suben sin preguntar."""
+        lista = self.estado["lista"]
+        self.estado["aceptados"].extend(n for n in lista if n not in self.estado["aceptados"])
+        self.estado["lista"] = []
+        self.estado["modo_lista"] = False
+        if en_pantalla:
+            # Si la lista tarda, la búsqueda vuelve a llegar con la pregunta.
+            previas = [{**p, "enviada": False} for p in en_pantalla.get("previas", [])] if lista else []
+            self.estado["despues_de_lista"] = {
+                "album": en_pantalla.get("album") or Path(en_pantalla["carpeta"]).name,
+                "carpeta": en_pantalla["carpeta"],
+                "foto": en_pantalla["foto"],
+                "previas": previas,
+                "enlace": en_pantalla.get("enlace", ""),
+            }
+        self.guardar()
+        if lista:
+            self.avisar(
+                f"▶️ Renderizo y subo {cantidad_de_albumes(len(lista))} de la lista. "
+                "Solo te pregunto si un chequeo falla."
+            )
+        else:
+            self.avisar("La lista estaba vacía; vuelvo a preguntar de a uno.")
 
     def respuesta_subir(self, accion, pregunta):
         if accion in ("subir", "eliminar"):
