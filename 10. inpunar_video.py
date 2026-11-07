@@ -7,6 +7,7 @@ import sys
 import time
 from pathlib import Path
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
@@ -152,6 +153,17 @@ P_VERIFY_IDENTITY = re.compile(
     r"necesitamos confirmar que eres t[uú]|extra security|nivel extra de seguridad)",
     re.IGNORECASE,
 )
+
+# Solo frases enteras del diálogo: en toda la página, un patrón con ".*" junta palabras de
+# elementos distintos (una canción "Confirmation" y otra "Lost Identity" de la lista).
+P_VERIFY_IDENTITY_DIALOG = re.compile(
+    r"(verifica que eres t[uú]|verify (it'?s|that) you|necesitamos confirmar que eres t[uú])",
+    re.IGNORECASE,
+)
+
+# "Verifica que eres tú" sale unos segundos después del formulario (visto el 2026-11-07):
+# visto el formulario, se sigue mirando este tiempo antes de darlo por listo.
+VERIFY_DIALOG_DELAY_S = 6.0
 
 _VERIFY_IDENTITY_WAIT_S = 0.0  # configurado desde main() via --esperar-verificacion-s
 
@@ -3743,6 +3755,15 @@ def _click_continuar_in_modal(page):
         return False
 
 
+def _verify_identity_visible(page):
+    """"Verifica que eres tú" sale en un diálogo chico encima del formulario (visto el
+    2026-11-07). get_active_root elige el formulario, así que se busca en toda la página."""
+    try:
+        return page.get_by_text(P_VERIFY_IDENTITY_DIALOG).filter(visible=True).count() > 0
+    except PlaywrightError:
+        return False
+
+
 def _wait_for_form_or_2fa(page, max_s=300.0):
     """Devuelve 'form', '2fa' o 'timeout'."""
     strict = [
@@ -3761,13 +3782,32 @@ def _wait_for_form_or_2fa(page, max_s=300.0):
             txt = get_active_root(page).inner_text().strip().lower()
         except Exception:
             txt = ""
-        if P_VERIFY_IDENTITY.search(txt):
+        if P_VERIFY_IDENTITY.search(txt) or _verify_identity_visible(page):
             return "2fa"
         in_selector = bool(P_ACTION_SELECTOR_DIALOG.search(txt))
         hits = sum(1 for h in strict if h in txt)
         if hits >= 1 and not in_selector:
+            limite = time.time() + VERIFY_DIALOG_DELAY_S
+            while time.time() < limite:
+                time.sleep(1.0)
+                if _verify_identity_visible(page):
+                    return "2fa"
             return "form"
     return "timeout"
+
+
+def _wait_for_verification_to_clear(page, max_s):
+    """Con ventana, el usuario pasa "Verifica que eres tú" a mano: espera a que el diálogo se
+    vaya y vuelva el formulario. `_wait_for_form_or_2fa` dice "2fa" mientras el diálogo siga,
+    así que no alcanza con llamarla una vez. Devuelve 'form', o '2fa'/'timeout' si no pasó."""
+    deadline = time.time() + max_s
+    estado = "timeout"
+    while time.time() < deadline:
+        estado = _wait_for_form_or_2fa(page, max_s=max(1.0, deadline - time.time()))
+        if estado != "2fa":
+            return estado
+        time.sleep(2.0)
+    return estado
 
 
 def _contar_checkboxes_via_locator(root_):
@@ -4283,7 +4323,7 @@ def preparar_pestana_para_reclamo(context, video_id, claim_index, args, selector
             print("     >>> 2FA detectado en esta tab. Pasalo manualmente. <<<")
             _2FA_PASSED_THIS_SESSION = True
             tope = float(getattr(args, "pausa_interactiva_s", 600.0))
-            estado = _wait_for_form_or_2fa(page, max_s=tope)
+            estado = _wait_for_verification_to_clear(page, max_s=tope)
             if estado != "form":
                 try:
                     snippet = get_active_root(page).inner_text().strip().replace("\n", " | ")

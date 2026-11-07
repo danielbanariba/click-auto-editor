@@ -119,8 +119,10 @@ env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the alb
 env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → monetization on → public now / first free moment, or +2 years if claimed
 env/bin/python pipeline_agente.py eliminar_video --video-id ID [--retirado]  # deletes the video from YouTube (irreversible; the service only runs it from a Telegram button); --retirado skips the existence check for a video YouTube removed as a copy
 env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # disputes every claim of the video in Studio (a legal statement in the user's name); --sin-enviar fills the first form and closes it without sending
+env/bin/python pipeline_agente.py impugnar_con_ventana --video-id ID [--video-id ID]... [--sin-enviar]  # the same for several videos, in one visible Brave window that waits for the user to pass "Verifica que eres tú"
 env/bin/python pipeline_agente.py apelar [--sin-enviar] [--limite N]  # appeals age restrictions and limited ads in Hebrew (in the user's name); --sin-enviar fills one form of each kind and closes it
 env/bin/python pipeline_agente.py seguir_impugnaciones  # reads /claims of the disputed videos and reports what changed (read-only)
+env/bin/python pipeline_agente.py mapear_canal  # reads /claims of every video parked by a claim and sorts them (read-only)
 env/bin/python pipeline_agente.py estado [--esperar-render]  # unscheduled uploads, rendered albums awaiting approval, render running
 env/bin/python pipeline_agente.py sembrar_publicados  # loads the channel titles (1 quota unit per 50 videos) and the albums the service deleted or uploaded into the published registry
 ```
@@ -196,14 +198,24 @@ link; "🗑️ Eliminar video" runs `pipeline_agente.py eliminar_video`, as in t
 blacklist question. Nothing is disputed or deleted without that press, and a
 blacklisted video keeps only the delete question.
 
+When a dispute fails with `verificacion_de_identidad`, the notice carries "🖥 Impugnar con
+ventana" and how to use it (be at the PC, pass the verification in the window, touch nothing
+else). The press runs `impugnar_con_ventana` for that video, and the service reports the
+result in one message. If the verification was not passed in time, the report offers the window
+again for what was left. A window run that ends with no result (`sin_respuesta`) may have
+sent something, so the notice lists the `/claims` links to check and offers nothing.
+`seguir_impugnaciones` also reads the `servicio_impugnar_con_ventana_*.out` logs.
+
 Disputing (`impugnar`) reuses the recipe of `10. inpunar_video.py`: for each claim
 whose "Tomar medidas" is visible and enabled it opens the form, picks "Licencia",
 ticks the permission and the three declarations, fills `mensaje` and `firma`, and
 presses "Enviar". It opens `/claims` directly (Studio redirects `/copyright` there from the browser, and
 an `evaluate` caught in that navigation fails with "Execution context was destroyed";
 the count also retries when that still happens). It runs inside the `programar` lock (same Studio profile copy)
-and never waits for a 2FA (the service is headless): a verification page, a missing
-form or any unexpected page fails that claim without sending and dumps evidence to
+and never waits for a 2FA (the service is headless): a verification page (also the
+small "Verifica que eres tú" dialog Studio stacks over the form a few seconds after it opens:
+it is looked for in the whole page, and for `VERIFY_DIALOG_DELAY_S` (6 s) more once the form
+shows), a missing form or any unexpected page fails that claim without sending and dumps evidence to
 `data/impugnar_evidencia/`. It never disputes more claims than there were
 disputable claims at the start. A dispute counts as done only when `/claims`,
 reloaded, shows exactly one enabled "Tomar medidas" fewer. Studio sometimes leaves
@@ -244,6 +256,46 @@ video (the title comes from `programados.jsonl`, since the video is no longer pe
 it still has a claim (the dispute was rejected, or another claim remains), it goes in
 `rechazados` with each claim's status and a `/claims` screenshot, and the service asks
 "Conservar" or "🗑️ Eliminar video"; Eliminar runs `eliminar_video` with its usual check.
+
+`/mapear_canal` (also written `/mapear-canal`; in the bot's menu) runs `mapear_canal` once.
+The step takes the parked videos from the API: the private ones scheduled more than a year
+ahead among the last `ESCANEO_PROGRAMADOS` uploads (claimed videos go two years ahead, whoever
+scheduled them). It reads each `/claims` under the `programar` lock and presses nothing.
+- No claims, in two reads: the video goes in `liberados`, and the service runs
+  `programar --reclamo no` (unless one is already running for that video).
+- An enabled "Tomar medidas": the step reads the claimants. If they cannot be read, the video
+  goes in `fallos`: without them the blacklist cannot be checked. A blacklist match goes in
+  `lista_negra`, and the service asks the usual blacklist question unless one is already open
+  for that video. Anything else goes in `sin_impugnar`.
+- Claims, none disputable: `en_proceso`. A page that cannot be read: `fallos`. A browser error
+  stops the run, and the first video left goes to the end of the next run.
+
+The run stops after 30 min (`TIEMPO_MAXIMO_MAPEO_S`); the rest comes back in `sin_revisar`.
+`data/agente/mapeo_canal.json` keeps when each video was last read, so the next run starts
+with the others. The service then sends one message: the counts, the videos that could not
+be read, and every video left to dispute with its claimants and `/claims` link. If anything
+is left to dispute, the message carries one button, "⚖️ Impugnar todos (N)". A message longer
+than Telegram's 4096 characters is split, and the button goes on the last part.
+
+Nothing is disputed without that press. The press stores the batch in `lote_impugnar`
+(`data/agente/servicio.json`) and runs `impugnar` for one video at a time. A second press
+adds to the running batch the videos that are not in it yet. At the end the service sends one
+report: claims disputed per video, and failures with their `/claims` link. A
+`verificacion_de_identidad`, `sin_sesion_en_studio` or `canal_no_disponible` stops the batch,
+since the rest would fail the same way, and the report lists what was left. When it was
+the verification, the report carries "🖥 Impugnar con ventana" for the video that asked and
+the ones left: one window, one verification. After a restart,
+the video in progress is not run again: it may have sent a dispute that Studio does not show
+yet. The report marks it as interrupted, with its `/claims` link, and the batch goes on.
+
+`impugnar_con_ventana` disputes one or several videos, one after another, in one visible
+Brave window (`pagina_de_studio(visible=True)`) on the user's desktop. Passing "Verifica que
+eres tú" in the everyday Brave does not help: the service's profile copy does not get it. When
+the dialog shows, each claim waits up to `ESPERA_VERIFICACION_VENTANA_S` (10 min) for the user
+to pass it in that window; once passed, it holds for the next claims of the same window (seen
+on 2026-11-07). A verification not passed in time, a missing session or channel, or a browser
+error stops the run (`FRENAN_LA_VENTANA`); the videos left come back in `sin_revisar`. It prints
+one JSON line with `videos`, one dispute result each.
 
 Monetization (`studio_monetizacion.py`) turns ads on at
 `/video/<id>/monetization`. After opening it, Studio navigates several times and ends
