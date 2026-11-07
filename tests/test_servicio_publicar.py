@@ -1952,7 +1952,7 @@ class TestMapearCanal(BaseServicio):
     def sin_impugnar(self, *ids):
         return [
             {"video_id": v, "titulo": f"Banda - {v}", "impugnables": 1,
-             "reclamantes": ["Sello Independiente", "Otro Sello"] if v == "V1" else []}
+             "reclamantes": ["Sello Independiente", "Otro Sello"] if v == "V1" else ["Sello"]}
             for v in ids
         ]
 
@@ -1974,6 +1974,7 @@ class TestMapearCanal(BaseServicio):
         # Defecto: un mensaje por video (S3: "Un solo mensaje"), un resumen sin links ni
         # reclamantes, o una impugnación que sale sin apretar nada.
         self.mapear(
+            ok=False,  # como lo manda el paso cuando hay fallos
             aparcados=6,
             sin_impugnar=self.sin_impugnar("V1", "V2"),
             en_proceso=[{"video_id": "V3", "titulo": "Banda - V3"}],
@@ -2042,15 +2043,37 @@ class TestMapearCanal(BaseServicio):
         self.assertIn("Banda - V2", aviso["texto"])
         self.assertIsNone(self.servicio.estado["lote_impugnar"])
 
-    def test_el_lote_sigue_despues_de_un_reinicio(self):
-        # Defecto: un reinicio a mitad del lote dejaba el resto sin impugnar y sin aviso.
+    def test_un_reinicio_no_relanza_el_video_en_curso_y_sigue_con_el_resto(self):
+        # Defecto: un reinicio a mitad del lote lo dejaba sin terminar, o relanzaba el video en
+        # curso, que pudo haber enviado un reclamo que Studio todavía no muestra (dos veces).
         self.impugnar_todos()
         self.servicio = self.nuevo_servicio()
-        self.assertEqual(self.lanzador.lanzados("impugnar")[-1], ["impugnar", "--video-id", "V1"])
+        self.assertEqual([a[2] for a in self.lanzador.lanzados("impugnar")], ["V1", "V2"])
+        antes = len(self.telegram.mensajes)
         self.lanzador.terminar("impugnar", {"ok": True, "video_id": "V1", "reclamos": 1, "impugnados": 1, "fallos": []})
-        self.lanzador.terminar("impugnar", {"ok": True, "video_id": "V1", "reclamos": 1, "impugnados": 1, "fallos": []})
+        self.lanzador.terminar("impugnar", {"ok": True, "video_id": "V2", "reclamos": 1, "impugnados": 1, "fallos": []})
         self.servicio.paso()
-        self.assertEqual(self.lanzador.lanzados("impugnar")[-1], ["impugnar", "--video-id", "V2"])
+        (aviso,) = [m for m in self.telegram.mensajes[antes:] if "«Impugnar todos»" in m["texto"]]
+        self.assertIn(sp.MOTIVOS_IMPUGNACION["interrumpido"], aviso["texto"])
+        self.assertIn("1 de 1", aviso["texto"])
+        self.assertIsNone(self.servicio.estado["lote_impugnar"])
+
+    def test_sin_sesion_en_studio_tambien_frena_el_lote(self):
+        # Defecto: el fallo de todo el paso (sin "fallos" por reclamo) no frenaba el lote, y
+        # cada video siguiente fallaba igual.
+        self.impugnar_todos()
+        self.lanzador.terminar("impugnar", {"ok": False, "motivo": "sin_sesion_en_studio", "fallos": []})
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("impugnar")), 1)
+        self.assertIn(sp.MOTIVOS_IMPUGNACION["sin_sesion_en_studio"], self.telegram.mensajes[-1]["texto"])
+        self.assertIn("Banda - V2", self.telegram.mensajes[-1]["texto"])
+
+    def test_un_liberado_que_ya_se_esta_programando_no_se_programa_dos_veces(self):
+        # Defecto: dos /mapear_canal seguidos lanzaban dos `programar` del mismo video.
+        liberado = [{"video_id": "V1", "titulo": "Banda - V1"}]
+        self.mapear(aparcados=1, liberados=liberado)
+        self.mapear(aparcados=1, liberados=liberado)
+        self.assertEqual(len(self.lanzador.lanzados("programar")), 1)
 
     def test_un_resumen_largo_no_pierde_videos_y_el_boton_va_al_final(self):
         # Defecto: Telegram corta el texto en 4096 caracteres y los últimos videos no se ven.

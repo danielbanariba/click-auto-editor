@@ -120,8 +120,9 @@ LIMITES_PASO_S = {
     "programar": 8 * 3600,  # espera el procesado de YouTube y el margen del reclamo
     "apelar": 90 * 60,  # tiene el candado de Studio: colgado, frenaría a `programar`
     "seguir_impugnaciones": 45 * 60,  # también; corta solo a los 30 min y sigue al otro día
-    # También; corta a los 30 min de tener el candado, que puede esperar a `apelar` (90 min).
-    "mapear_canal": 2 * 3600,
+    # También: corta a los 30 min de tener el candado, que puede esperar a `apelar` (90 min),
+    # más un video que ya estaba leyendo.
+    "mapear_canal": 150 * 60,
 }
 # `apelar` anota cada video antes de pulsar el envío: cortarlo nunca hace que se repita uno.
 # `seguir_impugnaciones` y `mapear_canal` solo leen Studio. `buscar` aparta los publicados con
@@ -157,6 +158,9 @@ MOTIVOS_IMPUGNACION = {
     "sin_sesion_en_studio": "Studio no tiene la sesión iniciada",
     "canal_no_disponible": "YouTube pidió elegir canal y no pude entrar con «Daniel Banariba»",
     "error_navegador": "falló el navegador",
+    "reclamantes_no_disponibles": "no pude leer quién reclama, y sin eso no sé si está en la lista negra",
+    "interrumpido": "el servicio se reinició a mitad de la impugnación; revisa en Studio qué salió "
+    "(/mapear_canal lo vuelve a encontrar si le falta algo)",
 }
 
 MOTIVOS_APELACION = {
@@ -412,9 +416,11 @@ class Servicio:
         for pendiente in pa.leer_pendientes():
             if pendiente["video_id"] not in con_pregunta:
                 self.lanzar_paso("programar", "--video-id", pendiente["video_id"], "--esperar")
-        # El `impugnar` que corría murió con el reinicio: se lanza de nuevo y solo impugna lo
-        # que Studio todavía deja impugnar.
-        self.impugnar_siguiente_del_lote()
+        # El `impugnar` del lote murió con el reinicio. Pudo haber enviado un reclamo que Studio
+        # todavía no muestra impugnado: relanzarlo podría impugnarlo dos veces. Queda como
+        # interrumpido y el lote sigue con el próximo.
+        if self.estado["lote_impugnar"] and self.estado["lote_impugnar"]["videos"]:
+            self.anotar_en_el_lote({"ok": False, "motivo": "interrumpido"})
         self.enviar_preguntas()
 
     def guardar(self):
@@ -1001,9 +1007,8 @@ class Servicio:
         if sin_impugnar:
             lineas.append(f"⚖️ Con reclamos sin impugnar: {len(sin_impugnar)}")
             for video in sin_impugnar:
-                quienes = ", ".join(video.get("reclamantes") or []) or "no pude leer quién reclama"
                 lineas.append(
-                    f"• \"{video.get('titulo') or video['video_id']}\": {quienes}\n"
+                    f"• \"{video.get('titulo') or video['video_id']}\": {', '.join(video['reclamantes'])}\n"
                     f"  https://studio.youtube.com/video/{video['video_id']}/claims"
                 )
             lineas.append(
@@ -1021,9 +1026,11 @@ class Servicio:
         else:
             for parte in partir_en_mensajes(lineas):
                 self.avisar(parte)
+        programando = {valor(a, "--video-id") for a, _ in self.tareas if a[0] == "programar"}
         for liberado in listas["liberados"]:
             # Studio ya lo leyó dos veces sin reclamos: sin la espera ni otra revisión.
-            self.lanzar_paso("programar", "--video-id", liberado["video_id"], "--reclamo", "no")
+            if liberado["video_id"] not in programando:
+                self.lanzar_paso("programar", "--video-id", liberado["video_id"], "--reclamo", "no")
         ya_preguntados = {
             p.get("video_id") for p in self.estado["preguntas"].values() if p["tipo"] == "lista_negra"
         }
@@ -1059,6 +1066,12 @@ class Servicio:
             titulo = hecho.get("titulo") or hecho["video_id"]
             if hecho["motivo"] == "sin_reclamos_impugnables":
                 lineas.append(f"• \"{titulo}\": no tenía reclamos que se pudieran impugnar")
+                continue
+            if hecho["motivo"] == "interrumpido":
+                lineas.append(
+                    f"• \"{titulo}\": {causa_legible('interrumpido')}\n"
+                    f"  https://studio.youtube.com/video/{hecho['video_id']}/claims"
+                )
                 continue
             linea = f"• \"{titulo}\": {hecho['impugnados']} de {hecho['reclamos']} reclamos" if hecho["reclamos"] else f"• \"{titulo}\": no pude impugnar"
             for fallo in hecho["fallos"]:

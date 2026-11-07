@@ -252,11 +252,13 @@ The step takes the parked videos from the API: the private ones scheduled more t
 ahead among the last `ESCANEO_PROGRAMADOS` uploads (claimed videos go two years ahead, whoever
 scheduled them). It reads each `/claims` under the `programar` lock and presses nothing.
 - No claims, in two reads: the video goes in `liberados`, and the service runs
-  `programar --reclamo no`.
-- An enabled "Tomar medidas": the step reads the claimants. A blacklist match goes in
+  `programar --reclamo no` (unless one is already running for that video).
+- An enabled "Tomar medidas": the step reads the claimants. If they cannot be read, the video
+  goes in `fallos`: without them the blacklist cannot be checked. A blacklist match goes in
   `lista_negra`, and the service asks the usual blacklist question unless one is already open
   for that video. Anything else goes in `sin_impugnar`.
-- Claims, none disputable: `en_proceso`. A page that cannot be read: `fallos`.
+- Claims, none disputable: `en_proceso`. A page that cannot be read: `fallos`. A browser error
+  stops the run, and the video it was reading goes to the end of the next run.
 
 The run stops after 30 min (`TIEMPO_MAXIMO_MAPEO_S`); the rest comes back in `sin_revisar`.
 `data/agente/mapeo_canal.json` keeps when each video was last read, so the next run starts
@@ -267,11 +269,12 @@ than Telegram's 4096 characters is split, and the button goes on the last part.
 
 Nothing is disputed without that press. The press stores the batch in `lote_impugnar`
 (`data/agente/servicio.json`) and runs `impugnar` for one video at a time. A second press
-adds its videos to the running batch without repeating any. At the end the service sends one
+adds to the running batch the videos that are not in it yet. At the end the service sends one
 report: claims disputed per video, and failures with their `/claims` link. A
 `verificacion_de_identidad`, `sin_sesion_en_studio` or `canal_no_disponible` stops the batch,
 since the rest would fail the same way, and the report lists what was left. After a restart,
-the video in progress is run again; `impugnar` only disputes what Studio still lets it.
+the video in progress is not run again: it may have sent a dispute that Studio does not show
+yet. The report marks it as interrupted, with its `/claims` link, and the batch goes on.
 
 Monetization (`studio_monetizacion.py`) turns ads on at
 `/video/<id>/monetization`. After opening it, Studio navigates several times and ends
