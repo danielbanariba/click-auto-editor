@@ -120,7 +120,8 @@ LIMITES_PASO_S = {
     "programar": 8 * 3600,  # espera el procesado de YouTube y el margen del reclamo
     "apelar": 90 * 60,  # tiene el candado de Studio: colgado, frenaría a `programar`
     "seguir_impugnaciones": 45 * 60,  # también; corta solo a los 30 min y sigue al otro día
-    "mapear_canal": 60 * 60,  # también; corta a los 30 min, más lo que espere el candado
+    # También; corta a los 30 min de tener el candado, que puede esperar a `apelar` (90 min).
+    "mapear_canal": 2 * 3600,
 }
 # `apelar` anota cada video antes de pulsar el envío: cortarlo nunca hace que se repita uno.
 # `seguir_impugnaciones` y `mapear_canal` solo leen Studio. `buscar` aparta los publicados con
@@ -969,15 +970,22 @@ class Servicio:
             clave: resultado.get(clave) or []
             for clave in ("liberados", "sin_impugnar", "lista_negra", "en_proceso", "fallos", "sin_revisar")
         }
+        if "aparcados" not in resultado:
+            # Falló o se cortó antes de saber qué videos mirar: no hay nada que contar.
+            self.avisar(
+                f"❌ No pude revisar el canal: {causa_legible(resultado.get('motivo'))}.\n"
+                f"Log: {resultado.get('log')}"
+            )
+            return
         revisados = sum(len(listas[clave]) for clave in ("liberados", "sin_impugnar", "lista_negra", "en_proceso", "fallos"))
-        lineas = [f"🗺 Revisé {revisados} de {resultado.get('aparcados', revisados)} videos aparcados por un reclamo."]
+        lineas = [f"🗺 Videos aparcados por un reclamo: {resultado['aparcados']}. Revisados: {revisados}."]
         if listas["liberados"]:
-            lineas.append(f"✅ {len(listas['liberados'])} ya no tienen reclamos: los publico o programo como uno sin reclamo.")
+            lineas.append(f"✅ Ya sin reclamos (los publico o programo como uno sin reclamo): {len(listas['liberados'])}")
             lineas += [f"• {video.get('titulo') or video['video_id']}" for video in listas["liberados"]]
         if listas["lista_negra"]:
-            lineas.append(f"🚩 {len(listas['lista_negra'])} con un reclamante de la lista negra: te pregunto aparte.")
+            lineas.append(f"🚩 Con un reclamante de la lista negra (te pregunto aparte): {len(listas['lista_negra'])}")
         if listas["en_proceso"]:
-            lineas.append(f"⏳ {len(listas['en_proceso'])} con la impugnación en revisión.")
+            lineas.append(f"⏳ Con la impugnación en revisión: {len(listas['en_proceso'])}")
         if listas["fallos"]:
             lineas.append("❌ No pude leer estos (no toqué nada):")
             for fallo in listas["fallos"]:
@@ -986,12 +994,12 @@ class Servicio:
                     f"  https://studio.youtube.com/video/{fallo['video_id']}/claims"
                 )
         if listas["sin_revisar"]:
-            lineas.append(f"⏸ {len(listas['sin_revisar'])} sin revisar. /mapear_canal sigue con ellos.")
+            lineas.append(f"⏸ Sin revisar (/mapear_canal sigue con ellos): {len(listas['sin_revisar'])}")
         if resultado.get("motivo"):
             lineas.append(f"❌ No terminé de revisar: {causa_legible(resultado['motivo'])}.\nLog: {resultado.get('log')}")
         sin_impugnar = listas["sin_impugnar"]
         if sin_impugnar:
-            lineas.append(f"⚖️ {len(sin_impugnar)} tienen reclamos sin impugnar:")
+            lineas.append(f"⚖️ Con reclamos sin impugnar: {len(sin_impugnar)}")
             for video in sin_impugnar:
                 quienes = ", ".join(video.get("reclamantes") or []) or "no pude leer quién reclama"
                 lineas.append(
@@ -1046,7 +1054,7 @@ class Servicio:
             return
         self.estado["lote_impugnar"] = None
         self.guardar()
-        lineas = [f"⚖️ Terminé de impugnar {len(lote['hechos'])} videos:"]
+        lineas = [f"⚖️ Terminé el «Impugnar todos». Videos: {len(lote['hechos'])}"]
         for hecho in lote["hechos"]:
             titulo = hecho.get("titulo") or hecho["video_id"]
             if hecho["motivo"] == "sin_reclamos_impugnables":
@@ -1369,11 +1377,12 @@ class Servicio:
             self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"])
 
     def respuesta_impugnar_todos(self, accion, pregunta):
-        """Suma los videos al lote, sin repetir; si no había uno en curso, empieza por el primero."""
+        """Suma al lote los videos que no tiene (ni por hacer ni hechos); si no había uno en
+        curso, empieza por el primero."""
         lote = self.estado["lote_impugnar"]
         if lote is None:
             lote = self.estado["lote_impugnar"] = {"videos": [], "hechos": []}
-        en_el_lote = {video["video_id"] for video in lote["videos"]}
+        en_el_lote = {video["video_id"] for video in lote["videos"] + lote["hechos"]}
         nuevos = [video for video in pregunta["videos"] if video["video_id"] not in en_el_lote]
         en_curso = bool(lote["videos"])
         lote["videos"] += nuevos

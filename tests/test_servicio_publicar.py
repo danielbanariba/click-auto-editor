@@ -1986,8 +1986,8 @@ class TestMapearCanal(BaseServicio):
                       "https://studio.youtube.com/video/V1/claims", "https://studio.youtube.com/video/V2/claims",
                       "https://studio.youtube.com/video/V4/claims", "Licencia"):
             self.assertIn(texto, pregunta["texto"])
-        self.assertIn("1 con la impugnación en revisión", pregunta["texto"])
-        self.assertIn("1 sin revisar", pregunta["texto"])
+        self.assertIn("Con la impugnación en revisión: 1", pregunta["texto"])
+        self.assertIn("Sin revisar (/mapear_canal sigue con ellos): 1", pregunta["texto"])
         self.assertEqual(self.lanzador.lanzados("impugnar"), [])
 
     def test_los_liberados_se_programan_sin_reclamo_y_la_lista_negra_pregunta_aparte(self):
@@ -2066,6 +2066,29 @@ class TestMapearCanal(BaseServicio):
         self.assertGreater(len(nuevos), 1)
         self.assertEqual([self.etiquetas(m) for m in nuevos if m["botones"]], [["⚖️ Impugnar todos (60)"]])
         self.assertTrue(nuevos[-1]["botones"])
+
+    def test_un_segundo_impugnar_todos_no_repite_lo_que_el_lote_ya_hizo(self):
+        # Defecto: un video ya impugnado en el lote se volvía a correr y salía dos veces.
+        self.impugnar_todos()
+        self.lanzador.terminar("impugnar", {"ok": True, "video_id": "V1", "reclamos": 1, "impugnados": 1, "fallos": []})
+        self.servicio.paso()
+        self.mapear(aparcados=2, sin_impugnar=self.sin_impugnar("V1", "V2"))
+        self.telegram.apretar(self.ultima_pregunta(), self.TODOS)
+        self.servicio.paso()
+        self.lanzador.terminar("impugnar", {"ok": True, "video_id": "V2", "reclamos": 1, "impugnados": 1, "fallos": []})
+        self.servicio.paso()
+        self.assertEqual([a[2] for a in self.lanzador.lanzados("impugnar")], ["V1", "V2"])
+        self.assertEqual(self.telegram.mensajes[-1]["texto"].count("Banda - V1"), 1)
+
+    def test_un_mapeo_cortado_antes_de_empezar_no_dice_que_reviso_cero(self):
+        # Defecto: "Revisé 0 de 0" cuando el paso ni llegó a leer la lista de subidas.
+        escribir_en(self.telegram, "/mapear_canal")
+        self.servicio.paso()
+        self.lanzador.terminar("mapear_canal", {"ok": False, "motivo": "tiempo_agotado", "log": "x.log"})
+        self.servicio.paso()
+        texto = self.telegram.mensajes[-1]["texto"]
+        self.assertIn(sp.MOTIVOS_APELACION["tiempo_agotado"], texto)
+        self.assertNotRegex(texto, r"\b0\b")
 
     def test_un_mapeo_que_no_termina_dice_por_que(self):
         # Defecto: silencio después de que el usuario escribió el comando.
