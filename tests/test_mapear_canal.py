@@ -8,7 +8,7 @@ import contextlib
 import shutil
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -98,7 +98,8 @@ def uploader_del_canal(canal):
 
 
 def en(dias):
-    return (datetime.now().astimezone() + timedelta(days=dias)).isoformat(timespec="seconds")
+    """Un publishAt como lo da la API: en UTC, con «Z»."""
+    return (datetime.now(timezone.utc) + timedelta(days=dias)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class TestMapearCanal(unittest.TestCase):
@@ -205,6 +206,46 @@ class TestMapearCanal(unittest.TestCase):
         self.assertEqual(resultado["liberados"], [])
         self.assertNotIn("V2", self.leidos)
         self.assertEqual(studio.pulsados, [])
+
+    def test_un_aviso_de_sin_reclamos_que_despues_dibuja_la_lista_no_libera_el_video(self):
+        # Defecto: Studio muestra un momento "No se han encontrado reclamaciones" antes de dibujar
+        # la lista; tomar esa primera lectura publicaría un video con reclamo.
+        canal = CanalFalso([[("V1", "private", en(730), "Banda - Uno")]])
+        studio = StudioDelCanal({"V1": []})
+        studio.despues["V1"] = (1200, [("Canción A", "Artista", RECLAMO_ACTIVO)])
+        self.reclamantes = {"V1": ["Sello Independiente"]}
+        resultado = self.mapear(studio, canal)
+        self.assertEqual(resultado["liberados"], [])
+        self.assertEqual([v["video_id"] for v in resultado["sin_impugnar"]], ["V1"])
+
+    def test_sin_saber_quien_reclama_no_va_a_impugnar_todos(self):
+        # Defecto: sin los reclamantes no se puede mirar la lista negra, y el video entraba al
+        # lote: un toque impugnaría a un reclamante de la lista negra.
+        canal = CanalFalso([[("V1", "private", en(730), "Banda - Uno")]])
+        studio = StudioDelCanal({"V1": [("Canción A", "Artista", RECLAMO_ACTIVO)]})
+        resultado = self.mapear(studio, canal)
+        self.assertEqual(resultado["sin_impugnar"], [])
+        self.assertEqual(
+            [(f["video_id"], f["motivo"]) for f in resultado["fallos"]], [("V1", "reclamantes_no_disponibles")]
+        )
+
+    def test_un_video_que_rompe_la_corrida_va_al_final_de_la_proxima(self):
+        # Defecto: un video que siempre hace fallar la lectura quedaba primero en cada corrida
+        # y ninguna llegaba a los demás.
+        canal = CanalFalso([[("V1", "private", en(730), "Banda - Uno"), ("V2", "private", en(730), "Banda - Dos")]])
+        studio = StudioDelCanal({v: [("Canción", "Artista", RECLAMO_ACTIVO)] for v in ("V1", "V2")})
+        self.reclamantes = {"V2": ["Sello Independiente"]}
+
+        def leer_reclamantes(pagina, video_id):
+            if video_id == "V1":
+                raise PlaywrightError("Timeout 30000ms exceeded")
+            return self.reclamantes[video_id]
+
+        self.leer_reclamantes = leer_reclamantes
+        primera = self.mapear(studio, canal)
+        segunda = self.mapear(studio, canal)
+        self.assertEqual(primera["motivo"], "error_navegador")
+        self.assertEqual([v["video_id"] for v in segunda["sin_impugnar"]], ["V2"])
 
     def test_una_pagina_que_no_se_lee_no_libera_el_video(self):
         # Defecto: una página de error tomada por "sin reclamos" publicaría un video con reclamo.

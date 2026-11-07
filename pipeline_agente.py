@@ -2252,6 +2252,9 @@ def mirar_video_aparcado(pagina, video, modulo, leer_reclamantes, lista_negra):
     if not impugnables:
         return "en_proceso", datos
     reclamantes = leer_reclamantes(pagina, video_id)
+    if not reclamantes:
+        # Sin saber quién reclama no se sabe si está en la lista negra: no va a «Impugnar todos».
+        return "fallos", {**datos, "motivo": "reclamantes_no_disponibles"}
     datos.update(impugnables=impugnables, reclamantes=reclamantes)
     en_lista_negra = reclamantes_en_lista_negra(reclamantes, lista_negra)
     if not en_lista_negra:
@@ -2321,6 +2324,10 @@ def mapear_canal(uploader=None, abrir_studio=pagina_de_studio, modulo=None, leer
         except errores_del_paso_de_studio() as exc:
             detalle = f"{type(exc).__name__}: {exc}"[:200]
             print(f"No se pudieron leer los reclamos en Studio: {detalle}")
+            if pendientes:
+                # El video en que falló pasa al final: si falla siempre, no frena a los demás.
+                mapeo[pendientes[0]["video_id"]] = datetime.now().isoformat(timespec="seconds")
+                guardar_mapeo(mapeo)
             motivo = exc.motivo if isinstance(exc, NavegadorNoDisponible) else "error_navegador"
             return {**resumen, "ok": False, "motivo": motivo, "detalle": detalle}
     return {**resumen, "ok": not listas["fallos"]}
