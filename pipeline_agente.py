@@ -212,12 +212,12 @@ def destino_libre(directorio, nombre):
     return destino
 
 
-def siguiente_sin_publicar(aleatorio=False):
+def siguiente_sin_publicar(aleatorio=False, excluir=()):
     """Como siguiente_album, pero aparta en DIR_YA_PUBLICADOS los que están en el registro.
 
     Devuelve el álbum (o None) y los apartados; uno que no se pudo mover lleva `error` y
     queda en su carpeta sin renderizar. Con `aleatorio`, el orden es al azar entre todas las
-    carpetas de origen.
+    carpetas de origen. Los nombres de `excluir` (la lista del /crear_lista) se saltan.
     """
     registro = registro_publicados.leer(REGISTRO_PUBLICADOS)
     apartados = []
@@ -231,6 +231,8 @@ def siguiente_sin_publicar(aleatorio=False):
         candidatos = list(candidatos)
         random.shuffle(candidatos)
     for origen, nombre in candidatos:
+        if nombre in excluir:
+            continue
         fila = registro.buscar(nombre)
         if fila is None:
             return origen / nombre, apartados
@@ -910,15 +912,16 @@ def portada_del_album(carpeta):
     return next(iter(sin_sombra or imagenes), None)
 
 
-def buscar(uploader=None, aleatorio=False):
+def buscar(uploader=None, aleatorio=False, excluir=()):
     """Elige el próximo álbum sin renderizarlo y captura su búsqueda en YouTube.
 
     El servicio pregunta con esa captura y la portada antes de renderizar: un álbum que ya está
     publicado se borra sin gastar el render. Los que están en el registro se apartan como en
     `renderizar`. Sin portada en la carpeta (puede venir dentro del audio), va solo la búsqueda.
     Con `aleatorio` (el /aleatorio del servicio), elige al azar entre las carpetas de origen.
+    Salta los de `excluir`: los que ya están en la lista del /crear_lista.
     """
-    origen, apartados = siguiente_sin_publicar(aleatorio)
+    origen, apartados = siguiente_sin_publicar(aleatorio, excluir)
     if origen is None:
         return {"ok": False, "motivo": "sin_albumes", "ya_publicados": apartados}
     captura, busqueda = capturar_busqueda(origen, uploader)
@@ -2407,6 +2410,9 @@ def parse_args(argv=None):
         "buscar", help="Elige el próximo álbum y captura su búsqueda en YouTube, sin renderizarlo."
     )
     p.add_argument("--aleatorio", action="store_true", help="Elige al azar entre las carpetas de origen.")
+    p.add_argument(
+        "--excluir", action="append", default=[], help="Álbum que se salta (repetible): la lista del servicio."
+    )
 
     p = sub.add_parser("verificar", help="Tests del video renderizado y captura.")
     p.add_argument("--carpeta", required=True, help="Carpeta devuelta por renderizar.")
@@ -2491,7 +2497,7 @@ def main(argv=None):
     if args.comando == "renderizar":
         return responder(renderizar(args.carpeta))
     if args.comando == "buscar":
-        return responder(buscar(aleatorio=args.aleatorio))
+        return responder(buscar(aleatorio=args.aleatorio, excluir=args.excluir))
     if args.comando == "verificar":
         return responder(verificar(args.carpeta))
     if args.comando == "subir":

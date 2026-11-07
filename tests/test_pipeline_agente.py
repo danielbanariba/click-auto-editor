@@ -585,6 +585,29 @@ class TestPreguntarAntesDeRenderizar(unittest.TestCase):
         self.assertTrue((pa.DIR_YA_PUBLICADOS / "Banda D - Publicado (2001) [EP]").is_dir())
         self.assertEqual(en_orden["album"], "Banda A - Cola (2024)")
 
+    def test_buscar_salta_los_albumes_de_la_lista(self):
+        # Defecto: sin esto, después de "➕ A la lista" se vuelve a preguntar por el mismo álbum.
+        for nombre in ("Banda A - Primero (2024)", "Banda B - Segundo (2023)"):
+            (self.album / nombre).mkdir()
+        captura = (self.tmp / "busqueda.png", "titulo")
+
+        with mock.patch.object(pa, "capturar_busqueda", return_value=captura):
+            siguiente = pa.buscar(excluir=["Banda A - Primero (2024)"])
+            todos = pa.buscar(excluir=["Banda A - Primero (2024)", "Banda B - Segundo (2023)"])
+
+        self.assertEqual(siguiente["album"], "Banda B - Segundo (2023)")
+        self.assertEqual(todos["motivo"], "sin_albumes")
+        self.assertTrue((self.album / "Banda A - Primero (2024)").is_dir())
+
+    def test_el_subcomando_buscar_pasa_cada_excluir(self):
+        # Defecto: el servicio manda la lista por la línea de comandos; si no llega, se pierde.
+        salida = io.StringIO()
+        with mock.patch.object(pa, "buscar", return_value={"ok": True}) as buscar, \
+                contextlib.redirect_stdout(salida):
+            codigo = pa.main(["buscar", "--aleatorio", "--excluir", "A", "--excluir", "B"])
+        buscar.assert_called_once_with(aleatorio=True, excluir=["A", "B"])
+        self.assertEqual(codigo, 0)
+
     def test_buscar_sin_albumes_no_captura_nada(self):
         with mock.patch.object(pa, "capturar_busqueda", side_effect=AssertionError("capturó")):
             self.assertEqual(pa.buscar()["motivo"], "sin_albumes")
