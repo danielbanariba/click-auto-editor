@@ -35,6 +35,7 @@ from urllib.parse import quote
 import httplib2
 from google.auth.exceptions import RefreshError, TransportError
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaFileUpload
 
 from config import (
     AUDIO_FORMATS,
@@ -872,6 +873,31 @@ def borrar_album(uploader, carpeta, raiz):
     return bool(borrada)
 
 
+def poner_miniatura(uploader, youtube, video_id, video, captura):
+    """Pone de miniatura el fotograma del medio del video; sin esto YouTube elige uno del intro.
+
+    Usa la captura de `verificar`; si no está (una subida a mano), la saca. Un fallo no deshace
+    la subida: devuelve (False, motivo) y la miniatura se pone a mano en Studio.
+    """
+    try:
+        if not captura.exists():
+            sondeo = sondear(video)
+            duracion = float((sondeo or {}).get("format", {}).get("duration", 0) or 0)
+            if not duracion or not generar_captura(video, duracion, captura):
+                return False, "no se pudo sacar el fotograma del video"
+        ejecutar_api(
+            uploader,
+            {"cliente": youtube},
+            lambda c: c.thumbnails().set(
+                videoId=video_id, media_body=MediaFileUpload(str(captura), mimetype="image/jpeg")
+            ).execute(),
+        )
+    except (HttpError, RefreshError, SinCredenciales, OSError, *ERRORES_DE_CONEXION) as exc:
+        print(f"No se pudo poner la miniatura de {video_id}: {exc}")
+        return False, str(exc)
+    return True, None
+
+
 def portada_del_album(carpeta):
     """La imagen que el render usa de portada: cover.* primero; si no, otra que no sea una sombra."""
     imagenes = sorted(
@@ -979,12 +1005,18 @@ def subir(carpeta, uploader=None, sin_deathgrind=False, raices=RAICES_BORRABLES)
     )
     anotar_publicados([(carpeta.name, "subir", video_id)])
     with open(log, "a", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
+        # Antes de borrar el álbum, que también borra la captura.
+        miniatura, error_miniatura = poner_miniatura(
+            uploader, youtube, video_id, video, DIR_CAPTURAS / f"{slug(carpeta.name)}.jpg"
+        )
         borrada = borrar_album(uploader, carpeta, raiz)
     return {
         "ok": True,
         "video_id": video_id,
         "titulo": metadata["title"],
         "carpeta_borrada": borrada,
+        "miniatura": miniatura,
+        "miniatura_error": error_miniatura,
         "studio": f"https://studio.youtube.com/video/{video_id}/edit",
         "log": str(log),
     }
