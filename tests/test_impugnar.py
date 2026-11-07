@@ -550,6 +550,14 @@ class TestImpugnar(unittest.TestCase):
         self.assertNotIn("motivo", studio.pasos)
         self.assertEqual(studio.enviados, [])
 
+    def test_canciones_que_dicen_confirm_e_identity_no_se_toman_por_verificacion(self):
+        # Defecto: la búsqueda en toda la página juntaba "Confirmation" de una fila con
+        # "Identity" de otra y frenaba la impugnación como si Studio pidiera verificar.
+        studio = StudioFalso([reclamo("Confirmation"), reclamo("Lost Identity")])
+        resultado = self.impugnar(studio)
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(resultado["impugnados"], 2)
+
     def test_si_un_reclamo_falla_informa_los_anteriores_y_no_sigue_con_los_demas(self):
         # Defecto: perder la cuenta de lo ya impugnado cuando falla el reclamo siguiente, o
         # seguir con los demás sin entender por qué falló uno.

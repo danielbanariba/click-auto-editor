@@ -7,6 +7,7 @@ import sys
 import time
 from pathlib import Path
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
@@ -150,6 +151,13 @@ def is_video_marcado_omitir(item, fecha_pat):
 P_VERIFY_IDENTITY = re.compile(
     r"(verifica que eres t[uú]|verify (it'?s|that) you|confirm.*identity|"
     r"necesitamos confirmar que eres t[uú]|extra security|nivel extra de seguridad)",
+    re.IGNORECASE,
+)
+
+# Solo frases enteras del diálogo: en toda la página, un patrón con ".*" junta palabras de
+# elementos distintos (una canción "Confirmation" y otra "Lost Identity" de la lista).
+P_VERIFY_IDENTITY_DIALOG = re.compile(
+    r"(verifica que eres t[uú]|verify (it'?s|that) you|necesitamos confirmar que eres t[uú])",
     re.IGNORECASE,
 )
 
@@ -3747,8 +3755,8 @@ def _verify_identity_visible(page):
     """"Verifica que eres tú" sale en un diálogo chico encima del formulario (visto el
     2026-11-07). get_active_root elige el formulario, así que se busca en toda la página."""
     try:
-        return page.get_by_text(P_VERIFY_IDENTITY).filter(visible=True).count() > 0
-    except Exception:
+        return page.get_by_text(P_VERIFY_IDENTITY_DIALOG).filter(visible=True).count() > 0
+    except PlaywrightError:
         return False
 
 
