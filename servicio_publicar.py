@@ -102,7 +102,9 @@ AVISO_BOTON = {
     "eliminar_video": "Borrando el video…",
     "impugnar": "Impugnando…",
     "impugnar_todos": "Los impugno de a uno; aviso al final",
-    "impugnar_ventana": "Abro Brave en la PC: pasá la verificación ahí",
+    # Puede esperar el candado de Studio (`apelar` lo tiene hasta 90 min): la espera de 10 min
+    # por reclamo empieza recién con el formulario abierto.
+    "impugnar_ventana": "Abro Brave en la PC apenas Studio esté libre: pasá la verificación ahí",
 }
 # El menú de comandos del bot.
 COMANDOS = [
@@ -1145,7 +1147,7 @@ class Servicio:
         sin_revisar = resultado.get("sin_revisar")
         if sin_revisar is None:
             # Terminó sin decir qué hizo: pudo haber impugnado algo, así que no se ofrece de nuevo.
-            lineas = [f"❌ La ventana terminó sin decir qué impugnó ({causa_legible(motivo)}). Revisa en Studio:"]
+            lineas = ["❌ La ventana terminó sin decir qué impugnó (se cortó o falló). Revisa en Studio:"]
             lineas += [f"• https://studio.youtube.com/video/{v}/claims" for v in argumentos[2::2]]
             if resultado.get("log"):
                 lineas.append(f"Log: {resultado['log']}")
