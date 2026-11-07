@@ -2169,6 +2169,164 @@ def seguir_impugnaciones(abrir_studio=pagina_de_studio):
 
 
 # ---------------------------------------------------------------------------
+# mapear_canal
+# ---------------------------------------------------------------------------
+
+# Un video con reclamo se programa a dos años (elegir_fecha): uno privado que sale a más de un
+# año está aparcado por un reclamo, lo haya programado este servicio u otro script.
+UMBRAL_APARCADO = timedelta(days=365)
+# Cuándo se miró por última vez cada video aparcado: la corrida siguiente empieza por el resto.
+MAPEO_JSON = DIR_AGENTE / "mapeo_canal.json"
+# Tiene el candado de Studio, como el seguimiento: lo que no alcanza sale en `sin_revisar`.
+TIEMPO_MAXIMO_MAPEO_S = 30 * 60
+
+
+def videos_aparcados(uploader, cliente, ahora):
+    """Los videos privados programados a más de UMBRAL_APARCADO de `ahora`, entre las últimas
+    ESCANEO_PROGRAMADOS subidas del canal: [{"video_id", "titulo", "publica_en"}], en el orden
+    de la lista de subidas. Los borrados o retirados por YouTube no aparecen."""
+    lista = uploader.get_uploads_playlist_id(cliente)
+    if not lista:
+        return []
+    aparcados, vistos, siguiente = [], 0, None
+    while vistos < ESCANEO_PROGRAMADOS:
+        respuesta = cliente.playlistItems().list(
+            part="snippet", playlistId=lista, maxResults=50, pageToken=siguiente
+        ).execute()
+        items = respuesta.get("items", [])
+        vistos += len(items)
+        ids = [
+            item["snippet"]["resourceId"]["videoId"]
+            for item in items
+            if item.get("snippet", {}).get("resourceId", {}).get("videoId")
+        ]
+        if ids:
+            videos = cliente.videos().list(part="snippet,status", id=",".join(ids)).execute()
+            por_id = {video["id"]: video for video in videos.get("items", [])}
+            for video_id in ids:
+                video = por_id.get(video_id, {})
+                status = video.get("status", {})
+                if status.get("privacyStatus") != "private" or not status.get("publishAt"):
+                    continue
+                publica_en = datetime.fromisoformat(status["publishAt"]).astimezone()
+                if publica_en - ahora > UMBRAL_APARCADO:
+                    aparcados.append({
+                        "video_id": video_id,
+                        "titulo": video.get("snippet", {}).get("title") or video_id,
+                        "publica_en": publica_en.isoformat(),
+                    })
+        siguiente = respuesta.get("nextPageToken")
+        if not items or not siguiente:
+            break
+    return aparcados
+
+
+def leer_mapeo():
+    if not MAPEO_JSON.exists():
+        return {}
+    with open(MAPEO_JSON, "r", encoding="utf-8") as archivo:
+        return json.load(archivo)
+
+
+def guardar_mapeo(mapeo):
+    MAPEO_JSON.parent.mkdir(parents=True, exist_ok=True)
+    temporal = MAPEO_JSON.with_name(f"{MAPEO_JSON.name}.tmp")
+    with open(temporal, "w", encoding="utf-8") as archivo:
+        json.dump(mapeo, archivo, ensure_ascii=False, indent=2)
+    temporal.replace(MAPEO_JSON)
+
+
+def mirar_video_aparcado(pagina, video, modulo, leer_reclamantes, lista_negra):
+    """En qué lista va un video aparcado, según su /claims; solo lee. Devuelve (lista, datos)."""
+    video_id = video["video_id"]
+    datos = {"video_id": video_id, "titulo": video["titulo"], "publica_en": video["publica_en"]}
+    reclamos = confirmar_reclamos(pagina, video_id, {}, leer_reclamos(pagina, video_id))
+    if reclamos is None:
+        return "fallos", {**datos, "motivo": "lista_de_reclamos_no_disponible"}
+    if not reclamos:
+        return "liberados", datos
+    impugnables = contar_en_la_pagina(pagina, modulo)
+    if impugnables is None:
+        return "fallos", {**datos, "motivo": "lista_de_reclamos_no_disponible"}
+    datos["reclamos"] = reclamos
+    if not impugnables:
+        return "en_proceso", datos
+    reclamantes = leer_reclamantes(pagina, video_id)
+    datos.update(impugnables=impugnables, reclamantes=reclamantes)
+    en_lista_negra = reclamantes_en_lista_negra(reclamantes, lista_negra)
+    if not en_lista_negra:
+        return "sin_impugnar", datos
+    return "lista_negra", {
+        **datos,
+        "reclamantes_en_lista_negra": en_lista_negra,
+        "captura": capturar_pagina(pagina, DIR_CAPTURAS / f"reclamos_{video_id}.png"),
+    }
+
+
+def mapear_canal(uploader=None, abrir_studio=pagina_de_studio, modulo=None, leer_reclamantes=None):
+    """Vuelve a mirar en Studio los videos aparcados por un reclamo. Solo lee: nunca pulsa nada.
+
+    Los videos salen de `videos_aparcados`, primero los que hace más que no se miran. Cada uno
+    va a una lista: `liberados` (/claims ya no muestra reclamos, en dos lecturas), `sin_impugnar`
+    (algún "Tomar medidas" habilitado, con sus reclamantes), `lista_negra` (como el anterior,
+    pero algún reclamante está en la lista negra), `en_proceso` (tiene reclamos y ninguno se
+    puede impugnar) o `fallos` (no se pudo leer). Lo que no alcanzó a mirarse en
+    TIEMPO_MAXIMO_MAPEO_S sale en `sin_revisar`. Lo lanza el servicio con /mapear_canal.
+    """
+    uploader = uploader or uploader_real()
+    log = ruta_log("mapear_canal")
+    base = {"log": str(log)}
+    listas = {"liberados": [], "sin_impugnar": [], "lista_negra": [], "en_proceso": [], "fallos": []}
+    with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
+        uploader.cargar_env()
+        youtube, *_ = uploader.probar_credenciales_disponibles(prefix="upload")
+        if not youtube:
+            return {"ok": False, "motivo": "sin_credenciales", **base}
+        ahora = datetime.now().astimezone()
+        try:
+            videos = ejecutar_api(uploader, {"cliente": youtube}, lambda c: videos_aparcados(uploader, c, ahora))
+        except SinCredenciales:
+            return {"ok": False, "motivo": "sin_credenciales", **base}
+        except HttpError as exc:
+            print(f"Error YouTube API: {exc}")
+            return {"ok": False, "motivo": "error_api", "detalle": str(exc)[:200], **base}
+        except ERRORES_DE_CONEXION as exc:
+            detalle = f"{type(exc).__name__}: {exc}"[:200]
+            print(f"Sin conexion con YouTube tras {REINTENTOS_CONEXION} reintentos: {detalle}")
+            return {"ok": False, "motivo": "sin_conexion", "detalle": detalle, **base}
+        mapeo = leer_mapeo()
+        pendientes = sorted(videos, key=lambda video: mapeo.get(video["video_id"], ""))
+        print(f"{len(videos)} videos aparcados por un reclamo")
+        resumen = {"aparcados": len(videos), **listas, "sin_revisar": pendientes, **base}
+        try:
+            if pendientes:
+                modulo = modulo or impugnador()
+                leer_reclamantes = leer_reclamantes or apelacion_agente().extract_claimants_from_video
+                lista_negra = cargar_lista_negra()
+                # El mismo candado que `programar`, `impugnar` y `apelar`: comparten el perfil.
+                with bloqueo("programar"), abrir_studio() as pagina:
+                    DIR_CAPTURAS.mkdir(parents=True, exist_ok=True)
+                    inicio = time.monotonic()
+                    while pendientes:
+                        if len(pendientes) < len(videos) and time.monotonic() - inicio > TIEMPO_MAXIMO_MAPEO_S:
+                            print("Se acabó el tiempo de la corrida: el resto va primero la próxima vez.")
+                            break
+                        video = pendientes[0]
+                        lista, datos = mirar_video_aparcado(pagina, video, modulo, leer_reclamantes, lista_negra)
+                        print(f"{video['video_id']}: {lista}")
+                        listas[lista].append(datos)
+                        pendientes.pop(0)
+                        mapeo[video["video_id"]] = datetime.now().isoformat(timespec="seconds")
+                        guardar_mapeo(mapeo)
+        except errores_del_paso_de_studio() as exc:
+            detalle = f"{type(exc).__name__}: {exc}"[:200]
+            print(f"No se pudieron leer los reclamos en Studio: {detalle}")
+            motivo = exc.motivo if isinstance(exc, NavegadorNoDisponible) else "error_navegador"
+            return {**resumen, "ok": False, "motivo": motivo, "detalle": detalle}
+    return {**resumen, "ok": not listas["fallos"]}
+
+
+# ---------------------------------------------------------------------------
 # apelar
 # ---------------------------------------------------------------------------
 
@@ -2480,6 +2638,11 @@ def parse_args(argv=None):
         help="Lee en Studio el estado de los reclamos impugnados y dice qué cambió (solo lectura).",
     )
 
+    sub.add_parser(
+        "mapear_canal",
+        help="Vuelve a mirar en Studio los videos aparcados por un reclamo (solo lectura).",
+    )
+
     p = sub.add_parser(
         "estado", help="Videos sin programar, álbumes sin aprobar y si hay un render corriendo."
     )
@@ -2517,6 +2680,8 @@ def main(argv=None):
         return responder(sembrar_publicados())
     if args.comando == "seguir_impugnaciones":
         return responder(seguir_impugnaciones())
+    if args.comando == "mapear_canal":
+        return responder(mapear_canal())
     return responder(estado(esperar_render=args.esperar_render))
 
 
