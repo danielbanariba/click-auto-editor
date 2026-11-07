@@ -52,6 +52,9 @@ const PIDE_VERIFICACION = __VERIFICACION__;
 // Como en vivo (2026-11-07): "Verifica que eres tú" sale en un diálogo chico, con su fondo,
 // encima del formulario ya abierto en "Descripción general".
 const VERIFICACION_ENCIMA = __VERIFICACION_ENCIMA__;
+// Sale unos segundos después del formulario; con ventana, el usuario la pasa a mano.
+const VERIFICACION_DEMORA_MS = __VERIFICACION_DEMORA_MS__;
+const VERIFICACION_SE_PASA_MS = __VERIFICACION_SE_PASA_MS__;
 const $ = (id) => document.getElementById(id);
 const dlg = $("dlg");
 const paso = (nombre) => fetch("/_paso", {method: "POST", body: nombre});
@@ -127,14 +130,21 @@ function pintar() {
 function enganchar(p) {
   const continuar = $("continuar");
   if (continuar) continuar.onclick = () => {
+    // Como Studio: con la verificación encima, el formulario no avanza.
+    if (!$("verif-encima").hidden) return;
     const encima = p === 0 && PIDE_VERIFICACION && VERIFICACION_ENCIMA;
     est.paso = (p === 0 && PIDE_VERIFICACION && !encima) ? "verif" : p + 1;
     pintar();
-    if (encima) {
+    if (encima) setTimeout(() => {
       $("fondo-verif").hidden = false;
       $("verif-encima").hidden = false;
       paso("verificacion");
-    }
+      if (VERIFICACION_SE_PASA_MS !== null) setTimeout(() => {
+        $("fondo-verif").hidden = true;
+        $("verif-encima").hidden = true;
+        paso("verificacion_pasada");
+      }, VERIFICACION_SE_PASA_MS);
+    }, VERIFICACION_DEMORA_MS);
   };
   if ($("cancelar")) $("cancelar").onclick = () => { dlg.hidden = true; };
   if ($("cerrar")) $("cerrar").onclick = () => { dlg.hidden = true; };
@@ -208,6 +218,8 @@ class StudioFalso:
         acepta_envios=True,
         verificacion_tras=None,
         verificacion_encima=False,
+        verificacion_demora_ms=0,
+        verificacion_se_pasa_ms=None,
         sin_sesion=False,
         pagina_de_error=None,
         envios=None,
@@ -224,6 +236,11 @@ class StudioFalso:
         # Con N impugnaciones ya aceptadas, el siguiente "Continuar" pide "Verifica que eres tú".
         self.verificacion_tras = verificacion_tras
         self.verificacion_encima = verificacion_encima  # en un diálogo aparte, sobre el formulario
+        self.verificacion_demora_ms = verificacion_demora_ms  # cuánto después del formulario sale
+        # Con ventana: cuánto tarda el usuario en pasarla (None: no la pasa). Pasada, Studio no
+        # la vuelve a pedir en esa sesión.
+        self.verificacion_se_pasa_ms = verificacion_se_pasa_ms
+        self.verificacion_pasada = False
         self.sin_sesion = sin_sesion
         # "siempre" o "tras_enviar": /claims responde una página de error, sin la lista ni el
         # aviso de que no hay reclamaciones.
@@ -249,6 +266,8 @@ class StudioFalso:
         url = ruta.request.url
         if url.endswith("/_paso"):
             self.pasos.append(ruta.request.post_data)
+            if ruta.request.post_data == "verificacion_pasada":
+                self.verificacion_pasada = True
             return ruta.fulfill(status=200, body="{}", content_type="application/json")
         if url.endswith("/_enviar"):
             datos = json.loads(ruta.request.post_data)
@@ -275,13 +294,19 @@ class StudioFalso:
             return ruta.fulfill(status=200, body=PAGINA_DE_ERROR, content_type="text/html; charset=utf-8")
         if url.endswith("/claims"):
             self.mostrar_lo_registrado()
-        verificacion = self.verificacion_tras is not None and self.impugnados() >= self.verificacion_tras
+        verificacion = (
+            self.verificacion_tras is not None
+            and self.impugnados() >= self.verificacion_tras
+            and not self.verificacion_pasada
+        )
         html = (
             PAGINA.replace("__RECLAMOS__", json.dumps(self.reclamos))
             .replace("__TITULO__", json.dumps(self.titulo))
             .replace("__CARGA_MS__", str(self.carga_ms))
             .replace("__VERIFICACION__", json.dumps(verificacion))
             .replace("__VERIFICACION_ENCIMA__", json.dumps(self.verificacion_encima))
+            .replace("__VERIFICACION_DEMORA_MS__", json.dumps(self.verificacion_demora_ms))
+            .replace("__VERIFICACION_SE_PASA_MS__", json.dumps(self.verificacion_se_pasa_ms))
         )
         return ruta.fulfill(status=200, body=html, content_type="text/html; charset=utf-8")
 
@@ -344,6 +369,8 @@ class TestImpugnar(unittest.TestCase):
             mock.patch.object(pa, "ESPERA_CONFIRMAR_IMPUGNACION_S", 0.2),
             mock.patch.object(pa, "PAUSA_REINTENTO_NAVEGACION_S", 0.1),
             mock.patch.object(pa, "PAUSA_REINTENTO_IMPUGNAR_S", 0.1),
+            # Sin esto cada reclamo esperaría el diálogo que llega tarde; lo prueba su test.
+            mock.patch.object(self.modulo, "VERIFY_DIALOG_DELAY_S", 0.0),
         ]
         for parche in parches:
             parche.start()
@@ -548,6 +575,18 @@ class TestImpugnar(unittest.TestCase):
         self.assertEqual([fallo["motivo"] for fallo in resultado["fallos"]], ["verificacion_de_identidad"])
         self.assertIn("verificacion", studio.pasos)
         self.assertNotIn("motivo", studio.pasos)
+        self.assertEqual(studio.enviados, [])
+
+    def test_una_verificacion_que_sale_despues_del_formulario_tambien_se_ve(self):
+        # Defecto (visto en vivo): el diálogo sale unos segundos después del formulario. La
+        # espera ya había visto el formulario, seguía de largo y el fallo salía como
+        # formulario_no_disponible.
+        studio = StudioFalso(
+            [reclamo("Canción A")], verificacion_tras=0, verificacion_encima=True, verificacion_demora_ms=4000
+        )
+        with mock.patch.object(self.modulo, "VERIFY_DIALOG_DELAY_S", 3.0):
+            resultado = self.impugnar(studio)
+        self.assertEqual([fallo["motivo"] for fallo in resultado["fallos"]], ["verificacion_de_identidad"])
         self.assertEqual(studio.enviados, [])
 
     def test_canciones_que_dicen_confirm_e_identity_no_se_toman_por_verificacion(self):

@@ -204,8 +204,9 @@ presses "Enviar". It opens `/claims` directly (Studio redirects `/copyright` the
 an `evaluate` caught in that navigation fails with "Execution context was destroyed";
 the count also retries when that still happens). It runs inside the `programar` lock (same Studio profile copy)
 and never waits for a 2FA (the service is headless): a verification page (also the
-small "Verifica que eres tú" dialog Studio stacks over the form, looked for in the whole
-page), a missing form or any unexpected page fails that claim without sending and dumps evidence to
+small "Verifica que eres tú" dialog Studio stacks over the form a few seconds after it opens:
+it is looked for in the whole page, and for `VERIFY_DIALOG_DELAY_S` (6 s) more once the form
+shows), a missing form or any unexpected page fails that claim without sending and dumps evidence to
 `data/impugnar_evidencia/`. It never disputes more claims than there were
 disputable claims at the start. A dispute counts as done only when `/claims`,
 reloaded, shows exactly one enabled "Tomar medidas" fewer. Studio sometimes leaves

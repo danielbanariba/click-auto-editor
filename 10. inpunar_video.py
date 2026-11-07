@@ -161,6 +161,10 @@ P_VERIFY_IDENTITY_DIALOG = re.compile(
     re.IGNORECASE,
 )
 
+# "Verifica que eres tú" sale unos segundos después del formulario (visto el 2026-11-07):
+# visto el formulario, se sigue mirando este tiempo antes de darlo por listo.
+VERIFY_DIALOG_DELAY_S = 6.0
+
 _VERIFY_IDENTITY_WAIT_S = 0.0  # configurado desde main() via --esperar-verificacion-s
 
 
@@ -3783,6 +3787,11 @@ def _wait_for_form_or_2fa(page, max_s=300.0):
         in_selector = bool(P_ACTION_SELECTOR_DIALOG.search(txt))
         hits = sum(1 for h in strict if h in txt)
         if hits >= 1 and not in_selector:
+            limite = time.time() + VERIFY_DIALOG_DELAY_S
+            while time.time() < limite:
+                time.sleep(1.0)
+                if _verify_identity_visible(page):
+                    return "2fa"
             return "form"
     return "timeout"
 
