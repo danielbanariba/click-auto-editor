@@ -1929,5 +1929,150 @@ class TestConexiones(unittest.TestCase):
         self.assertIn("por_aprobar", resultado)
 
 
+class TestMapearCanal(BaseServicio):
+    """/mapear_canal relee los videos aparcados por un reclamo y junta en un mensaje lo que falta
+    impugnar. Impugnar es una declaración legal: nada sale sin apretar «Impugnar todos»."""
+
+    TODOS = "⚖️ Impugnar todos (2)"
+
+    def mapear(self, **resultado):
+        escribir_en(self.telegram, "/mapear_canal")
+        self.servicio.paso()
+        listas = ("liberados", "sin_impugnar", "lista_negra", "en_proceso", "fallos", "sin_revisar")
+        self.antes_del_resultado = len(self.telegram.mensajes)
+        self.lanzador.terminar("mapear_canal", {"ok": True, "aparcados": 0, **dict.fromkeys(listas, []), **resultado})
+        self.servicio.paso()
+
+    def preguntas(self):
+        return [m for m in self.telegram.mensajes if m["botones"]]
+
+    def etiquetas(self, mensaje):
+        return [etiqueta for etiqueta, _ in mensaje["botones"]]
+
+    def sin_impugnar(self, *ids):
+        return [
+            {"video_id": v, "titulo": f"Banda - {v}", "impugnables": 1,
+             "reclamantes": ["Sello Independiente", "Otro Sello"] if v == "V1" else []}
+            for v in ids
+        ]
+
+    def impugnar_todos(self):
+        self.mapear(aparcados=2, sin_impugnar=self.sin_impugnar("V1", "V2"))
+        self.telegram.apretar(self.ultima_pregunta(), self.TODOS)
+        self.servicio.paso()
+
+    def test_el_comando_lanza_el_mapeo_una_sola_vez_y_tambien_escrito_con_guion(self):
+        # Defecto: el comando no hace nada, o dos mapeos a la vez se pisan en Studio.
+        escribir_en(self.telegram, "/mapear-canal")
+        self.servicio.paso()
+        escribir_en(self.telegram, "/mapear_canal")
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("mapear_canal"), [["mapear_canal"]])
+        self.assertIn("mapear_canal", [c["command"] for c in sp.COMANDOS])
+
+    def test_lo_que_falta_impugnar_llega_en_un_solo_mensaje_con_un_boton(self):
+        # Defecto: un mensaje por video (S3: "Un solo mensaje"), un resumen sin links ni
+        # reclamantes, o una impugnación que sale sin apretar nada.
+        self.mapear(
+            aparcados=6,
+            sin_impugnar=self.sin_impugnar("V1", "V2"),
+            en_proceso=[{"video_id": "V3", "titulo": "Banda - V3"}],
+            fallos=[{"video_id": "V4", "titulo": "Banda - V4", "motivo": "lista_de_reclamos_no_disponible"}],
+            sin_revisar=[{"video_id": "V5", "titulo": "Banda - V5"}],
+        )
+        (pregunta,) = self.telegram.mensajes[self.antes_del_resultado:]
+        self.assertEqual(self.etiquetas(pregunta), [self.TODOS])
+        for texto in ("Banda - V1", "Sello Independiente", "Otro Sello", "Banda - V2",
+                      "https://studio.youtube.com/video/V1/claims", "https://studio.youtube.com/video/V2/claims",
+                      "https://studio.youtube.com/video/V4/claims", "Licencia"):
+            self.assertIn(texto, pregunta["texto"])
+        self.assertIn("1 con la impugnación en revisión", pregunta["texto"])
+        self.assertIn("1 sin revisar", pregunta["texto"])
+        self.assertEqual(self.lanzador.lanzados("impugnar"), [])
+
+    def test_los_liberados_se_programan_sin_reclamo_y_la_lista_negra_pregunta_aparte(self):
+        # Defecto: un video sin reclamos que sigue aparcado dos años (S2), o uno de la lista
+        # negra ofrecido para impugnar o preguntado dos veces.
+        self.servicio.preguntar("lista_negra", "ya abierta", video_id="V3")
+        negro = {"titulo": "Banda - V2", "reclamantes_en_lista_negra": ["UMG"], "captura": str(self.tmp / "v2.png")}
+        self.mapear(
+            aparcados=3,
+            liberados=[{"video_id": "V1", "titulo": "Banda - V1"}],
+            lista_negra=[{"video_id": "V2", **negro}, {"video_id": "V3", **negro, "titulo": "Banda - V3"}],
+        )
+        self.assertEqual(self.lanzador.lanzados("programar"), [["programar", "--video-id", "V1", "--reclamo", "no"]])
+        de_lista_negra = [p for p in self.servicio.estado["preguntas"].values() if p["tipo"] == "lista_negra"]
+        self.assertEqual(sorted(p["video_id"] for p in de_lista_negra), ["V2", "V3"])
+        (nueva,) = [m for m in self.preguntas() if "Banda - V2" in m["texto"]]
+        self.assertEqual(self.etiquetas(nueva), ["Conservar", "🗑️ Eliminar video"])
+        self.assertEqual(nueva["foto"], str(self.tmp / "v2.png"))
+        self.assertEqual(self.lanzador.lanzados("impugnar"), [])
+
+    def test_impugnar_todos_va_de_a_uno_y_avisa_una_sola_vez_al_final(self):
+        # Defecto: varios `impugnar` a la vez en Studio, o un aviso por cada video.
+        self.impugnar_todos()
+        self.assertEqual(self.lanzador.lanzados("impugnar"), [["impugnar", "--video-id", "V1"]])
+        antes = len(self.telegram.mensajes)
+        self.lanzador.terminar("impugnar", {"ok": True, "video_id": "V1", "titulo": "Banda - V1", "reclamos": 2, "impugnados": 2, "fallos": []})
+        self.servicio.paso()
+        self.assertEqual(len(self.telegram.mensajes), antes)
+        self.assertEqual(self.lanzador.lanzados("impugnar")[1:], [["impugnar", "--video-id", "V2"]])
+        self.lanzador.terminar("impugnar", {"ok": False, "motivo": "sin_reclamos_impugnables", "reclamos": 0, "impugnados": 0, "fallos": []})
+        self.servicio.paso()
+        (aviso,) = self.telegram.mensajes[antes:]
+        self.assertIn("Banda - V1", aviso["texto"])
+        self.assertIn("2 de 2", aviso["texto"])
+        self.assertIn("Banda - V2", aviso["texto"])
+        self.assertEqual(len(self.lanzador.lanzados("impugnar")), 2)
+        self.assertIsNone(self.servicio.estado["lote_impugnar"])
+
+    def test_una_verificacion_de_identidad_frena_el_lote_y_dice_que_falta(self):
+        # Defecto: seguir abriendo formularios con Studio pidiendo verificar la identidad (todos
+        # fallarían), o frenar sin decir por qué ni qué quedó sin impugnar.
+        self.impugnar_todos()
+        antes = len(self.telegram.mensajes)
+        self.lanzador.terminar("impugnar", {
+            "ok": False, "video_id": "V1", "titulo": "Banda - V1", "reclamos": 1, "impugnados": 0,
+            "fallos": [{"motivo": "verificacion_de_identidad"}],
+        })
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("impugnar")), 1)
+        (aviso,) = self.telegram.mensajes[antes:]
+        self.assertIn(sp.MOTIVOS_IMPUGNACION["verificacion_de_identidad"], aviso["texto"])
+        self.assertIn("Banda - V2", aviso["texto"])
+        self.assertIsNone(self.servicio.estado["lote_impugnar"])
+
+    def test_el_lote_sigue_despues_de_un_reinicio(self):
+        # Defecto: un reinicio a mitad del lote dejaba el resto sin impugnar y sin aviso.
+        self.impugnar_todos()
+        self.servicio = self.nuevo_servicio()
+        self.assertEqual(self.lanzador.lanzados("impugnar")[-1], ["impugnar", "--video-id", "V1"])
+        self.lanzador.terminar("impugnar", {"ok": True, "video_id": "V1", "reclamos": 1, "impugnados": 1, "fallos": []})
+        self.lanzador.terminar("impugnar", {"ok": True, "video_id": "V1", "reclamos": 1, "impugnados": 1, "fallos": []})
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("impugnar")[-1], ["impugnar", "--video-id", "V2"])
+
+    def test_un_resumen_largo_no_pierde_videos_y_el_boton_va_al_final(self):
+        # Defecto: Telegram corta el texto en 4096 caracteres y los últimos videos no se ven.
+        ids = [f"V{i:02d}" for i in range(60)]
+        videos = [{**v, "titulo": f"Banda con un nombre bastante largo {v['video_id']} - Álbum (2026)"}
+                  for v in self.sin_impugnar(*ids)]
+        self.mapear(aparcados=60, sin_impugnar=videos)
+        nuevos = self.telegram.mensajes[self.antes_del_resultado:]
+        textos = [m["texto"] for m in nuevos]
+        self.assertTrue(all(len(t) <= sp.LIMITE_TEXTO for t in textos))
+        for v in ids:
+            self.assertIn(f"https://studio.youtube.com/video/{v}/claims", "\n".join(textos))
+        self.assertGreater(len(nuevos), 1)
+        self.assertEqual([self.etiquetas(m) for m in nuevos if m["botones"]], [["⚖️ Impugnar todos (60)"]])
+        self.assertTrue(nuevos[-1]["botones"])
+
+    def test_un_mapeo_que_no_termina_dice_por_que(self):
+        # Defecto: silencio después de que el usuario escribió el comando.
+        self.mapear(ok=False, motivo="sin_sesion_en_studio", aparcados=4,
+                    sin_revisar=[{"video_id": "V1", "titulo": "Banda - V1"}])
+        self.assertIn(sp.MOTIVOS_IMPUGNACION["sin_sesion_en_studio"], self.telegram.mensajes[-1]["texto"])
+
+
 if __name__ == "__main__":
     unittest.main()

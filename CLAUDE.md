@@ -121,6 +121,7 @@ env/bin/python pipeline_agente.py eliminar_video --video-id ID [--retirado]  # d
 env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # disputes every claim of the video in Studio (a legal statement in the user's name); --sin-enviar fills the first form and closes it without sending
 env/bin/python pipeline_agente.py apelar [--sin-enviar] [--limite N]  # appeals age restrictions and limited ads in Hebrew (in the user's name); --sin-enviar fills one form of each kind and closes it
 env/bin/python pipeline_agente.py seguir_impugnaciones  # reads /claims of the disputed videos and reports what changed (read-only)
+env/bin/python pipeline_agente.py mapear_canal  # reads /claims of every video parked by a claim and sorts them (read-only)
 env/bin/python pipeline_agente.py estado [--esperar-render]  # unscheduled uploads, rendered albums awaiting approval, render running
 env/bin/python pipeline_agente.py sembrar_publicados  # loads the channel titles (1 quota unit per 50 videos) and the albums the service deleted or uploaded into the published registry
 ```
@@ -202,8 +203,9 @@ ticks the permission and the three declarations, fills `mensaje` and `firma`, an
 presses "Enviar". It opens `/claims` directly (Studio redirects `/copyright` there from the browser, and
 an `evaluate` caught in that navigation fails with "Execution context was destroyed";
 the count also retries when that still happens). It runs inside the `programar` lock (same Studio profile copy)
-and never waits for a 2FA (the service is headless): a verification page, a missing
-form or any unexpected page fails that claim without sending and dumps evidence to
+and never waits for a 2FA (the service is headless): a verification page (also the
+small "Verifica que eres tú" dialog Studio stacks over the form, looked for in the whole
+page), a missing form or any unexpected page fails that claim without sending and dumps evidence to
 `data/impugnar_evidencia/`. It never disputes more claims than there were
 disputable claims at the start. A dispute counts as done only when `/claims`,
 reloaded, shows exactly one enabled "Tomar medidas" fewer. Studio sometimes leaves
@@ -244,6 +246,32 @@ video (the title comes from `programados.jsonl`, since the video is no longer pe
 it still has a claim (the dispute was rejected, or another claim remains), it goes in
 `rechazados` with each claim's status and a `/claims` screenshot, and the service asks
 "Conservar" or "🗑️ Eliminar video"; Eliminar runs `eliminar_video` with its usual check.
+
+`/mapear_canal` (also written `/mapear-canal`; in the bot's menu) runs `mapear_canal` once.
+The step takes the parked videos from the API: the private ones scheduled more than a year
+ahead among the last `ESCANEO_PROGRAMADOS` uploads (claimed videos go two years ahead, whoever
+scheduled them). It reads each `/claims` under the `programar` lock and presses nothing.
+- No claims, in two reads: the video goes in `liberados`, and the service runs
+  `programar --reclamo no`.
+- An enabled "Tomar medidas": the step reads the claimants. A blacklist match goes in
+  `lista_negra`, and the service asks the usual blacklist question unless one is already open
+  for that video. Anything else goes in `sin_impugnar`.
+- Claims, none disputable: `en_proceso`. A page that cannot be read: `fallos`.
+
+The run stops after 30 min (`TIEMPO_MAXIMO_MAPEO_S`); the rest comes back in `sin_revisar`.
+`data/agente/mapeo_canal.json` keeps when each video was last read, so the next run starts
+with the others. The service then sends one message: the counts, the videos that could not
+be read, and every video left to dispute with its claimants and `/claims` link. If anything
+is left to dispute, the message carries one button, "⚖️ Impugnar todos (N)". A message longer
+than Telegram's 4096 characters is split, and the button goes on the last part.
+
+Nothing is disputed without that press. The press stores the batch in `lote_impugnar`
+(`data/agente/servicio.json`) and runs `impugnar` for one video at a time. A second press
+adds its videos to the running batch without repeating any. At the end the service sends one
+report: claims disputed per video, and failures with their `/claims` link. A
+`verificacion_de_identidad`, `sin_sesion_en_studio` or `canal_no_disponible` stops the batch,
+since the rest would fail the same way, and the report lists what was left. After a restart,
+the video in progress is run again; `impugnar` only disputes what Studio still lets it.
 
 Monetization (`studio_monetizacion.py`) turns ads on at
 `/video/<id>/monetization`. After opening it, Studio navigates several times and ends
