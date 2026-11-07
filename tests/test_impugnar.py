@@ -32,16 +32,26 @@ PAGINA = """<!doctype html><html><head><meta charset="utf-8"><title>Reclamacione
   .card { display: block; width: 100%; text-align: left; min-height: 72px; margin: 6px 0; }
   [role=radio], [role=checkbox] { display: block; padding: 6px; border: 1px solid #ccc; margin: 6px 0; }
   [aria-checked=true] { background: #cde; }
+  #fondo-verif { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); z-index: 10; }
+  #verif-encima { position: fixed; left: 30%; top: 40%; width: 40%; background: #fff; padding: 16px;
+                  z-index: 11; }
 </style></head><body>
 <h1>Contenido protegido</h1>
 <div id="lista"></div>
 <div id="vacio"></div>
 <div role="dialog" id="dlg" hidden></div>
+<div id="fondo-verif" hidden></div>
+<div role="dialog" id="verif-encima" hidden><h2>Verifica que eres tú</h2>
+  <p>Para continuar, necesitamos confirmar que eres tú. Este nivel extra de seguridad ayuda a proteger tu cuenta.</p>
+  <button>Más información</button><button>Siguiente</button></div>
 <script>
 const RECLAMOS = __RECLAMOS__;
 const TITULO = __TITULO__;
 const CARGA_MS = __CARGA_MS__;
 const PIDE_VERIFICACION = __VERIFICACION__;
+// Como en vivo (2026-11-07): "Verifica que eres tú" sale en un diálogo chico, con su fondo,
+// encima del formulario ya abierto en "Descripción general".
+const VERIFICACION_ENCIMA = __VERIFICACION_ENCIMA__;
 const $ = (id) => document.getElementById(id);
 const dlg = $("dlg");
 const paso = (nombre) => fetch("/_paso", {method: "POST", body: nombre});
@@ -117,8 +127,14 @@ function pintar() {
 function enganchar(p) {
   const continuar = $("continuar");
   if (continuar) continuar.onclick = () => {
-    est.paso = (p === 0 && PIDE_VERIFICACION) ? "verif" : p + 1;
+    const encima = p === 0 && PIDE_VERIFICACION && VERIFICACION_ENCIMA;
+    est.paso = (p === 0 && PIDE_VERIFICACION && !encima) ? "verif" : p + 1;
     pintar();
+    if (encima) {
+      $("fondo-verif").hidden = false;
+      $("verif-encima").hidden = false;
+      paso("verificacion");
+    }
   };
   if ($("cancelar")) $("cancelar").onclick = () => { dlg.hidden = true; };
   if ($("cerrar")) $("cerrar").onclick = () => { dlg.hidden = true; };
@@ -191,6 +207,7 @@ class StudioFalso:
         carga_ms=0,
         acepta_envios=True,
         verificacion_tras=None,
+        verificacion_encima=False,
         sin_sesion=False,
         pagina_de_error=None,
         envios=None,
@@ -206,6 +223,7 @@ class StudioFalso:
         self.por_mostrar = []  # [índice, cargas de /claims que faltan para mostrarlo impugnado]
         # Con N impugnaciones ya aceptadas, el siguiente "Continuar" pide "Verifica que eres tú".
         self.verificacion_tras = verificacion_tras
+        self.verificacion_encima = verificacion_encima  # en un diálogo aparte, sobre el formulario
         self.sin_sesion = sin_sesion
         # "siempre" o "tras_enviar": /claims responde una página de error, sin la lista ni el
         # aviso de que no hay reclamaciones.
@@ -263,6 +281,7 @@ class StudioFalso:
             .replace("__TITULO__", json.dumps(self.titulo))
             .replace("__CARGA_MS__", str(self.carga_ms))
             .replace("__VERIFICACION__", json.dumps(verificacion))
+            .replace("__VERIFICACION_ENCIMA__", json.dumps(self.verificacion_encima))
         )
         return ruta.fulfill(status=200, body=html, content_type="text/html; charset=utf-8")
 
@@ -517,6 +536,19 @@ class TestImpugnar(unittest.TestCase):
         self.assertEqual(fallo["motivo"], "verificacion_de_identidad")
         self.assertEqual(studio.enviados, [])
         self.assertTrue(list(self.evidencia.glob("*.json")), "sin evidencia del fallo")
+
+    def test_una_verificacion_encima_del_formulario_se_informa_como_verificacion(self):
+        # Defecto (visto en vivo): el diálogo chico de "Verifica que eres tú" queda encima del
+        # formulario, solo se lee el formulario, y el fallo sale como formulario_no_disponible:
+        # el aviso no dice que hay que verificar la identidad en Studio.
+        studio = StudioFalso([reclamo("Canción A")], verificacion_tras=0, verificacion_encima=True)
+        resultado = self.impugnar(studio)
+        self.assertFalse(resultado["ok"])
+        self.assertEqual(resultado["impugnados"], 0)
+        self.assertEqual([fallo["motivo"] for fallo in resultado["fallos"]], ["verificacion_de_identidad"])
+        self.assertIn("verificacion", studio.pasos)
+        self.assertNotIn("motivo", studio.pasos)
+        self.assertEqual(studio.enviados, [])
 
     def test_si_un_reclamo_falla_informa_los_anteriores_y_no_sigue_con_los_demas(self):
         # Defecto: perder la cuenta de lo ya impugnado cuando falla el reclamo siguiente, o

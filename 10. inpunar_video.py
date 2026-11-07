@@ -3743,6 +3743,15 @@ def _click_continuar_in_modal(page):
         return False
 
 
+def _verify_identity_visible(page):
+    """"Verifica que eres tú" sale en un diálogo chico encima del formulario (visto el
+    2026-11-07). get_active_root elige el formulario, así que se busca en toda la página."""
+    try:
+        return page.get_by_text(P_VERIFY_IDENTITY).filter(visible=True).count() > 0
+    except Exception:
+        return False
+
+
 def _wait_for_form_or_2fa(page, max_s=300.0):
     """Devuelve 'form', '2fa' o 'timeout'."""
     strict = [
@@ -3761,7 +3770,7 @@ def _wait_for_form_or_2fa(page, max_s=300.0):
             txt = get_active_root(page).inner_text().strip().lower()
         except Exception:
             txt = ""
-        if P_VERIFY_IDENTITY.search(txt):
+        if P_VERIFY_IDENTITY.search(txt) or _verify_identity_visible(page):
             return "2fa"
         in_selector = bool(P_ACTION_SELECTOR_DIALOG.search(txt))
         hits = sum(1 for h in strict if h in txt)
