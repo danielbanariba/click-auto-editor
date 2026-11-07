@@ -59,7 +59,12 @@ toggles random choice and answers "🔀 Aleatorio activado" or "Aleatorio
 desactivado"; while it is on, `buscar --aleatorio` picks at random among the three
 source folders, still moving registered albums aside. It starts off and the
 setting (`aleatorio`) survives restarts. Messages from anyone else, or any other
-text, are ignored. It needs `PUBLICAR_TELEGRAM_TOKEN` and
+text, are ignored. Right after the upload, `subir` sets the custom thumbnail
+(`thumbnails.set`, 50 quota units) to the frame from the middle of the video that `verificar`
+saved (it takes it again if it is missing); otherwise YouTube picks a frame of the intro. A
+thumbnail that fails never undoes the upload: the upload notice says why and gives the Studio
+link to set it by hand. Videos uploaded before this keep the intro: their frame and folder are
+gone. It needs `PUBLICAR_TELEGRAM_TOKEN` and
 `PUBLICAR_TELEGRAM_CHAT_ID` in `.env` (its own bot: Hermes keeps
 `@banar_precios_bot`). Open questions survive restarts in
 `data/agente/servicio.json`.
@@ -98,7 +103,7 @@ logs, screenshots and state go to `data/agente/` (gitignored).
 env/bin/python pipeline_agente.py buscar [--aleatorio]   # next album (or a random one) (cola, Album/, EP/) without rendering: its folder, cover and YouTube search screenshot; already published ones → Ya publicados/
 env/bin/python pipeline_agente.py renderizar             # next album (cola, Album/, EP/) → Renderizando/; already published ones → Ya publicados/
 env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/4K checks, screenshot + YouTube search screenshot
-env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, then deletes the album folder
+env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, mid-video frame as thumbnail, then deletes the album folder
 env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the album folder without uploading (already published); a direct child of Renderizando/, upload_video/ or a source folder
 env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → monetization on → public now / first free moment, or +2 years if claimed
 env/bin/python pipeline_agente.py eliminar_video --video-id ID [--retirado]  # deletes the video from YouTube (irreversible; the service only runs it from a Telegram button); --retirado skips the existence check for a video YouTube removed as a copy

@@ -608,6 +608,12 @@ class Servicio:
             )
             if not resultado.get("carpeta_borrada"):
                 texto += f"\n⚠️ No pude borrar la carpeta; sigue ocupando espacio: {carpeta}"
+            if resultado.get("miniatura") is False:
+                texto += (
+                    f"\n⚠️ No pude poner la miniatura ({resultado.get('miniatura_error')}); "
+                    "YouTube muestra un fotograma del intro. Ponela a mano: "
+                    f"https://studio.youtube.com/video/{resultado['video_id']}/edit"
+                )
             self.avisar(texto)
             self.lanzar_paso("programar", "--video-id", resultado["video_id"], "--esperar")
             return

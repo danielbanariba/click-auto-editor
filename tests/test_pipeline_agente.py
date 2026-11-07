@@ -697,6 +697,31 @@ class TestRetomar(unittest.TestCase):
         self.assertGreater(time.monotonic() - inicio, 1.0)
 
 
+class ClienteDeMiniaturas:
+    """Cliente de YouTube falso: anota cada thumbnails().set() o lanza el error pedido."""
+
+    def __init__(self, error=None):
+        self.puestas = []
+        self.error = error
+
+    def thumbnails(self):
+        return self
+
+    def set(self, videoId, media_body):
+        self.puestas.append((videoId, media_body))
+        return self
+
+    def execute(self):
+        if self.error:
+            raise self.error
+        return {}
+
+
+def media_falsa(ruta, mimetype):
+    # Como MediaFileUpload, abre el archivo al crearse: falla si ya se borró.
+    return {"bytes": Path(ruta).read_bytes(), "mimetype": mimetype}
+
+
 class TestSubir(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -710,10 +735,14 @@ class TestSubir(unittest.TestCase):
             mock.patch.object(pa, "DIR_CAPTURAS", self.tmp / "capturas"),
             mock.patch.object(pa, "DIR_LOGS", self.tmp / "logs"),
             mock.patch.object(pa, "REGISTRO_PUBLICADOS", self.tmp / "ya_publicados.tsv"),
+            mock.patch.object(pa, "MediaFileUpload", media_falsa),
+            mock.patch.object(pa, "sondear", lambda ruta: None),
         ]
         for parche in self.parches:
             parche.start()
         self.subidas = []
+        self.youtube = ClienteDeMiniaturas()
+        self.captura = self.tmp / "capturas" / f"{pa.slug(self.carpeta.name)}.jpg"
 
     def tearDown(self):
         for parche in self.parches:
@@ -736,7 +765,7 @@ class TestSubir(unittest.TestCase):
             QuotaExceededError=QuotaExceededError,
             UploadLimitExceededError=UploadLimitExceededError,
             cargar_env=lambda: None,
-            probar_credenciales_disponibles=lambda prefix: ("yt", [], [], []),
+            probar_credenciales_disponibles=lambda prefix: (self.youtube, [], [], []),
             encontrar_video=lambda carpeta: next(carpeta.glob("*.mp4"), None),
             cargar_generos=lambda: ([], {}),
             cargar_repertorio=lambda: {},
@@ -744,8 +773,78 @@ class TestSubir(unittest.TestCase):
             subir_video=subir_video,
             authenticate_next=lambda prefix: None,
             is_invalid_grant_error=lambda exc: False,
+            is_quota_error=lambda exc: False,
             safe_delete_folder=borrar,
         )
+
+    def subir_bien(self, subir_video=None):
+        def subir_video_ok(youtube, video, titulo, descripcion, **kwargs):
+            return {"id": "abc123"}
+
+        return pa.subir(
+            self.carpeta,
+            uploader=self.uploader(subir_video or subir_video_ok),
+            sin_deathgrind=True,
+            raices=(self.raiz,),
+        )
+
+    def test_pone_de_miniatura_el_fotograma_del_medio_que_saco_verificar(self):
+        # Defecto: sin esto YouTube elige un fotograma del intro como miniatura.
+        self.captura.parent.mkdir(parents=True)
+        self.captura.write_bytes(b"fotograma del medio")
+
+        resultado = self.subir_bien()
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertTrue(resultado["miniatura"], resultado)
+        # Se lee antes de borrar el álbum, que también borra la captura.
+        self.assertEqual(
+            self.youtube.puestas,
+            [("abc123", {"bytes": b"fotograma del medio", "mimetype": "image/jpeg"})],
+        )
+        self.assertFalse(self.captura.exists())
+
+    def test_sin_la_captura_de_verificar_saca_el_fotograma_del_medio(self):
+        # Defecto: una subida a mano, sin `verificar` antes, queda con el intro de miniatura.
+        generadas = []
+
+        def generar_captura(video, duracion, destino):
+            generadas.append((Path(video).name, duracion, destino))
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            destino.write_bytes(b"nuevo")
+            return destino
+
+        with mock.patch.object(pa, "sondear", lambda ruta: {"format": {"duration": "600.0"}}), \
+                mock.patch.object(pa, "generar_captura", generar_captura):
+            resultado = self.subir_bien()
+
+        self.assertTrue(resultado["miniatura"], resultado)
+        self.assertEqual(generadas, [("Banda - Album.mp4", 600.0, self.captura)])
+        self.assertEqual(self.youtube.puestas[0][1]["bytes"], b"nuevo")
+
+    def test_si_youtube_rechaza_la_miniatura_el_video_queda_subido_igual(self):
+        # Defecto: el error se llevaba el resultado y el álbum, ya subido, se volvía a subir.
+        self.captura.parent.mkdir(parents=True)
+        self.captura.write_bytes(b"jpg")
+        self.youtube.error = HttpError(httplib2.Response({"status": 403}), b"forbidden")
+
+        resultado = self.subir_bien()
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(resultado["video_id"], "abc123")
+        self.assertTrue(resultado["carpeta_borrada"])
+        self.assertFalse(self.carpeta.exists())
+        self.assertFalse(resultado["miniatura"])
+        self.assertIn("403", resultado["miniatura_error"])
+
+    def test_sin_fotograma_no_se_pone_miniatura_y_se_avisa(self):
+        # Defecto: sin fotograma se daba la miniatura por puesta y no llegaba el aviso.
+        resultado = self.subir_bien()
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(self.youtube.puestas, [])
+        self.assertFalse(resultado["miniatura"])
+        self.assertTrue(resultado["miniatura_error"])
 
     def test_sube_privado_sin_fecha_registra_pendiente_y_borra_la_carpeta(self):
         def subir_video(youtube, video, titulo, descripcion, **kwargs):

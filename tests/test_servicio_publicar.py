@@ -291,6 +291,25 @@ class TestAprobacion(BaseServicio):
         self.assertEqual(len(self.lanzador.lanzados("verificar")), 1)
         self.assertEqual(len([m for m in self.telegram.mensajes if m["botones"]]), 1)
 
+    def test_miniatura_que_no_se_pudo_poner_se_avisa_con_el_enlace_de_studio(self):
+        _, mensaje = self.pedir_aprobacion()
+
+        self.telegram.apretar(mensaje, "✅ Subir")
+        self.servicio.paso()
+        self.lanzador.terminar(
+            "subir",
+            {
+                "ok": True, "video_id": "VID1", "titulo": "T", "carpeta_borrada": True,
+                "miniatura": False, "miniatura_error": "HttpError 403",
+            },
+        )
+        self.servicio.paso()
+
+        aviso = next(m["texto"] for m in self.telegram.mensajes if "Subido como privado" in m["texto"])
+        self.assertIn("miniatura", aviso)
+        self.assertIn("HttpError 403", aviso)
+        self.assertIn("https://studio.youtube.com/video/VID1/edit", aviso)
+
     def test_subida_que_registro_el_video_y_murio_no_pregunta_otra_vez(self):
         _, mensaje = self.pedir_aprobacion()
 
