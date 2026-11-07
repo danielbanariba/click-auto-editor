@@ -9,6 +9,7 @@ del usuario: lo que el "servidor" recibe con "Enviar" es lo que estos tests vigi
 """
 import contextlib
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -399,6 +400,26 @@ class TestImpugnar(unittest.TestCase):
 
         return pa.impugnar("V1", sin_enviar=sin_enviar, abrir_studio=abrir_studio, modulo=self.modulo)
 
+    def impugnar_con_ventana(self, studios, video_ids, espera_s=20):
+        """`studios`: {video_id: StudioFalso}; cada pedido va al de su video (por la URL o la página que lo hizo)."""
+        self.contexto = self.navegador.new_context()
+        self.addCleanup(self.contexto.close)
+
+        def atender(ruta):
+            origen = f"{ruta.request.url} {ruta.request.headers.get('referer') or ''}"
+            video = next((v for v in studios if f"/video/{v}/" in origen), video_ids[0])
+            return studios[video].atender(ruta)
+
+        self.contexto.route("https://studio.youtube.com/**", atender)
+        pagina = self.contexto.new_page()
+
+        @contextlib.contextmanager
+        def abrir_studio():
+            yield pagina
+
+        with mock.patch.object(pa, "ESPERA_VERIFICACION_VENTANA_S", espera_s):
+            return pa.impugnar_con_ventana(video_ids, abrir_studio=abrir_studio, modulo=self.modulo)
+
     def test_impugna_cada_reclamo_habilitado_y_no_toca_el_que_ya_estaba_impugnado(self):
         # Defecto: impugnar siempre el primer botón de la lista (también el ya impugnado), o
         # parar tras el primero, dejaba reclamos sin disputar o repetía una impugnación.
@@ -588,6 +609,61 @@ class TestImpugnar(unittest.TestCase):
             resultado = self.impugnar(studio)
         self.assertEqual([fallo["motivo"] for fallo in resultado["fallos"]], ["verificacion_de_identidad"])
         self.assertEqual(studio.enviados, [])
+
+    def test_con_ventana_espera_la_verificacion_y_sigue_con_los_demas_videos(self):
+        # Defecto (visto en vivo): la espera volvía apenas veía "Verifica que eres tú", a los
+        # 13 s, sin dar tiempo a pasarla. Pasada una vez, vale para el resto de la ventana.
+        uno = StudioFalso(
+            [reclamo("Canción A"), reclamo("Canción B")],
+            verificacion_tras=0,
+            verificacion_encima=True,
+            verificacion_se_pasa_ms=8000,  # después de que el módulo la vio (mira a los ~3 s)
+        )
+        dos = StudioFalso([reclamo("Canción C")], titulo="Banda - Otro (2026)")
+        resultado = self.impugnar_con_ventana({"V1": uno, "V2": dos}, ["V1", "V2"])
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(
+            [(v["video_id"], v["impugnados"], v["reclamos"]) for v in resultado["videos"]],
+            [("V1", 2, 2), ("V2", 1, 1)],
+        )
+        self.assertEqual(uno.pasos.count("verificacion"), 1)
+        self.assertEqual([e["indice"] for e in uno.enviados], [0, 1])
+        self.assertEqual([e["indice"] for e in dos.enviados], [0])
+
+    def test_con_ventana_si_no_pasa_la_verificacion_a_tiempo_no_envia_nada_y_frena(self):
+        # Defecto: sin pasarla, cada video que sigue esperaría otros 10 minutos en vano.
+        uno = StudioFalso([reclamo("Canción A")], verificacion_tras=0, verificacion_encima=True)
+        dos = StudioFalso([reclamo("Canción C")])
+        resultado = self.impugnar_con_ventana({"V1": uno, "V2": dos}, ["V1", "V2"], espera_s=3)
+        self.assertFalse(resultado["ok"])
+        self.assertEqual(resultado["motivo"], "verificacion_de_identidad")
+        self.assertEqual([f["motivo"] for f in resultado["videos"][0]["fallos"]], ["verificacion_de_identidad"])
+        self.assertEqual([v["video_id"] for v in resultado["sin_revisar"]], ["V2"])
+        self.assertEqual(uno.enviados, [])
+        self.assertEqual(dos.urls, [])
+
+    def test_con_ventana_el_navegador_se_abre_visible_y_sin_ventana_no(self):
+        # Defecto: la ventana se abría sin pantalla y nadie podía pasar la verificación; o el
+        # paso de siempre, que corre en el servicio, abría una ventana.
+        vistos = []
+
+        def abrir_contexto(playwright, user_data_dir, headless, ejecutable, perfil):
+            vistos.append(headless)
+            raise PlaywrightError("sin navegador en el test")
+
+        with (
+            mock.patch.object(pa, "preparar_perfil_studio", return_value=(str(self.tmp), None, None)),
+            mock.patch.object(pa, "abrir_contexto_studio", abrir_contexto),
+            mock.patch("playwright.sync_api.sync_playwright", lambda: contextlib.nullcontext(object())),
+            mock.patch.dict(os.environ),
+        ):
+            os.environ.pop("AGENTE_STUDIO_HEADLESS", None)
+            ventana = pa.impugnar_con_ventana(["V1"], modulo=self.modulo)
+            sin_ventana = pa.impugnar("V1", modulo=self.modulo)
+        self.assertEqual(vistos, [False, True])
+        self.assertEqual(ventana["motivo"], "error_navegador")
+        self.assertEqual(ventana["sin_revisar"], [{"video_id": "V1", "titulo": "Banda - Álbum (2026)"}])
+        self.assertEqual(sin_ventana["motivo"], "error_navegador")
 
     def test_canciones_que_dicen_confirm_e_identity_no_se_toman_por_verificacion(self):
         # Defecto: la búsqueda en toda la página juntaba "Confirmation" de una fila con

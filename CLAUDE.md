@@ -119,6 +119,7 @@ env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the alb
 env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → monetization on → public now / first free moment, or +2 years if claimed
 env/bin/python pipeline_agente.py eliminar_video --video-id ID [--retirado]  # deletes the video from YouTube (irreversible; the service only runs it from a Telegram button); --retirado skips the existence check for a video YouTube removed as a copy
 env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # disputes every claim of the video in Studio (a legal statement in the user's name); --sin-enviar fills the first form and closes it without sending
+env/bin/python pipeline_agente.py impugnar_con_ventana --video-id ID [--video-id ID]... [--sin-enviar]  # the same for several videos, in one visible Brave window that waits for the user to pass "Verifica que eres tú"
 env/bin/python pipeline_agente.py apelar [--sin-enviar] [--limite N]  # appeals age restrictions and limited ads in Hebrew (in the user's name); --sin-enviar fills one form of each kind and closes it
 env/bin/python pipeline_agente.py seguir_impugnaciones  # reads /claims of the disputed videos and reports what changed (read-only)
 env/bin/python pipeline_agente.py mapear_canal  # reads /claims of every video parked by a claim and sorts them (read-only)
@@ -276,6 +277,15 @@ report: claims disputed per video, and failures with their `/claims` link. A
 since the rest would fail the same way, and the report lists what was left. After a restart,
 the video in progress is not run again: it may have sent a dispute that Studio does not show
 yet. The report marks it as interrupted, with its `/claims` link, and the batch goes on.
+
+`impugnar_con_ventana` disputes one or several videos, one after another, in one visible
+Brave window (`pagina_de_studio(visible=True)`) on the user's desktop. Passing "Verifica que
+eres tú" in the everyday Brave does not help: the service's profile copy does not get it. When
+the dialog shows, each claim waits up to `ESPERA_VERIFICACION_VENTANA_S` (10 min) for the user
+to pass it in that window; once passed, it holds for the next claims of the same window (seen
+on 2026-11-07). A verification not passed in time, a missing session or channel, or a browser
+error stops the run (`FRENAN_LA_VENTANA`); the videos left come back in `sin_revisar`. It prints
+one JSON line with `videos`, one dispute result each.
 
 Monetization (`studio_monetizacion.py`) turns ads on at
 `/video/<id>/monetization`. After opening it, Studio navigates several times and ends

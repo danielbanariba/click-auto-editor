@@ -1244,8 +1244,11 @@ def entrar_a_studio(pagina):
 
 
 @contextlib.contextmanager
-def pagina_de_studio():
+def pagina_de_studio(visible=False):
     """Entrega una página del navegador con la sesión de Studio y lo cierra al salir.
+
+    Con `visible` abre una ventana en el escritorio, para que el usuario pase ahí lo que el
+    servicio no puede ("Verifica que eres tú").
 
     Lanza NavegadorNoDisponible (con el motivo) si no hay perfil, no abre el navegador o
     no puede entrar a Studio con el canal. Un error al cerrar no se propaga: el trabajo ya está hecho y descartaría su resultado.
@@ -1260,7 +1263,7 @@ def pagina_de_studio():
             print(f"No se pudo cerrar {que}: {exc}")
 
     user_data_dir, ejecutable, perfil = preparar_perfil_studio()
-    headless = os.environ.get("AGENTE_STUDIO_HEADLESS", "1") != "0"
+    headless = not visible and os.environ.get("AGENTE_STUDIO_HEADLESS", "1") != "0"
     driver = contextlib.ExitStack()
     try:
         playwright = driver.enter_context(sync_playwright())
@@ -1681,6 +1684,11 @@ ESPERA_CONFIRMAR_IMPUGNACION_S = 5.0
 # Studio a veces deja el formulario abierto tras "Enviar", sin error, y no registra nada: tras
 # esta pausa se vuelve a mirar /claims y, si nada cambió, ese reclamo se reintenta una sola vez.
 PAUSA_REINTENTO_IMPUGNAR_S = 30.0
+# Con ventana, cuánto espera cada reclamo a que el usuario pase "Verifica que eres tú".
+ESPERA_VERIFICACION_VENTANA_S = 10 * 60
+# Frenan `impugnar_con_ventana`: los videos que siguen fallarían igual en esa ventana (sin
+# pasar la verificación, cada uno la esperaría otros 10 minutos).
+FRENAN_LA_VENTANA = ("verificacion_de_identidad", "sin_sesion_en_studio", "canal_no_disponible", "error_navegador")
 
 
 @functools.lru_cache(maxsize=None)
@@ -1807,7 +1815,7 @@ def capturar_pagina(pagina, destino):
     return str(destino)
 
 
-def impugnar_reclamos(pagina, video_id, sin_enviar, modulo):
+def impugnar_reclamos(pagina, video_id, sin_enviar, modulo, espera_verificacion_s=0.0):
     """Impugna, de a uno, los reclamos que Studio deja impugnar; devuelve el resumen del intento.
 
     Nunca impugna más reclamos que los que había al empezar. Cada uno cuenta como hecho solo
@@ -1819,7 +1827,9 @@ def impugnar_reclamos(pagina, video_id, sin_enviar, modulo):
     tampoco sale, la lista no se puede leer, la cuenta no es la esperada) se anota
     `no_confirmado` y se frena. Cualquier otro fallo también frena: no se envió nada de ese
     reclamo y los siguientes fallarían igual (sesión, 2FA, formulario).
-    Con `sin_enviar` llena el formulario del primer reclamo y lo cierra sin enviarlo.
+    Con `sin_enviar` llena el formulario del primer reclamo y lo cierra sin enviarlo. Con
+    `espera_verificacion_s` (solo con ventana) cada reclamo espera ese tiempo a que el usuario
+    pase "Verifica que eres tú".
     """
     reclamos = contar_reclamos_impugnables(pagina, video_id, modulo)
     resumen = {"reclamos": reclamos or 0, "impugnados": 0, "fallos": []}
@@ -1838,8 +1848,8 @@ def impugnar_reclamos(pagina, video_id, sin_enviar, modulo):
     args = SimpleNamespace(
         delay=PAUSA_IMPUGNAR_S,
         espera_envio=ESPERA_ENVIO_IMPUGNAR_S,
-        # El servicio corre sin ventana: un 2FA no lo puede pasar, así que no se espera a nadie.
-        pausa_interactiva_s=0.0,
+        # Sin ventana nadie puede pasar un 2FA, así que no se espera a nadie.
+        pausa_interactiva_s=espera_verificacion_s,
     )
     try:
         filas = contar_filas_de_reclamos(pagina)
@@ -1950,10 +1960,59 @@ def impugnar(video_id, sin_enviar=False, abrir_studio=pagina_de_studio, modulo=N
             print(f"No se pudo impugnar en Studio: {detalle}")
             motivo = exc.motivo if isinstance(exc, NavegadorNoDisponible) else "error_navegador"
             return {"ok": False, "motivo": motivo, "detalle": detalle, **base}
+    return {**resultado_de_impugnar(resumen, sin_enviar), **base}
+
+
+def resultado_de_impugnar(resumen, sin_enviar):
     if resumen["reclamos"] == 0 and not resumen["fallos"]:
-        return {"ok": False, "motivo": "sin_reclamos_impugnables", **resumen, **base}
+        return {"ok": False, "motivo": "sin_reclamos_impugnables", **resumen}
     hecho = resumen["listos"] == 1 if sin_enviar else resumen["impugnados"] == resumen["reclamos"]
-    return {"ok": hecho and not resumen["fallos"], **resumen, **base}
+    return {"ok": hecho and not resumen["fallos"], **resumen}
+
+
+def impugnar_con_ventana(video_ids, sin_enviar=False, abrir_studio=None, modulo=None):
+    """Impugna en una ventana visible, uno detrás del otro, los reclamos de varios videos.
+
+    Para cuando Studio pide "Verifica que eres tú": el usuario la pasa en esa ventana y cada
+    reclamo la espera hasta ESPERA_VERIFICACION_VENTANA_S. Pasada una vez, vale para los
+    reclamos siguientes de la misma ventana (visto el 2026-11-07). Un fallo de
+    FRENAN_LA_VENTANA frena: los demás quedan en `sin_revisar`. Es una declaración legal a
+    nombre del usuario: solo la lanza el botón «Impugnar con ventana».
+    """
+    modulo = modulo or impugnador()
+    abrir_studio = abrir_studio or functools.partial(pagina_de_studio, visible=True)
+    log = ruta_log("impugnar_con_ventana")
+    base = {"ventana": True, "log": str(log)}
+    videos, pendientes = [], list(video_ids)
+
+    def quedan():
+        return [{"video_id": v, "titulo": titulo_conocido(v)} for v in pendientes]
+
+    with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
+        try:
+            with bloqueo("programar"), abrir_studio() as pagina:
+                while pendientes:
+                    video_id = pendientes[0]
+                    captura = DIR_CAPTURAS / f"impugnar_{video_id}.png"
+                    captura.parent.mkdir(parents=True, exist_ok=True)
+                    resumen = impugnar_reclamos(
+                        pagina, video_id, sin_enviar, modulo, espera_verificacion_s=ESPERA_VERIFICACION_VENTANA_S
+                    )
+                    resumen["captura"] = capturar_pagina(pagina, captura)
+                    videos.append(
+                        {"video_id": video_id, "titulo": titulo_conocido(video_id), **resultado_de_impugnar(resumen, sin_enviar)}
+                    )
+                    pendientes.pop(0)
+                    frena = next((f["motivo"] for f in resumen["fallos"] if f["motivo"] in FRENAN_LA_VENTANA), None)
+                    if frena:
+                        return {**base, "ok": False, "motivo": frena, "videos": videos, "sin_revisar": quedan()}
+        except errores_del_paso_de_studio() as exc:
+            detalle = f"{type(exc).__name__}: {exc}"[:200]
+            print(f"No se pudo impugnar en Studio: {detalle}")
+            motivo = exc.motivo if isinstance(exc, NavegadorNoDisponible) else "error_navegador"
+            return {**base, "ok": False, "motivo": motivo, "detalle": detalle, "videos": videos, "sin_revisar": quedan()}
+    ok = all(v["ok"] or v.get("motivo") == "sin_reclamos_impugnables" for v in videos)
+    return {**base, "ok": ok, "videos": videos, "sin_revisar": []}
 
 
 # ---------------------------------------------------------------------------
@@ -2625,6 +2684,18 @@ def parse_args(argv=None):
     )
 
     p = sub.add_parser(
+        "impugnar_con_ventana",
+        help="Impugna en una ventana visible los reclamos de uno o varios videos y espera a que "
+        "el usuario pase ahí «Verifica que eres tú» (declaración legal a nombre del usuario).",
+    )
+    p.add_argument("--video-id", action="append", required=True, help="Se repite, uno por video.")
+    p.add_argument(
+        "--sin-enviar",
+        action="store_true",
+        help="Llena el formulario del primer reclamo de cada video y lo cierra sin enviarlo (prueba en seco).",
+    )
+
+    p = sub.add_parser(
         "apelar",
         help="Apela en hebreo la restricción de edad y los anuncios limitados (a nombre del usuario).",
     )
@@ -2681,6 +2752,8 @@ def main(argv=None):
         return responder(eliminar_video(args.video_id, retirado=args.retirado))
     if args.comando == "impugnar":
         return responder(impugnar(args.video_id, sin_enviar=args.sin_enviar))
+    if args.comando == "impugnar_con_ventana":
+        return responder(impugnar_con_ventana(args.video_id, sin_enviar=args.sin_enviar))
     if args.comando == "apelar":
         return responder(apelar(sin_enviar=args.sin_enviar, limite=args.limite))
     if args.comando == "sembrar_publicados":

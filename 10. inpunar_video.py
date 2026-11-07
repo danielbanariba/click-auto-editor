@@ -3796,6 +3796,20 @@ def _wait_for_form_or_2fa(page, max_s=300.0):
     return "timeout"
 
 
+def _wait_for_verification_to_clear(page, max_s):
+    """Con ventana, el usuario pasa "Verifica que eres tú" a mano: espera a que el diálogo se
+    vaya y vuelva el formulario. `_wait_for_form_or_2fa` dice "2fa" mientras el diálogo siga,
+    así que no alcanza con llamarla una vez. Devuelve 'form', o '2fa'/'timeout' si no pasó."""
+    deadline = time.time() + max_s
+    estado = "timeout"
+    while time.time() < deadline:
+        estado = _wait_for_form_or_2fa(page, max_s=max(1.0, deadline - time.time()))
+        if estado != "2fa":
+            return estado
+        time.sleep(2.0)
+    return estado
+
+
 def _contar_checkboxes_via_locator(root_):
     """Cuenta total y unchecked via Playwright locator (pierces shadow DOM, usa el dialog correcto)."""
     tot = 0
@@ -4309,7 +4323,7 @@ def preparar_pestana_para_reclamo(context, video_id, claim_index, args, selector
             print("     >>> 2FA detectado en esta tab. Pasalo manualmente. <<<")
             _2FA_PASSED_THIS_SESSION = True
             tope = float(getattr(args, "pausa_interactiva_s", 600.0))
-            estado = _wait_for_form_or_2fa(page, max_s=tope)
+            estado = _wait_for_verification_to_clear(page, max_s=tope)
             if estado != "form":
                 try:
                     snippet = get_active_root(page).inner_text().strip().replace("\n", " | ")
