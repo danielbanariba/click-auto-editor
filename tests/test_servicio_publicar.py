@@ -511,6 +511,162 @@ class TestAleatorio(BaseServicio):
         self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
 
 
+class TestCrearLista(BaseServicio):
+    """/crear_lista: lo aprobado se guarda en una lista y ▶️ la renderiza y la sube entera."""
+
+    def etiquetas(self, mensaje):
+        return [etiqueta for etiqueta, _ in mensaje["botones"]]
+
+    def en_lista(self, *nombres):
+        """Prende el modo lista y suma cada álbum con ➕; no deja ninguna pregunta abierta."""
+        escribir_en(self.telegram, "/crear_lista")
+        for nombre in nombres:
+            _, pregunta = self.preguntar_antes_de_renderizar(nombre)
+            self.telegram.apretar(pregunta, "➕ A la lista")
+            self.servicio.paso()
+
+    def renderizar_y_subir(self, nombre, video_id, ok=True):
+        """Simula render, chequeos y subida del álbum de la lista que se está renderizando."""
+        carpeta = self.album_renderizado(nombre)
+        shutil.rmtree(self.cola / nombre)
+        self.lanzador.terminar("renderizar", {"ok": True, "album": nombre, "carpeta": carpeta})
+        self.servicio.paso()
+        self.lanzador.terminar("verificar", self.verificado(nombre, ok=ok))
+        self.servicio.paso()
+        if ok:
+            shutil.rmtree(carpeta)
+            self.lanzador.terminar(
+                "subir", {"ok": True, "video_id": video_id, "titulo": nombre, "carpeta_borrada": True}
+            )
+            self.servicio.paso()
+
+    def test_a_la_lista_guarda_el_album_sin_renderizar_y_pregunta_el_siguiente(self):
+        # Defecto: sin esto, aprobar un álbum lo renderiza enseguida y el teléfono suena cada vez.
+        self.en_lista("Banda A - Uno", "Banda B - Dos")
+        _, pregunta = self.preguntar_antes_de_renderizar("Banda C - Tres")
+
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [])
+        self.assertEqual(
+            self.lanzador.lanzados("buscar")[-1],
+            ["buscar", "--excluir", "Banda A - Uno", "--excluir", "Banda B - Dos"],
+        )
+        self.assertEqual(
+            self.etiquetas(pregunta),
+            ["➕ A la lista", "🗑 Eliminar (ya está publicado)", "▶️ Renderizar la lista (2)"],
+        )
+
+    def test_renderizar_la_lista_sube_todo_sin_preguntar_y_despues_vuelve_al_de_la_pantalla(self):
+        self.en_lista("Banda A - Uno", "Banda B - Dos")
+        _, pregunta = self.preguntar_antes_de_renderizar("Banda C - Tres")
+        preguntas_antes = len([m for m in self.telegram.mensajes if m["botones"]])
+
+        self.telegram.apretar(pregunta, "▶️ Renderizar la lista (2)")
+        self.servicio.paso()
+        self.servicio.paso()
+        self.renderizar_y_subir("Banda A - Uno", "VID1")
+        self.renderizar_y_subir("Banda B - Dos", "VID2")
+        self.servicio.paso()
+
+        self.assertEqual(
+            self.lanzador.lanzados("renderizar"),
+            [["renderizar", "--carpeta", "Banda A - Uno"], ["renderizar", "--carpeta", "Banda B - Dos"]],
+        )
+        self.assertEqual(len(self.lanzador.lanzados("subir")), 2)
+        con_botones = [m for m in self.telegram.mensajes if m["botones"]]
+        # Una sola pregunta después de ▶️: la del álbum que estaba en pantalla, ya sin la lista.
+        self.assertEqual(len(con_botones), preguntas_antes + 1)
+        self.assertIn("Banda C - Tres", con_botones[-1]["texto"])
+        self.assertEqual(
+            self.etiquetas(con_botones[-1]), ["✅ Renderizar y subir", "🗑 Eliminar (ya está publicado)"]
+        )
+        # Pasaron horas: la búsqueda vuelve a llegar antes de la pregunta.
+        self.assertEqual(self.telegram.mensajes[-2]["foto"], str(self.tmp / "busqueda.png"))
+
+    def test_un_chequeo_que_falla_pregunta_y_la_lista_sigue(self):
+        # Defecto: la pregunta de un chequeo fallido frenaba el resto de la lista hasta contestarla.
+        self.en_lista("Banda A - Uno", "Banda B - Dos")
+        _, pregunta = self.preguntar_antes_de_renderizar("Banda C - Tres")
+        self.telegram.apretar(pregunta, "▶️ Renderizar la lista (2)")
+        self.servicio.paso()
+        self.servicio.paso()
+
+        self.renderizar_y_subir("Banda A - Uno", "VID1", ok=False)
+        self.servicio.paso()
+
+        self.assertIn("✅ Subir", self.etiquetas(self.ultima_pregunta()))
+        self.assertEqual(
+            self.lanzador.lanzados("renderizar")[-1], ["renderizar", "--carpeta", "Banda B - Dos"]
+        )
+        self.assertEqual(len(self.lanzador.lanzados("verificar")), 1)
+        self.assertEqual(self.lanzador.lanzados("subir"), [])
+
+    def test_una_subida_que_falla_frena_el_resto_de_la_lista(self):
+        # Defecto: con el límite del canal, cada álbum restante se renderizaría y fallaría igual.
+        self.en_lista("Banda A - Uno", "Banda B - Dos")
+        _, pregunta = self.preguntar_antes_de_renderizar("Banda C - Tres")
+        self.telegram.apretar(pregunta, "▶️ Renderizar la lista (2)")
+        self.servicio.paso()
+        self.servicio.paso()
+        carpeta = self.album_renderizado("Banda A - Uno")
+        shutil.rmtree(self.cola / "Banda A - Uno")
+        self.lanzador.terminar("renderizar", {"ok": True, "album": "Banda A - Uno", "carpeta": carpeta})
+        self.servicio.paso()
+        self.lanzador.terminar("verificar", self.verificado("Banda A - Uno"))
+        self.servicio.paso()
+
+        self.lanzador.terminar("subir", {"ok": False, "motivo": "limite_canal"})
+        self.servicio.paso()
+        self.servicio.paso()
+
+        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 1)
+
+    def test_sin_mas_albumes_llega_solo_el_boton_de_renderizar(self):
+        # Defecto: sin álbumes nuevos no había pregunta con ▶️ y buscar se relanzaba en cada vuelta.
+        self.en_lista("Banda A - Uno")
+        self.servicio.paso()
+        self.lanzador.terminar("buscar", {"ok": False, "motivo": "sin_albumes", "ya_publicados": []})
+        self.servicio.paso()
+        self.servicio.paso()
+
+        final = self.ultima_pregunta()
+        self.assertEqual(self.etiquetas(final), ["▶️ Renderizar la lista (1)"])
+        self.assertEqual(len(self.lanzador.lanzados("buscar")), 2)
+        self.telegram.apretar(final, "▶️ Renderizar la lista (1)")
+        self.servicio.paso()
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [["renderizar", "--carpeta", "Banda A - Uno"]])
+
+    def test_crear_lista_otra_vez_no_borra_la_lista_y_dice_cuantos_hay(self):
+        # Defecto: si funcionara como /aleatorio, volver a escribirlo tiraría lo ya elegido.
+        self.en_lista("Banda A - Uno")
+        self.preguntar_antes_de_renderizar("Banda C - Tres")
+        escribir_en(self.telegram, "/crear-lista")
+        self.servicio.paso()
+
+        self.assertIn("1 álbum", [m for m in self.telegram.mensajes if not m["botones"]][-1]["texto"])
+        self.assertIn("▶️ Renderizar la lista (1)", self.etiquetas(self.ultima_pregunta()))
+
+    def test_la_pregunta_abierta_al_prender_el_modo_vuelve_con_los_botones_de_la_lista(self):
+        # Defecto: la pregunta vieja seguía con "Renderizar y subir" y renderizaba al tocarla.
+        _, vieja = self.preguntar_antes_de_renderizar("Banda A - Uno")
+        escribir_en(self.telegram, "/crear_lista")
+        self.servicio.paso()
+
+        self.assertIn(self.telegram.mensajes.index(vieja) + 1, self.telegram.sin_botones)
+        nueva = self.ultima_pregunta()
+        self.assertIn("Banda A - Uno", nueva["texto"])
+        self.assertEqual(self.etiquetas(nueva)[0], "➕ A la lista")
+
+    def test_la_lista_y_el_modo_sobreviven_un_reinicio(self):
+        self.en_lista("Banda A - Uno")
+        self.servicio = self.nuevo_servicio()
+        self.album_en_cola("Banda C - Tres")
+        _, pregunta = self.preguntar_antes_de_renderizar("Banda C - Tres")
+
+        self.assertIn(["buscar", "--excluir", "Banda A - Uno"], self.lanzador.lanzados("buscar"))
+        self.assertEqual(self.etiquetas(pregunta)[0], "➕ A la lista")
+
+
 class TestReclamos(BaseServicio):
     def test_programado_manda_el_resumen(self):
         carpeta, mensaje = self.pedir_aprobacion()

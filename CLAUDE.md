@@ -58,7 +58,18 @@ or picked from the bot's command menu (registered with `setMyCommands` at start)
 toggles random choice and answers "🔀 Aleatorio activado" or "Aleatorio
 desactivado"; while it is on, `buscar --aleatorio` picks at random among the three
 source folders, still moving registered albums aside. It starts off and the
-setting (`aleatorio`) survives restarts. Messages from anyone else, or any other
+setting (`aleatorio`) survives restarts. `/crear_lista` (the menu does not take
+hyphens; typing `/crear-lista` also works) turns list mode on: each question then shows
+"➕ A la lista", "🗑 Eliminar (ya está publicado)" and "▶️ Renderizar la lista (N)".
+➕ saves the album in `lista` without rendering it and the next question comes right away
+(`buscar --excluir` skips the albums on the list). ▶️ moves the list into `aceptados`, so
+they are rendered, checked and uploaded one after another with no question, and turns list
+mode off. The album on screen does not join the list: it is asked again, as a normal
+question, when the list ends (`despues_de_lista`). A failed check of a list album asks as
+usual and the rest of the list goes on; a failed upload or a Reintentar render stops it.
+With no albums left to add, one message comes with only ▶️. Writing `/crear_lista` again
+only says how many albums the list holds, and a "Renderizar y subir" question that was
+open comes back with the list buttons. Messages from anyone else, or any other
 text, are ignored. Right after the upload, `subir` sets the custom thumbnail
 (`thumbnails.set`, 50 quota units) to the frame from the middle of the video that `verificar`
 saved (it takes it again if it is missing); otherwise YouTube picks a frame of the intro. A
@@ -100,7 +111,7 @@ Each step is a `pipeline_agente.py` subcommand that prints one JSON line;
 logs, screenshots and state go to `data/agente/` (gitignored).
 
 ```bash
-env/bin/python pipeline_agente.py buscar [--aleatorio]   # next album (or a random one) (cola, Album/, EP/) without rendering: its folder, cover and YouTube search screenshot; already published ones → Ya publicados/
+env/bin/python pipeline_agente.py buscar [--aleatorio] [--excluir NAME]...  # next album (or a random one) (cola, Album/, EP/), skipping the excluded ones, without rendering: its folder, cover and YouTube search screenshot; already published ones → Ya publicados/
 env/bin/python pipeline_agente.py renderizar             # next album (cola, Album/, EP/) → Renderizando/; already published ones → Ya publicados/
 env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/4K checks, screenshot + YouTube search screenshot
 env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, mid-video frame as thumbnail, then deletes the album folder
