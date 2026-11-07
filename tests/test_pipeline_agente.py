@@ -604,8 +604,9 @@ class TestPreguntarAntesDeRenderizar(unittest.TestCase):
         salida = io.StringIO()
         with mock.patch.object(pa, "buscar", return_value={"ok": True}) as buscar, \
                 contextlib.redirect_stdout(salida):
-            codigo = pa.main(["buscar", "--aleatorio", "--excluir", "A", "--excluir", "B"])
-        buscar.assert_called_once_with(aleatorio=True, excluir=["A", "B"])
+            # Como lo manda el servicio: con "=", para un nombre que empieza con guion.
+            codigo = pa.main(["buscar", "--aleatorio", "--excluir=-Ruido - Disco", "--excluir=B"])
+        buscar.assert_called_once_with(aleatorio=True, excluir=["-Ruido - Disco", "B"])
         self.assertEqual(codigo, 0)
 
     def test_buscar_sin_albumes_no_captura_nada(self):

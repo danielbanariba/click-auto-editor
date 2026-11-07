@@ -484,13 +484,16 @@ class Servicio:
             # Ya no está: el render lo movió a Error404 o alguien lo sacó de la carpeta.
             self.estado["aceptados"].remove(nombre)
             self.guardar()
+        # La lista terminó: lo nuevo espera a que se conteste la pregunta que quedó abierta.
+        if abiertas:
+            return
         if self.preguntar_despues_de_lista():
             return
         if pa.siguiente_album() is not None:
             self.avisos.discard("sin_albumes")
             argumentos = ["--aleatorio"] if self.estado["aleatorio"] else []
-            for nombre in self.estado["lista"]:
-                argumentos += ["--excluir", nombre]
+            # Con "=": un nombre que empieza con "-" no se lee como otra opción.
+            argumentos += [f"--excluir={nombre}" for nombre in self.estado["lista"]]
             self.lanzar_paso("buscar", *argumentos)
         else:
             self.avisar_una_vez(

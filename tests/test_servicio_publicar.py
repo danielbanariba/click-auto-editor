@@ -548,7 +548,7 @@ class TestCrearLista(BaseServicio):
         self.assertEqual(self.lanzador.lanzados("renderizar"), [])
         self.assertEqual(
             self.lanzador.lanzados("buscar")[-1],
-            ["buscar", "--excluir", "Banda A - Uno", "--excluir", "Banda B - Dos"],
+            ["buscar", "--excluir=Banda A - Uno", "--excluir=Banda B - Dos"],
         )
         self.assertEqual(
             self.etiquetas(pregunta),
@@ -599,6 +599,30 @@ class TestCrearLista(BaseServicio):
         )
         self.assertEqual(len(self.lanzador.lanzados("verificar")), 1)
         self.assertEqual(self.lanzador.lanzados("subir"), [])
+
+    def test_al_terminar_la_lista_la_pregunta_del_chequeo_fallido_frena_lo_nuevo(self):
+        # Defecto: con un aceptado ya movido a Error404, se preguntaba por el álbum siguiente
+        # mientras la pregunta del chequeo fallido seguía abierta.
+        self.en_lista("Banda A - Uno", "Banda B - Dos")
+        _, pregunta = self.preguntar_antes_de_renderizar("Banda C - Tres")
+        self.telegram.apretar(pregunta, "▶️ Renderizar la lista (2)")
+        self.servicio.paso()
+        self.servicio.paso()
+        self.renderizar_y_subir("Banda A - Uno", "VID1", ok=False)
+        fallida = self.ultima_pregunta()
+        shutil.rmtree(self.cola / "Banda B - Dos")
+        self.lanzador.terminar(
+            "renderizar",
+            {"ok": False, "motivo": "render_fallido", "album": "Banda B - Dos", "movido_a_error404": True},
+        )
+        self.servicio.paso()
+        self.servicio.paso()
+
+        self.assertIs(self.ultima_pregunta(), fallida)
+        self.telegram.apretar(fallida, "❌ Rechazar")
+        self.servicio.paso()
+        self.servicio.paso()
+        self.assertIn("Banda C - Tres", self.ultima_pregunta()["texto"])
 
     def test_una_subida_que_falla_frena_el_resto_de_la_lista(self):
         # Defecto: con el límite del canal, cada álbum restante se renderizaría y fallaría igual.
@@ -663,7 +687,7 @@ class TestCrearLista(BaseServicio):
         self.album_en_cola("Banda C - Tres")
         _, pregunta = self.preguntar_antes_de_renderizar("Banda C - Tres")
 
-        self.assertIn(["buscar", "--excluir", "Banda A - Uno"], self.lanzador.lanzados("buscar"))
+        self.assertIn(["buscar", "--excluir=Banda A - Uno"], self.lanzador.lanzados("buscar"))
         self.assertEqual(self.etiquetas(pregunta)[0], "➕ A la lista")
 
 
