@@ -2057,9 +2057,12 @@ def guardar_impugnaciones(registro):
 
 
 def impugnados_por_el_servicio():
-    """Los videos con algún reclamo impugnado, según el JSON final de cada `servicio_impugnar_*.out`."""
+    """Los videos con algún reclamo impugnado, según el JSON final de cada `servicio_impugnar_*.out`
+    (un video) o `servicio_impugnar_con_ventana_*.out` (varios, en `videos`)."""
     videos = {}
-    for salida in sorted(DIR_LOGS.glob("servicio_impugnar_[0-9]*.out")):
+    salidas = sorted(DIR_LOGS.glob("servicio_impugnar_[0-9]*.out"))
+    salidas += sorted(DIR_LOGS.glob("servicio_impugnar_con_ventana_*.out"))
+    for salida in salidas:
         lineas = salida.read_text(encoding="utf-8", errors="replace").splitlines()
         for linea in reversed(lineas):
             if not linea.startswith("{"):
@@ -2068,8 +2071,9 @@ def impugnados_por_el_servicio():
                 resultado = json.loads(linea)
             except json.JSONDecodeError:
                 continue
-            if resultado.get("impugnados") and resultado.get("video_id"):
-                videos[resultado["video_id"]] = resultado.get("titulo") or resultado["video_id"]
+            for video in resultado.get("videos") or [resultado]:
+                if video.get("impugnados") and video.get("video_id"):
+                    videos[video["video_id"]] = video.get("titulo") or video["video_id"]
             break
     return videos
 

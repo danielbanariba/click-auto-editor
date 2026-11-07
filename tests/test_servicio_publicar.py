@@ -1108,6 +1108,24 @@ class TestImpugnarDesdeTelegram(BaseServicio):
         self.assertIn("Impugné 0 de 2", aviso["texto"])
         self.assertIn("no sé si salió", aviso["texto"])
         self.assertIn(self.ENLACE, aviso["texto"])
+        self.assertFalse(aviso["botones"])  # solo la verificación ofrece la ventana
+
+    def test_una_verificacion_de_identidad_ofrece_impugnar_con_ventana(self):
+        # Defecto: el aviso decía que el servicio no puede pasar la verificación y el video
+        # quedaba sin impugnar, sin forma de terminarlo desde Telegram.
+        aviso = self.terminar_impugnar(
+            {"ok": False, "reclamos": 3, "impugnados": 0,
+             "fallos": [{"motivo": "verificacion_de_identidad", "detalle": "2fa_no_completado (timeout)"}]}
+        )
+        self.assertEqual([etiqueta for etiqueta, _ in aviso["botones"]], ["🖥 Impugnar con ventana"])
+        self.assertIn("Verifica que eres tú", aviso["texto"])
+        self.assertIn(self.ENLACE, aviso["texto"])
+        self.assertEqual(self.lanzador.lanzados("impugnar_con_ventana"), [])
+        self.telegram.apretar(aviso, "🖥 Impugnar con ventana")
+        self.servicio.paso()
+        self.assertEqual(
+            self.lanzador.lanzados("impugnar_con_ventana"), [["impugnar_con_ventana", "--video-id", "VID1"]]
+        )
 
     def test_sin_reclamos_impugnables_dice_que_no_habia_nada_que_impugnar(self):
         # Defecto: reportar un fallo (o «Impugné 0 de 0») cuando simplemente no había nada.
@@ -1929,6 +1947,60 @@ class TestConexiones(unittest.TestCase):
         self.assertIn("por_aprobar", resultado)
 
 
+class TestImpugnarConVentana(BaseServicio):
+    """La ventana impugna varios videos con una sola verificación y avisa una vez."""
+
+    def terminar_ventana(self, resultado, videos=("V1", "V2")):
+        argumentos = ["impugnar_con_ventana"]
+        for video in videos:
+            argumentos += ["--video-id", video]
+        self.servicio.lanzar_paso(*argumentos)
+        self.antes = len(self.telegram.mensajes)
+        self.lanzador.terminar("impugnar_con_ventana", {"ventana": True, **resultado})
+        self.servicio.paso()
+        return [m for m in self.telegram.mensajes[self.antes:] if "ventana" in m["texto"]]
+
+    def test_avisa_una_vez_lo_que_impugno_y_lo_que_fallo(self):
+        # Defecto: un aviso por video, o callar el fallo y el link para terminarlo a mano.
+        (aviso,) = self.terminar_ventana({"ok": False, "sin_revisar": [], "videos": [
+            {"ok": True, "video_id": "V1", "titulo": "Banda - V1", "reclamos": 2, "impugnados": 2, "fallos": []},
+            {"ok": False, "video_id": "V2", "titulo": "Banda - V2", "reclamos": 1, "impugnados": 0,
+             "fallos": [{"motivo": "no_confirmado", "detalle": "x"}]},
+        ]})
+        self.assertIn("\"Banda - V1\": 2 de 2", aviso["texto"])
+        self.assertIn("\"Banda - V2\": 0 de 1", aviso["texto"])
+        self.assertIn(sp.MOTIVOS_IMPUGNACION["no_confirmado"], aviso["texto"])
+        self.assertIn("https://studio.youtube.com/video/V2/claims", aviso["texto"])
+        self.assertFalse(aviso["botones"])
+
+    def test_si_no_paso_la_verificacion_a_tiempo_ofrece_la_ventana_otra_vez(self):
+        # Defecto: lo que quedó sin impugnar se perdía, o se relanzaba solo sin nadie en la PC.
+        (pregunta,) = self.terminar_ventana({
+            "ok": False, "motivo": "verificacion_de_identidad",
+            "videos": [{"ok": False, "video_id": "V1", "titulo": "Banda - V1", "reclamos": 1, "impugnados": 0,
+                        "fallos": [{"motivo": "verificacion_de_identidad"}]}],
+            "sin_revisar": [{"video_id": "V2", "titulo": "Banda - V2"}],
+        })
+        self.assertEqual([e for e, _ in pregunta["botones"]], ["🖥 Impugnar con ventana"])
+        self.assertIn("Banda - V2", pregunta["texto"])
+        self.assertEqual(len(self.lanzador.lanzados("impugnar_con_ventana")), 1)
+        self.telegram.apretar(pregunta, "🖥 Impugnar con ventana")
+        self.servicio.paso()
+        self.assertEqual(
+            self.lanzador.lanzados("impugnar_con_ventana")[-1],
+            ["impugnar_con_ventana", "--video-id", "V1", "--video-id", "V2"],
+        )
+
+    def test_una_ventana_que_termina_sin_responder_manda_a_studio_y_no_se_ofrece_de_nuevo(self):
+        # Defecto: ofrecer otra ventana cuando la primera pudo haber impugnado algo, y
+        # mandarlo dos veces.
+        (aviso,) = self.terminar_ventana({"ok": False, "motivo": "sin_respuesta", "codigo": -9, "log": "/x.out"})
+        self.assertIn("https://studio.youtube.com/video/V1/claims", aviso["texto"])
+        self.assertIn("https://studio.youtube.com/video/V2/claims", aviso["texto"])
+        self.assertFalse(aviso["botones"])
+        self.assertNotIn("impugnar_ventana", [p["tipo"] for p in self.servicio.estado["preguntas"].values()])
+
+
 class TestMapearCanal(BaseServicio):
     """/mapear_canal relee los videos aparcados por un reclamo y junta en un mensaje lo que falta
     impugnar. Impugnar es una declaración legal: nada sale sin apretar «Impugnar todos»."""
@@ -2067,6 +2139,26 @@ class TestMapearCanal(BaseServicio):
         self.assertEqual(len(self.lanzador.lanzados("impugnar")), 1)
         self.assertIn(sp.MOTIVOS_IMPUGNACION["sin_sesion_en_studio"], self.telegram.mensajes[-1]["texto"])
         self.assertIn("Banda - V2", self.telegram.mensajes[-1]["texto"])
+        self.assertFalse(self.telegram.mensajes[-1]["botones"])  # una ventana no arregla la sesión
+
+    def test_el_lote_frenado_por_la_verificacion_ofrece_la_ventana_para_lo_que_quedo(self):
+        # Defecto: el lote frenado solo decía que corriera /mapear_canal de nuevo, que chocaría
+        # con la misma verificación.
+        self.impugnar_todos()
+        self.lanzador.terminar("impugnar", {
+            "ok": False, "video_id": "V1", "titulo": "Banda - V1", "reclamos": 1, "impugnados": 0,
+            "fallos": [{"motivo": "verificacion_de_identidad"}],
+        })
+        self.servicio.paso()
+        pregunta = self.ultima_pregunta()
+        self.assertEqual(self.etiquetas(pregunta), ["🖥 Impugnar con ventana"])
+        self.assertIn("Banda - V2", pregunta["texto"])
+        self.telegram.apretar(pregunta, "🖥 Impugnar con ventana")
+        self.servicio.paso()
+        self.assertEqual(
+            self.lanzador.lanzados("impugnar_con_ventana"),
+            [["impugnar_con_ventana", "--video-id", "V1", "--video-id", "V2"]],
+        )
 
     def test_un_liberado_que_ya_se_esta_programando_no_se_programa_dos_veces(self):
         # Defecto: dos /mapear_canal seguidos lanzaban dos `programar` del mismo video.

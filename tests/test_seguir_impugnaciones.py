@@ -159,6 +159,19 @@ class TestSeguirImpugnaciones(unittest.TestCase):
         self.assertNotIn("V2", studio.abiertos)
         self.assertEqual(studio.pulsados, [])
 
+    def test_tambien_sigue_lo_que_se_impugno_con_ventana(self):
+        # Defecto: la corrida con ventana deja otro log (`servicio_impugnar_con_ventana_*`, con
+        # varios videos) y su impugnación nunca se seguía.
+        resultado = {"ok": False, "ventana": True, "sin_revisar": [], "videos": [
+            {"ok": True, "video_id": "V1", "titulo": "Banda - Uno", "reclamos": 1, "impugnados": 1, "fallos": []},
+            {"ok": False, "video_id": "V2", "titulo": "Banda - Dos", "reclamos": 1, "impugnados": 0, "fallos": []},
+        ]}
+        salida = self.logs / "servicio_impugnar_con_ventana_20261107-010000_abc123.out"
+        salida.write_text(json.dumps(resultado, ensure_ascii=False) + "\n", encoding="utf-8")
+        studio = StudioFalso({"V1": [("Canción A", "Artista", EN_REVISION.format(dias=29))]})
+        self.seguir(studio)
+        self.assertEqual(studio.abiertos, ["V1"])
+
     def test_un_reclamo_que_desaparece_se_avisa_y_el_video_sin_pendientes_deja_de_seguirse(self):
         # Defecto: un reclamo retirado (ya no está en la lista) no se avisaba, o el video se
         # seguía abriendo todos los días aunque no le quedara nada pendiente.

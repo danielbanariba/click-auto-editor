@@ -198,6 +198,14 @@ link; "🗑️ Eliminar video" runs `pipeline_agente.py eliminar_video`, as in t
 blacklist question. Nothing is disputed or deleted without that press, and a
 blacklisted video keeps only the delete question.
 
+When a dispute fails with `verificacion_de_identidad`, the notice carries "🖥 Impugnar con
+ventana" and how to use it (be at the PC, pass the verification in the window, touch nothing
+else). The press runs `impugnar_con_ventana` for that video, and the service reports the
+result in one message. If the verification was not passed in time, the report offers the window
+again for what was left. A window run that ends with no result (`sin_respuesta`) may have
+sent something, so the notice lists the `/claims` links to check and offers nothing.
+`seguir_impugnaciones` also reads the `servicio_impugnar_con_ventana_*.out` logs.
+
 Disputing (`impugnar`) reuses the recipe of `10. inpunar_video.py`: for each claim
 whose "Tomar medidas" is visible and enabled it opens the form, picks "Licencia",
 ticks the permission and the three declarations, fills `mensaje` and `firma`, and
@@ -274,7 +282,9 @@ Nothing is disputed without that press. The press stores the batch in `lote_impu
 adds to the running batch the videos that are not in it yet. At the end the service sends one
 report: claims disputed per video, and failures with their `/claims` link. A
 `verificacion_de_identidad`, `sin_sesion_en_studio` or `canal_no_disponible` stops the batch,
-since the rest would fail the same way, and the report lists what was left. After a restart,
+since the rest would fail the same way, and the report lists what was left. When it was
+the verification, the report carries "🖥 Impugnar con ventana" for the video that asked and
+the ones left: one window, one verification. After a restart,
 the video in progress is not run again: it may have sent a dispute that Studio does not show
 yet. The report marks it as interrupted, with its `/claims` link, and the batch goes on.
 
