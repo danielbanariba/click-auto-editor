@@ -386,7 +386,6 @@ def deathgrind_smoke_test(session, generos):
         return False
 
     first_post = posts[0]
-    post_id = first_post.get("postId")
     band_id = None
     bands = first_post.get("bands") or []
     if bands and isinstance(bands[0], dict):
@@ -402,19 +401,8 @@ def deathgrind_smoke_test(session, generos):
     else:
         print("Prueba DeathGrind: no se encontro bandId en el primer post.")
 
-    if post_id:
-        links_data = api_get(session, f"/posts/{post_id}/links")
-        if links_data is None:
-            # Sin créditos de descarga DeathGrind niega los links (403), pero géneros,
-            # país y sello siguen llegando: no se apaga la API por eso.
-            print(f"Prueba DeathGrind /posts/{post_id}/links fallo; se sigue sin links.")
-        else:
-            links = links_data.get("links") if isinstance(links_data, dict) else links_data
-            links = links or []
-            print(f"Prueba DeathGrind links: {len(links)}")
-    else:
-        print("Prueba DeathGrind: no se encontro postId en el primer post.")
-
+    # No se piden los links del post (/posts/<id>/links): son los de descarga, gastan los
+    # créditos de la cuenta que necesita el scraper y la prueba no los usaba.
     return True
 
 
@@ -1422,15 +1410,6 @@ def merge_links(base, new_links):
             if key not in base[category]:
                 base[category][key] = value
     return base
-
-
-def extraer_links_deathgrind(session, post_id):
-    if DEATHGRIND_DISABLED:
-        return {"stream": {}, "follow": {}}
-    if not session or not post_id:
-        return {"stream": {}, "follow": {}}
-    data = api_get(session, f"/posts/{post_id}/links")
-    return extraer_links_desde_data(data)
 
 
 def first_value(values):
@@ -3087,11 +3066,9 @@ def procesar_carpeta(
 
     links = {"stream": {}, "follow": {}}
     if session and post_id:
-        links = extraer_links_deathgrind(session, post_id)
-        tiene_links = any(links["stream"].values()) or any(links["follow"].values())
-        if not tiene_links:
-            html_links = extraer_links_post_html(session, post_id)
-            links = merge_links(links, html_links)
+        # Sin /posts/<id>/links: son links de descarga (Mega, Mediafire...), gastan créditos
+        # de DeathGrind y casi nunca traen uno de escucha. Esos salen de la banda.
+        links = extraer_links_post_html(session, post_id)
 
     tiene_links = any(links["stream"].values()) or any(links["follow"].values())
     if session and band_id:

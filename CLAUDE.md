@@ -394,7 +394,10 @@ For each album folder in `DIR_AUDIO_SCRIPTS`:
 ### Upload pipeline (`3. subir_video_API.py`, ~109 KB)
 
 - Authenticates via `subir_video/authenticate.py` (rotates through multiple credential sets in `credentials/`)
-- Builds rich video descriptions with streaming links (Bandcamp, Spotify, etc.) and social links
+- Builds rich video descriptions with streaming links (Bandcamp, Spotify, etc.) and social links,
+  taken from the band's DeathGrind data. It never asks `/posts/<id>/links`: those are download
+  links (Mega, Mediafire...), and each request may spend the account's download credits, which
+  the scraper needs
 - Schedules uploads in batches at configurable time slots
 - Creates/manages playlists per band and genre
 - Handles quota exceeded errors by rotating credentials
