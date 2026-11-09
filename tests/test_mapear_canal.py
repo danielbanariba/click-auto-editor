@@ -247,6 +247,25 @@ class TestMapearCanal(unittest.TestCase):
         self.assertEqual(primera["motivo"], "error_navegador")
         self.assertEqual([v["video_id"] for v in segunda["sin_impugnar"]], ["V2"])
 
+    def test_si_no_abre_el_navegador_no_marca_como_mirado_al_primer_video(self):
+        # Defecto: el except sellaba el primer pendiente aunque nada se hubiera leído; la corrida
+        # siguiente empezaba por el segundo y el primero quedaba al final sin haberse mirado.
+        canal = CanalFalso([[("V1", "private", en(730), "Banda - Uno"), ("V2", "private", en(730), "Banda - Dos")]])
+
+        @contextlib.contextmanager
+        def sin_navegador():
+            raise pa.NavegadorNoDisponible("sin_sesion_en_studio")
+            yield  # pragma: no cover
+
+        fallida = pa.mapear_canal(
+            uploader=uploader_del_canal(canal), abrir_studio=sin_navegador, leer_reclamantes=self.leer_reclamantes
+        )
+        self.assertEqual(fallida["motivo"], "sin_sesion_en_studio")
+        self.assertFalse(pa.MAPEO_JSON.exists())
+        studio = StudioDelCanal({v: [("Canción", "Artista", EN_REVISION.format(dias=9), False)] for v in ("V1", "V2")})
+        self.mapear(studio, canal)
+        self.assertEqual(studio.abiertos, ["V1", "V2"])
+
     def test_una_pagina_que_no_se_lee_no_libera_el_video(self):
         # Defecto: una página de error tomada por "sin reclamos" publicaría un video con reclamo.
         canal = CanalFalso([[("V1", "private", en(730), "Banda - Uno")]])

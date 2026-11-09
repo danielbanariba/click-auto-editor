@@ -7,9 +7,11 @@ y "Tomar medidas". El seguimiento solo lee: cualquier botón pulsado llega al "s
 """
 import contextlib
 import json
+import os
 import re
 import shutil
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -125,10 +127,13 @@ class TestSeguirImpugnaciones(unittest.TestCase):
                      "impugnados": impugnados, "fallos": []}
         salida.write_text("Lanzo impugnar\n" + json.dumps(resultado, ensure_ascii=False) + "\n", encoding="utf-8")
 
-    def seguir(self, studio):
+    def seguir(self, studio, abortar=()):
+        """Una corrida de `seguir_impugnaciones`; la /claims de los videos de `abortar` no carga."""
         contexto = self.navegador.new_context()
         self.addCleanup(contexto.close)
         contexto.route("https://studio.youtube.com/**", studio.atender)
+        for video_id in abortar:
+            contexto.route(f"https://studio.youtube.com/**/{video_id}/claims", lambda ruta: ruta.abort())
         pagina = contexto.new_page()
 
         @contextlib.contextmanager
@@ -259,6 +264,71 @@ class TestSeguirImpugnaciones(unittest.TestCase):
                          [("V1", "lista_de_reclamos_no_disponible")])
         self.assertEqual(tercero["cambios"], [])
 
+    def test_un_video_terminado_vuelve_a_seguirse_si_despues_se_impugna_otro_de_sus_reclamos(self):
+        # Defecto: `terminado` no se revisaba nunca más: un reclamo impugnado después de cerrar el
+        # video quedaba sin seguir y su resultado (liberado o rechazado) no llegaba.
+        self.impugnado("V1", 1, "Banda - Uno")
+        studio = StudioFalso({"V1": [("Canción A", "Artista", RECHAZADA)]})
+        self.seguir(studio)
+        self.assertTrue(json.loads(self.registro.read_text(encoding="utf-8"))["V1"]["terminado"])
+        self.impugnado("V1", 1, "Banda - Uno")
+        # El log nuevo se escribió después de la lectura (impugnar tarda minutos).
+        nuevo = max(self.logs.iterdir(), key=lambda archivo: archivo.name)
+        os.utime(nuevo, (time.time() + 3600, time.time() + 3600))
+        studio.reclamos["V1"] = [("Canción A", "Artista", RECHAZADA),
+                                 ("Canción B", "Artista", EN_REVISION.format(dias=29))]
+        segunda = self.seguir(studio)
+        self.assertEqual(studio.abiertos, ["V1", "V1"])
+        self.assertEqual(segunda["rechazados"], [])  # el reclamo nuevo sigue en revisión
+        self.assertFalse(json.loads(self.registro.read_text(encoding="utf-8"))["V1"]["terminado"])
+
+    def test_un_video_cuya_lectura_aborta_no_frena_el_seguimiento_de_los_demas(self):
+        # Defecto: el video que aborta la corrida no actualizaba `revisado`: al día siguiente
+        # volvía a ser el primero, abortaba otra vez y los demás nunca se seguían.
+        self.impugnado("V1", 1, "Banda - Uno")
+        self.impugnado("V2", 1, "Banda - Dos")
+        studio = StudioFalso({v: [("Canción A", "Artista", EN_REVISION.format(dias=29))] for v in ("V1", "V2")})
+        primera = self.seguir(studio, abortar=["V1"])
+        segunda = self.seguir(studio, abortar=["V1"])
+        self.assertEqual(primera["motivo"], "error_navegador")
+        self.assertEqual(studio.abiertos, ["V2"])  # la segunda corrida llegó a V2
+        self.assertEqual(segunda["motivo"], "error_navegador")
+
+    def test_un_video_cuya_lista_no_se_lee_actualiza_su_revisado_y_pasa_al_final(self):
+        # Defecto: una lectura sin resultado no actualizaba `revisado`: el video ilegible seguía
+        # primero cada día y gastaba el tiempo de la corrida antes que los demás.
+        antes = "2026-11-02T00:00:00"
+        self.registro.parent.mkdir(parents=True)
+        self.registro.write_text(json.dumps({"V1": {"titulo": "Banda - Uno", "revisado": antes}}), encoding="utf-8")
+        studio = StudioFalso({})
+        studio.con_error.add("V1")
+        resultado = self.seguir(studio)
+        self.assertEqual([f["video_id"] for f in resultado["fallos"]], ["V1"])
+        guardado = json.loads(self.registro.read_text(encoding="utf-8"))["V1"]
+        self.assertGreater(guardado["revisado"], antes)
+        self.assertFalse(guardado.get("terminado"))
+
+    def test_si_falla_la_captura_del_rechazado_el_video_no_queda_terminado_y_la_pregunta_llega_despues(self):
+        # Defecto: el video se guardaba como terminado antes de la captura; si ésta lanzaba un
+        # error que no es de Playwright, la corrida se caía con el video ya cerrado y su pregunta
+        # de Eliminar no llegaba nunca.
+        self.impugnado("V1", 1, "Banda - Uno")
+        studio = StudioFalso({"V1": [("Canción A", "Artista", EN_REVISION.format(dias=29))]})
+        self.seguir(studio)
+        studio.reclamos["V1"] = [("Canción A", "Artista", RECHAZADA)]
+        with mock.patch.object(pa, "capturar_pagina", side_effect=OSError("disco lleno")):
+            fallida = self.seguir(studio)
+        self.assertFalse(fallida["ok"])
+        self.assertEqual(fallida["rechazados"], [])
+        self.assertFalse(json.loads(self.registro.read_text(encoding="utf-8"))["V1"].get("terminado"))
+        sana = self.seguir(studio)
+        (rechazado,) = sana["rechazados"]
+        self.assertEqual(rechazado["video_id"], "V1")
+        self.assertTrue(Path(rechazado["captura"]).is_file())
+        # El cambio de estado salió una sola vez: no se avisó con la corrida que se cayó.
+        self.assertEqual([c["ahora"] for c in sana["cambios"]], [RECHAZADA])
+        self.assertEqual(fallida["cambios"], [])
+
     def seguir_con_la_lista_a_medio_dibujar(self, filas_al_principio):
         self.impugnado("V1", 2, "Banda - Uno")
         dos = [("Canción A", "Artista", EN_REVISION.format(dias=29)),
@@ -284,6 +354,19 @@ class TestSeguirImpugnaciones(unittest.TestCase):
         self.assertEqual((resultado["cambios"], resultado["fallos"]), ([], []))
         self.assertEqual(sorted(guardado["reclamos"]), ["Canción A — Artista", "Canción B — Artista"])
         self.assertFalse(guardado["terminado"])
+
+
+class TestCompararReclamos(unittest.TestCase):
+    def test_pasar_de_dias_a_un_dia_no_es_un_cambio_pero_un_estado_distinto_si(self):
+        # Defecto: "Caduca dentro de 1 día" contra "N días" contaba como cambio de estado y daba
+        # un aviso de más al final del plazo.
+        antes = {"Canción A": EN_REVISION.format(dias=2), "Canción B": EN_REVISION.format(dias=2)}
+        reclamos = [
+            {"reclamo": "Canción A", "estado": "Impugnación en proceso de revisión. Caduca dentro de 1 día."},
+            {"reclamo": "Canción B", "estado": RECHAZADA},
+        ]
+        _, cambios = pa.comparar_reclamos(antes, reclamos)
+        self.assertEqual([(c["reclamo"], c["ahora"]) for c in cambios], [("Canción B", RECHAZADA)])
 
 
 if __name__ == "__main__":

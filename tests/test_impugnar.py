@@ -605,7 +605,9 @@ class TestImpugnar(unittest.TestCase):
         studio = StudioFalso(
             [reclamo("Canción A")], verificacion_tras=0, verificacion_encima=True, verificacion_demora_ms=4000
         )
-        with mock.patch.object(self.modulo, "VERIFY_DIALOG_DELAY_S", 3.0):
+        # La espera vuelve apenas ve el diálogo: 8 s da margen a una máquina cargada sin alargar
+        # la prueba (el diálogo sale a los 4 s).
+        with mock.patch.object(self.modulo, "VERIFY_DIALOG_DELAY_S", 8.0):
             resultado = self.impugnar(studio)
         self.assertEqual([fallo["motivo"] for fallo in resultado["fallos"]], ["verificacion_de_identidad"])
         self.assertEqual(studio.enviados, [])

@@ -1421,9 +1421,20 @@ class TestProgramar(unittest.TestCase):
             },
         )
         self.assertEqual(bloqueado, [True])
+        self.assertIs(resultado["album_registrado"], True)
         self.assertEqual(pa.leer_pendientes(), [])
         filas = pa.registro_publicados.leer(registro).filas
         self.assertEqual([(f["nombre"], f["origen"], f["video_id"]) for f in filas], [("Banda - Disco (2025)", "subir", "V1")])
+
+    def test_una_copia_sin_entrada_en_pendientes_no_dice_que_anoto_el_album(self):
+        # Defecto: sin entrada en pendientes (un video liberado de un reclamo se reprograma sin
+        # estar ahí) no hay álbum que anotar, pero el aviso aseguraba que quedó en el registro.
+        registro = self.tmp / "ya_publicados.tsv"
+        retiro = {"estado": "copia_retirada", "detalle": [], "captura_studio": None}
+        with mock.patch.object(pa, "REGISTRO_PUBLICADOS", registro):
+            resultado = pa.apartar_copia_retirada("V9", "Banda - Disco", retiro, self.tmp / "programar.out")
+        self.assertIs(resultado["album_registrado"], False)
+        self.assertFalse(registro.exists())
 
     def test_una_copia_de_un_album_ya_registrado_no_repite_la_fila(self):
         # Defecto: una fila por cada vez que se mira el video (el subir ya lo había anotado).
@@ -1985,6 +1996,16 @@ class TestEliminarVideo(unittest.TestCase):
         resultado = pa.eliminar_video("V1", uploader=uploader)
         self.assertTrue(resultado["ok"], resultado)
         self.assertEqual((agotada.videos_falsos.borrados, siguiente.videos_falsos.borrados), ([], ["V1"]))
+
+    def test_un_404_al_borrar_se_distingue_de_otro_error_de_la_api(self):
+        # Defecto: todo HttpError salía como `error_api` y el servicio decía «Sigue en YouTube»
+        # aunque un 404 puede significar que el video ya no existía (sobre todo con --retirado,
+        # que no lo consulta antes).
+        no_encontrado = HttpError(httplib2.Response({"status": 404}), b"{}")
+        canal = CanalParaBorrar({}, errores_al_borrar=[no_encontrado])
+        resultado = pa.eliminar_video("V1", retirado=True, uploader=uploader_para_programar(canal))
+        self.assertEqual((resultado["ok"], resultado["motivo"], resultado["video_id"]), (False, "no_encontrado", "V1"))
+        self.assertTrue(Path(resultado["log"]).is_file())
 
     def test_un_error_de_la_api_se_responde_como_json_sin_lanzar(self):
         # Defecto: dejar escapar la excepción; el servicio solo ve «sin_respuesta» y no sabe si se borró.

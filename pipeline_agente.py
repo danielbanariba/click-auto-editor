@@ -1349,13 +1349,13 @@ def leer_retiro_en_studio(video_id, abrir_studio=None):
 
     Solo lee: pulsa el aviso "Retirado" y "Revisar problemas", que abren información, y nada
     dentro del diálogo. Devuelve `estado` "copia_retirada" (con `detalle`, las líneas de quién
-    pidió la retirada, y `captura_studio`) solo cuando Studio dice que es una copia; cualquier
-    otra cosa, o una página que no se pudo leer, es "otro".
+    pidió la retirada, y `captura_studio`, None si la captura falló) solo cuando Studio dice que
+    es una copia; cualquier otra cosa, o una página que no se pudo leer, es "otro".
     """
     from playwright.sync_api import Error as PlaywrightError
 
     captura = DIR_CAPTURAS / f"retiro_{video_id}.png"
-    captura.parent.mkdir(parents=True, exist_ok=True)
+    captura_tomada = None
     try:
         with (abrir_studio or pagina_de_studio)() as pagina:
             try:
@@ -1380,13 +1380,19 @@ def leer_retiro_en_studio(video_id, abrir_studio=None):
                 except PlaywrightError as exc:
                     # El globo ya dice que es una copia: sin el diálogo solo falta quién la pidió.
                     print(f"No se pudo leer el diálogo del retiro: {exc}")
-                pagina.screenshot(path=str(captura))
+                try:
+                    captura.parent.mkdir(parents=True, exist_ok=True)
+                    pagina.screenshot(path=str(captura))
+                    captura_tomada = str(captura)
+                except (PlaywrightError, OSError) as exc:
+                    # La copia ya está confirmada: sin foto sigue siendo una copia.
+                    print(f"No se pudo tomar la captura del retiro: {exc}")
             except PlaywrightError as exc:
                 print(f"Error leyendo el retiro en Studio: {exc}")
                 return {"estado": "otro", "motivo": "error_navegador"}
     except NavegadorNoDisponible as exc:
         return {"estado": "otro", "motivo": exc.motivo}
-    return {"estado": "copia_retirada", "detalle": detalle, "captura_studio": str(captura)}
+    return {"estado": "copia_retirada", "detalle": detalle, "captura_studio": captura_tomada}
 
 
 def apartar_copia_retirada(video_id, titulo, retiro, log):
@@ -1405,6 +1411,9 @@ def apartar_copia_retirada(video_id, titulo, retiro, log):
         "titulo": titulo,
         "detalle": retiro.get("detalle", []),
         "captura_studio": retiro.get("captura_studio"),
+        # El aviso solo puede decir que el álbum está en el registro si hay álbum (sin entrada en
+        # pendientes no se anota nada); True también cuando ya estaba anotado.
+        "album_registrado": bool(album),
         "log": str(log),
     }
 
@@ -2058,11 +2067,15 @@ def guardar_impugnaciones(registro):
 
 def impugnados_por_el_servicio():
     """Los videos con algún reclamo impugnado, según el JSON final de cada `servicio_impugnar_*.out`
-    (un video) o `servicio_impugnar_con_ventana_*.out` (varios, en `videos`)."""
+    (un video) o `servicio_impugnar_con_ventana_*.out` (varios, en `videos`):
+    {video_id: {"titulo", "fecha"}}. `fecha` es cuándo se terminó de escribir el log más reciente
+    que lo menciona (ISO, al segundo, como `revisado`): la impugnación pudo salir después de la
+    última lectura del video."""
     videos = {}
     salidas = sorted(DIR_LOGS.glob("servicio_impugnar_[0-9]*.out"))
     salidas += sorted(DIR_LOGS.glob("servicio_impugnar_con_ventana_*.out"))
     for salida in salidas:
+        fecha = datetime.fromtimestamp(salida.stat().st_mtime).isoformat(timespec="seconds")
         lineas = salida.read_text(encoding="utf-8", errors="replace").splitlines()
         for linea in reversed(lineas):
             if not linea.startswith("{"):
@@ -2073,7 +2086,11 @@ def impugnados_por_el_servicio():
                 continue
             for video in resultado.get("videos") or [resultado]:
                 if video.get("impugnados") and video.get("video_id"):
-                    videos[video["video_id"]] = video.get("titulo") or video["video_id"]
+                    anterior = videos.get(video["video_id"], {})
+                    videos[video["video_id"]] = {
+                        "titulo": video.get("titulo") or video["video_id"],
+                        "fecha": max(fecha, anterior.get("fecha", "")),
+                    }
             break
     return videos
 
@@ -2147,10 +2164,11 @@ def confirmar_reclamos(pagina, video_id, antes, reclamos):
 
 def comparar_reclamos(antes, reclamos):
     """Lo leído como {reclamo: estado} y los cambios contra `antes`: un estado distinto o un
-    reclamo que ya no está (`ahora` None). La cuenta de días ("Caduca dentro de N días") no
-    es un cambio. Sin `antes`, la lectura es la base y no hay cambios."""
+    reclamo que ya no está (`ahora` None). La cuenta de días ("Caduca dentro de N días" o
+    "1 día") no es un cambio. Sin `antes`, la lectura es la base y no hay cambios."""
     ahora = {reclamo["reclamo"]: reclamo["estado"] for reclamo in reclamos}
-    sin_numeros = lambda texto: re.sub(r"\d+", "#", texto)
+    # "1 día" y "N días" son la misma cuenta: se igualan junto con los números.
+    sin_numeros = lambda texto: re.sub(r"\bd[ií]as?\b", "día", re.sub(r"\d+", "#", texto))
     cambios = [
         {"reclamo": nombre, "antes": estado, "ahora": ahora.get(nombre)}
         for nombre, estado in antes.items()
@@ -2172,8 +2190,11 @@ def seguir_impugnaciones(abrir_studio=pagina_de_studio):
     log = ruta_log("seguir_impugnaciones")
     base = {"log": str(log)}
     registro = leer_impugnaciones()
-    for video_id, titulo in impugnados_por_el_servicio().items():
-        registro.setdefault(video_id, {"titulo": titulo})
+    for video_id, impugnado in impugnados_por_el_servicio().items():
+        datos = registro.setdefault(video_id, {"titulo": impugnado["titulo"]})
+        # Un reclamo impugnado después de la última lectura: el video vuelve a seguirse.
+        if datos.get("terminado") and impugnado["fecha"] > datos.get("revisado", ""):
+            datos["terminado"] = False
     # Primero lo que hace más que no se mira: si se acaba el tiempo, mañana sigue el resto.
     seguidos = sorted(
         (video_id for video_id, datos in registro.items() if not datos.get("terminado")),
@@ -2181,6 +2202,7 @@ def seguir_impugnaciones(abrir_studio=pagina_de_studio):
     )
     cambios, fallos, liberados, rechazados = [], [], [], []
     inicio = time.monotonic()
+    leyendo = None  # el video que se está leyendo; ninguno si falló abrir Studio
     with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
         try:
             if seguidos:
@@ -2192,18 +2214,29 @@ def seguir_impugnaciones(abrir_studio=pagina_de_studio):
                             print("Se acabó el tiempo de la corrida: el resto se mira mañana.")
                             break
                         datos = registro[video_id]
+                        leyendo = video_id
                         antes = datos.get("reclamos") or {}
                         reclamos = confirmar_reclamos(pagina, video_id, antes, leer_reclamos(pagina, video_id))
                         if reclamos is None:
                             print(f"{video_id}: no se pudo leer /claims")
+                            # Pasa al final de la próxima corrida: uno ilegible no va primero cada día.
+                            datos["revisado"] = datetime.now().isoformat(timespec="seconds")
+                            guardar_impugnaciones(registro)
                             fallos.append(
                                 {"video_id": video_id, "titulo": datos.get("titulo"),
                                  "motivo": "lista_de_reclamos_no_disponible"}
                             )
                             continue
                         ahora, nuevos = comparar_reclamos(antes, reclamos)
-                        cambios += [{"video_id": video_id, "titulo": datos.get("titulo"), **c} for c in nuevos]
                         terminado = not any(P_IMPUGNACION_PENDIENTE.search(e) for e in ahora.values())
+                        # La captura va antes de anotar nada: si falla con un error que no es de
+                        # Playwright, el video no queda terminado sin que su pregunta haya salido, y
+                        # sus cambios se leen de nuevo en la próxima corrida en vez de repetirse.
+                        captura = (
+                            capturar_pagina(pagina, DIR_CAPTURAS / f"reclamos_{video_id}.png")
+                            if terminado and ahora else None
+                        )
+                        cambios += [{"video_id": video_id, "titulo": datos.get("titulo"), **c} for c in nuevos]
                         datos.update(
                             reclamos=ahora,
                             revisado=datetime.now().isoformat(timespec="seconds"),
@@ -2218,12 +2251,20 @@ def seguir_impugnaciones(abrir_studio=pagina_de_studio):
                                 "video_id": video_id,
                                 "titulo": datos.get("titulo"),
                                 "reclamos": [{"reclamo": n, "estado": e} for n, e in ahora.items()],
-                                "captura": capturar_pagina(pagina, DIR_CAPTURAS / f"reclamos_{video_id}.png"),
+                                "captura": captura,
                             })
         except errores_del_paso_de_studio() as exc:
             detalle = f"{type(exc).__name__}: {exc}"[:200]
             print(f"No se pudieron leer los reclamos en Studio: {detalle}")
             motivo = exc.motivo if isinstance(exc, NavegadorNoDisponible) else "error_navegador"
+            if leyendo and not isinstance(exc, NavegadorNoDisponible):
+                # El video en que falló pasa al final de la próxima corrida: si falla siempre, no
+                # frena a los demás. Sin navegador o sin sesión falla todo, no un video.
+                registro[leyendo]["revisado"] = datetime.now().isoformat(timespec="seconds")
+                try:
+                    guardar_impugnaciones(registro)
+                except OSError as exc_guardar:
+                    print(f"No se pudo anotar el video en que falló: {exc_guardar}")
             # Lo ya terminado no se vuelve a mirar: si no sale ahora, no sale nunca.
             return {"ok": False, "motivo": motivo, "detalle": detalle, "cambios": cambios, "fallos": fallos,
                     "liberados": liberados, "rechazados": rechazados, **base}
@@ -2364,6 +2405,7 @@ def mapear_canal(uploader=None, abrir_studio=pagina_de_studio, modulo=None, leer
         pendientes = sorted(videos, key=lambda video: mapeo.get(video["video_id"], ""))
         print(f"{len(videos)} videos aparcados por un reclamo")
         resumen = {"aparcados": len(videos), **listas, "sin_revisar": pendientes, **base}
+        leyendo = None  # el video que se está leyendo; sin él (el navegador ni abrió) nada se sella
         try:
             if pendientes:
                 modulo = modulo or impugnador()
@@ -2377,19 +2419,20 @@ def mapear_canal(uploader=None, abrir_studio=pagina_de_studio, modulo=None, leer
                         if len(pendientes) < len(videos) and time.monotonic() - inicio > TIEMPO_MAXIMO_MAPEO_S:
                             print("Se acabó el tiempo de la corrida: el resto va primero la próxima vez.")
                             break
-                        video = pendientes[0]
+                        video = leyendo = pendientes[0]
                         lista, datos = mirar_video_aparcado(pagina, video, modulo, leer_reclamantes, lista_negra)
                         print(f"{video['video_id']}: {lista}")
                         listas[lista].append(datos)
                         pendientes.pop(0)
+                        leyendo = None
                         mapeo[video["video_id"]] = datetime.now().isoformat(timespec="seconds")
                         guardar_mapeo(mapeo)
         except errores_del_paso_de_studio() as exc:
             detalle = f"{type(exc).__name__}: {exc}"[:200]
             print(f"No se pudieron leer los reclamos en Studio: {detalle}")
-            if pendientes:
+            if leyendo:
                 # El video en que falló pasa al final: si falla siempre, no frena a los demás.
-                mapeo[pendientes[0]["video_id"]] = datetime.now().isoformat(timespec="seconds")
+                mapeo[leyendo["video_id"]] = datetime.now().isoformat(timespec="seconds")
                 guardar_mapeo(mapeo)
             motivo = exc.motivo if isinstance(exc, NavegadorNoDisponible) else "error_navegador"
             return {**resumen, "ok": False, "motivo": motivo, "detalle": detalle}
@@ -2491,6 +2534,9 @@ def eliminar_video(video_id, retirado=False, uploader=None):
             return {"ok": False, "motivo": "sin_credenciales", "video_id": video_id, "log": str(log)}
         except HttpError as exc:
             print(f"Error YouTube API: {exc}")
+            if getattr(exc.resp, "status", None) == 404:
+                # Puede ser un video que ya no existía: el servicio no debe decir que sigue en YouTube.
+                return {"ok": False, "motivo": "no_encontrado", "video_id": video_id, "log": str(log)}
             return {
                 "ok": False,
                 "motivo": "error_api",

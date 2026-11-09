@@ -82,6 +82,20 @@ class StudioFalso:
         return ruta.fulfill(status=200, body=self.html, content_type="text/html; charset=utf-8")
 
 
+class PaginaQueFallaAlCapturar:
+    """La página real, salvo `screenshot`, que lanza `error`."""
+
+    def __init__(self, pagina, error):
+        self.pagina = pagina
+        self.error = error
+
+    def screenshot(self, **opciones):
+        raise self.error
+
+    def __getattr__(self, nombre):
+        return getattr(self.pagina, nombre)
+
+
 class TestLeerRetiroEnStudio(unittest.TestCase):
     def setUp(self):
         if sync_playwright is None:
@@ -105,7 +119,7 @@ class TestLeerRetiroEnStudio(unittest.TestCase):
             parche.start()
             self.addCleanup(parche.stop)
 
-    def leer(self, studio):
+    def leer(self, studio, falla_la_captura=None):
         contexto = self.navegador.new_context()
         self.addCleanup(contexto.close)
         contexto.route("https://studio.youtube.com/**", studio.atender)
@@ -113,7 +127,7 @@ class TestLeerRetiroEnStudio(unittest.TestCase):
 
         @contextlib.contextmanager
         def abrir_studio():
-            yield pagina
+            yield PaginaQueFallaAlCapturar(pagina, falla_la_captura) if falla_la_captura else pagina
 
         resultado = pa.leer_retiro_en_studio("V1", abrir_studio=abrir_studio)
         pagina.wait_for_timeout(300)  # que lleguen los avisos de clic que quedaron en vuelo
@@ -157,6 +171,27 @@ class TestLeerRetiroEnStudio(unittest.TestCase):
         studio = StudioFalso(abre_dialogo=False)
         resultado = self.leer(studio)
         self.assertEqual((resultado["estado"], resultado["detalle"]), ("copia_retirada", []))
+
+    def assert_copia_sin_foto(self, resultado):
+        self.assertEqual(resultado["estado"], "copia_retirada", resultado)
+        self.assertIsNone(resultado["captura_studio"])
+        self.assertEqual(len(resultado["detalle"]), 3)  # lo leído antes de la captura no se pierde
+
+    def test_si_falla_la_captura_la_copia_confirmada_no_se_pierde(self):
+        # Defecto: el PlaywrightError de `screenshot` caía en el except de afuera y devolvía
+        # `otro`: el video quedaba como `no_existe` y llegaba el aviso viejo, no la pregunta.
+        resultado = self.leer(StudioFalso(), falla_la_captura=PlaywrightError("Target closed"))
+        self.assert_copia_sin_foto(resultado)
+
+    def test_si_no_se_puede_crear_la_carpeta_de_capturas_la_copia_confirmada_no_se_pierde(self):
+        # Defecto: el OSError del mkdir salía de `programar` sin su línea JSON y el servicio lo
+        # tomaba por «sin respuesta» y reintentaba, en vez de dar el aviso de siempre.
+        archivo = self.tmp / "no_es_una_carpeta"
+        archivo.write_text("x", encoding="utf-8")
+        parche = mock.patch.object(pa, "DIR_CAPTURAS", archivo / "capturas")
+        parche.start()
+        self.addCleanup(parche.stop)
+        self.assert_copia_sin_foto(self.leer(StudioFalso()))
 
 
 if __name__ == "__main__":

@@ -932,6 +932,64 @@ class TestCopiaRetirada(BaseServicio):
             self.lanzador.lanzados("eliminar_video"), [["eliminar_video", "--video-id", "VID1", "--retirado"]]
         )
 
+    def copia_retirada(self, **extra):
+        self.terminar_programar({
+            "ok": False, "motivo": "copia_retirada", "video_id": "VID1",
+            "titulo": "🇩🇪 Naked Whipper - Chapel Defilement (2025)", "detalle": [], "captura_studio": None, **extra,
+        })
+        (pregunta,) = [m for m in self.telegram.mensajes if m["botones"]]
+        return pregunta
+
+    def eliminar_y_terminar(self, resultado):
+        """Aprieta Eliminar, deja que `eliminar_video` termine con `resultado` y devuelve el aviso."""
+        self.telegram.apretar(self.ultima_pregunta(), self.ELIMINAR)
+        self.servicio.paso()
+        self.lanzador.terminar("eliminar_video", {"video_id": "VID1", "log": "/logs/eliminar.out", **resultado})
+        self.servicio.paso()
+        return self.telegram.mensajes[-1]["texto"]
+
+    def test_el_aviso_de_borrado_nombra_el_album_y_no_el_id(self):
+        # Defecto: con --retirado `eliminar_video` no consulta el video y devuelve el id como
+        # título: el aviso decía «Borré el video "VID1"» en vez del nombre del álbum.
+        self.copia_retirada()
+        aviso = self.eliminar_y_terminar({"ok": True, "titulo": "VID1"})
+        self.assertIn("🇩🇪 Naked Whipper - Chapel Defilement (2025)", aviso)
+        self.assertNotIn("VID1", aviso)
+
+    def test_una_pregunta_guardada_sin_titulo_borra_y_avisa_con_el_id_como_antes(self):
+        # Comportamiento previo: una pregunta de antes del cambio no trae `titulo`.
+        self.copia_retirada()
+        for pregunta in self.servicio.estado["preguntas"].values():
+            pregunta.pop("titulo", None)
+        aviso = self.eliminar_y_terminar({"ok": True, "titulo": "VID1"})
+        self.assertIn("Borré el video \"VID1\"", aviso)
+
+    def test_un_404_al_borrar_dice_que_youtube_no_lo_encuentra_y_no_que_sigue(self):
+        # Defecto: un 404 de videos.delete puede ser un video que ya no existía, pero el aviso
+        # afirmaba «Sigue en YouTube». Cualquier otro error de la API conserva el aviso de siempre.
+        self.copia_retirada()
+        aviso = self.eliminar_y_terminar({"ok": False, "motivo": "no_encontrado"})
+        self.assertIn("YouTube no encuentra el video VID1", aviso)
+        self.assertIn("https://studio.youtube.com/video/VID1/edit", aviso)
+        self.assertNotIn("Sigue en YouTube", aviso)
+
+    def test_otro_error_de_la_api_al_borrar_sigue_diciendo_que_el_video_sigue_en_youtube(self):
+        # Comportamiento previo: solo el 404 cambia; un 403 no borró nada y el video sigue.
+        self.copia_retirada()
+        aviso = self.eliminar_y_terminar({"ok": False, "motivo": "error_api"})
+        self.assertIn("Sigue en YouTube", aviso)
+
+    def test_el_aviso_solo_dice_que_el_album_esta_en_el_registro_si_quedo_anotado(self):
+        # Defecto: sin entrada en pendientes (o sin álbum) `programar` no anota nada, pero el
+        # aviso aseguraba que el álbum no se vuelve a renderizar ni a subir.
+        for registrado in (True, False):
+            with self.subTest(album_registrado=registrado):
+                self.telegram.mensajes.clear()
+                texto = self.copia_retirada(album_registrado=registrado)["texto"]
+                self.assertIn("Ya no queda pendiente de programar", texto)
+                self.assertEqual("registro de publicados" in texto, registrado)
+                self.servicio.estado["preguntas"].clear()
+
     def test_un_video_que_no_existe_sigue_con_el_aviso_de_siempre(self):
         # Comportamiento previo: `no_existe` avisa una vez, sin pregunta.
         self.terminar_programar({"ok": False, "motivo": "no_existe", "status": {}, "video_id": "VID1"})
@@ -1114,12 +1172,14 @@ class TestImpugnarDesdeTelegram(BaseServicio):
         # Defecto: el aviso decía que el servicio no puede pasar la verificación y el video
         # quedaba sin impugnar, sin forma de terminarlo desde Telegram.
         aviso = self.terminar_impugnar(
-            {"ok": False, "reclamos": 3, "impugnados": 0,
+            {"ok": False, "reclamos": 3, "impugnados": 0, "log": "/logs/impugnar.out",
              "fallos": [{"motivo": "verificacion_de_identidad", "detalle": "2fa_no_completado (timeout)"}]}
         )
         self.assertEqual([etiqueta for etiqueta, _ in aviso["botones"]], ["🖥 Impugnar con ventana"])
         self.assertIn("Verifica que eres tú", aviso["texto"])
         self.assertIn(self.ENLACE, aviso["texto"])
+        # Defecto: esta rama del aviso perdió la línea con el log del paso que traen los demás.
+        self.assertIn("Log: /logs/impugnar.out", aviso["texto"])
         self.assertEqual(self.lanzador.lanzados("impugnar_con_ventana"), [])
         self.telegram.apretar(aviso, "🖥 Impugnar con ventana")
         self.servicio.paso()
@@ -1322,6 +1382,123 @@ class TestApelaciones(BaseServicio):
         self.lanzador.terminar("apelar", {"ok": True, "videos": [], "fallos": []})
         self.servicio.paso()
         self.assertEqual(len(self.telegram.mensajes), antes)
+
+    def test_sin_sesion_en_studio_no_lanza_el_seguimiento_y_avisa_el_problema_una_vez(self):
+        # Defecto: `seguir_impugnaciones` se lanzaba tras cada `apelar`, también cuando `apelar`
+        # no tenía sesión: el segundo paso falla igual y el mismo problema llegaba dos veces.
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar(
+            "apelar",
+            {"ok": False, "motivo": "sin_sesion_en_studio", "videos": [], "fallos": [], "log": "/logs/apelar.log"},
+        )
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("seguir_impugnaciones"), [])
+        (aviso,) = [m for m in self.telegram.mensajes if sp.MOTIVOS_APELACION["sin_sesion_en_studio"] in m["texto"]]
+        self.assertIn("Sigo mañana", aviso["texto"])
+
+
+class TestAvisosPendientes(BaseServicio):
+    """`apelar` y `seguir_impugnaciones` anotan su resultado antes de que el servicio lo avise:
+    si Telegram rechaza el mensaje, el aviso tiene que llegar en un paso posterior."""
+
+    DIA = sp.INTERVALO_APELACIONES_S
+    APELACION = {
+        "ok": True, "fallos": [],
+        "videos": [{"tipo": "edad", "video_id": "ID1", "titulo": "Banda - Uno", "estado": "enviado"}],
+    }
+    SEGUIMIENTO = {
+        "ok": True, "fallos": [],
+        "cambios": [{"video_id": "V1", "titulo": "Banda - Dos", "reclamo": "Canción B — Artista",
+                     "antes": "En revisión", "ahora": "El reclamante ha rechazado tu impugnación."}],
+    }
+
+    def telegram_que_rechaza(self, rechaza):
+        """`mandar` lanza ErrorTelegram mientras `rechaza(texto)` sea verdadero."""
+        def mandar(texto, botones=None, foto=None):
+            if rechaza(texto):
+                raise sp.ErrorTelegram("sendMessage: Bad Request")
+            return TelegramFalso.mandar(self.telegram, texto, botones=botones, foto=foto)
+
+        self.telegram.mandar = mandar
+
+    def telegram_que_rechaza_una_vez(self, fragmento):
+        """El primer mensaje que trae `fragmento` es rechazado; los demás pasan. Devuelve los
+        rechazos que faltan: vacío cuando ya rechazó ese mensaje."""
+        rechazos = [True]
+        self.telegram_que_rechaza(lambda texto: fragmento in texto and bool(rechazos) and rechazos.pop())
+        return rechazos
+
+    def recibidos(self, fragmento):
+        return [m["texto"] for m in self.telegram.mensajes if fragmento in m["texto"]]
+
+    def test_el_aviso_de_la_apelacion_que_telegram_rechaza_llega_en_el_paso_siguiente_una_sola_vez(self):
+        # Defecto: `avisar` traga el error de Telegram y el resultado ya quedó anotado en
+        # apelaciones.json: el aviso no salía nunca.
+        rechazos = self.telegram_que_rechaza_una_vez("Banda - Uno")
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar("apelar", self.APELACION)
+        for _ in range(3):
+            self.servicio.paso()
+        self.assertEqual(rechazos, [])  # el primer envío sí fue rechazado
+        self.assertEqual(len(self.recibidos("Banda - Uno")), 1)
+        self.assertEqual(self.servicio.estado["avisos_pendientes"], [])
+
+    def test_el_aviso_del_seguimiento_que_telegram_rechaza_llega_en_el_paso_siguiente_una_sola_vez(self):
+        # Defecto: el mismo, con el resultado ya anotado en impugnaciones.json.
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar("apelar", {"ok": True, "videos": [], "fallos": []})
+        self.servicio.paso()
+        rechazos = self.telegram_que_rechaza_una_vez("Canción B")
+        self.lanzador.terminar("seguir_impugnaciones", self.SEGUIMIENTO)
+        for _ in range(3):
+            self.servicio.paso()
+        self.assertEqual(rechazos, [])  # el primer envío sí fue rechazado
+        self.assertEqual(len(self.recibidos("Canción B")), 1)
+
+    def test_el_aviso_que_no_salio_sobrevive_a_un_reinicio(self):
+        # Defecto: la cola solo en memoria: reiniciar el servicio con el aviso sin enviar lo perdía.
+        self.telegram_que_rechaza(lambda texto: "Banda - Uno" in texto)
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar("apelar", self.APELACION)
+        self.servicio.paso()
+        self.telegram_que_rechaza(lambda texto: False)
+        self.servicio = self.nuevo_servicio()
+        self.servicio.paso()
+        self.assertEqual(len(self.recibidos("Banda - Uno")), 1)
+
+    def test_con_telegram_caido_el_aviso_espera_sin_gastar_intentos(self):
+        # Defecto: contar como intento cada paso con Telegram sin responder; una caída larga
+        # descartaba el aviso, que es justo cuando más hace falta que llegue después.
+        self.telegram.falla = sp.ErrorTelegram("sin red")
+        self.telegram_que_rechaza(lambda texto: True)
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar("apelar", self.APELACION)
+        for _ in range(sp.INTENTOS_AVISO + 3):
+            self.servicio.paso()
+        self.telegram.falla = None
+        self.telegram_que_rechaza(lambda texto: False)
+        self.servicio.paso()
+        self.assertEqual(len(self.recibidos("Banda - Uno")), 1)
+
+    def test_un_aviso_que_telegram_rechaza_siempre_se_descarta_y_no_bloquea_los_demas(self):
+        # Defecto: sin tope de intentos, un texto que Telegram nunca acepta quedaba primero de la
+        # cola para siempre y los avisos de después no salían.
+        self.telegram_que_rechaza(lambda texto: "Banda - Uno" in texto)
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar("apelar", self.APELACION)
+        self.servicio.paso()
+        self.lanzador.terminar("seguir_impugnaciones", self.SEGUIMIENTO)
+        for _ in range(sp.INTENTOS_AVISO + 1):
+            self.servicio.paso()
+        self.assertEqual(len(self.recibidos("Canción B")), 1)
+        self.assertEqual(self.recibidos("Banda - Uno"), [])
+        self.assertEqual(self.servicio.estado["avisos_pendientes"], [])
 
 
 class TestProgramarFallido(BaseServicio):
@@ -1990,6 +2167,82 @@ class TestImpugnarConVentana(BaseServicio):
             self.lanzador.lanzados("impugnar_con_ventana")[-1],
             ["impugnar_con_ventana", "--video-id", "V1", "--video-id", "V2"],
         )
+
+    def ofrecer_ventana(self, *videos):
+        """La pregunta «Impugnar con ventana» de esos videos."""
+        self.servicio.preguntar_por_ventana(
+            ["⚠️ Studio pidió verificar"], [{"video_id": v, "titulo": f"Banda - {v}"} for v in videos]
+        )
+        return self.ultima_pregunta()
+
+    def apretar_ventana(self, pregunta):
+        self.telegram.apretar(pregunta, "🖥 Impugnar con ventana")
+        self.servicio.paso()
+
+    def test_la_ventana_no_se_lanza_para_un_video_que_ya_esta_en_otra_ventana(self):
+        # Defecto: dos ventanas para el mismo video: una corrida de más en Studio, que además
+        # comparte el perfil con todo lo demás.
+        primera = self.ofrecer_ventana("V1", "V2")
+        segunda = self.ofrecer_ventana("V2", "V3")
+        tercera = self.ofrecer_ventana("V1")
+        self.apretar_ventana(primera)
+        self.apretar_ventana(segunda)
+        antes = len(self.telegram.mensajes)
+        self.apretar_ventana(tercera)
+        self.assertEqual(self.lanzador.lanzados("impugnar_con_ventana"), [
+            ["impugnar_con_ventana", "--video-id", "V1", "--video-id", "V2"],
+            ["impugnar_con_ventana", "--video-id", "V3"],
+        ])
+        (aviso,) = self.telegram.mensajes[antes:]
+        self.assertIn("ya se están impugnando", aviso["texto"])
+
+    def test_la_ventana_no_se_lanza_para_un_video_que_ya_esta_en_el_lote_de_impugnar_todos(self):
+        # Defecto: la ventana y el lote para el mismo video corren uno detrás del otro con el
+        # candado de Studio: una corrida de más.
+        sin_impugnar = [{"video_id": v, "titulo": f"Banda - {v}", "impugnables": 1, "reclamantes": ["Sello"]}
+                        for v in ("V1", "V2")]
+        listas = dict.fromkeys(("liberados", "lista_negra", "en_proceso", "fallos", "sin_revisar"), [])
+        self.servicio.lanzar_paso("mapear_canal")
+        self.lanzador.terminar("mapear_canal", {"ok": True, "aparcados": 2, **listas, "sin_impugnar": sin_impugnar})
+        self.servicio.paso()
+        self.telegram.apretar(self.ultima_pregunta(), "⚖️ Impugnar todos (2)")
+        self.servicio.paso()
+        ventana = self.ofrecer_ventana("V1", "V3")
+        self.apretar_ventana(ventana)
+        self.assertEqual(
+            self.lanzador.lanzados("impugnar_con_ventana"), [["impugnar_con_ventana", "--video-id", "V3"]]
+        )
+        self.assertEqual(self.lanzador.lanzados("impugnar"), [["impugnar", "--video-id", "V1"]])
+
+    def test_un_reinicio_con_la_ventana_abierta_avisa_con_los_links_y_no_la_relanza(self):
+        # Defecto: la ventana muere con el reinicio y nadie lo sabe: los videos quedaban sin
+        # impugnar, o se relanzaba la ventana y se impugnaba dos veces lo que pudo salir.
+        self.apretar_ventana(self.ofrecer_ventana("V1", "V2"))
+        antes = len(self.telegram.mensajes)
+        self.servicio = self.nuevo_servicio()
+        (aviso,) = self.telegram.mensajes[antes:]
+        self.assertIn(sp.MOTIVOS_IMPUGNACION["interrumpido"], aviso["texto"])
+        for video in ("V1", "V2"):
+            self.assertIn(f"Banda - {video}", aviso["texto"])
+            self.assertIn(f"https://studio.youtube.com/video/{video}/claims", aviso["texto"])
+        self.assertEqual(len(self.lanzador.lanzados("impugnar_con_ventana")), 1)
+        # Se avisa una sola vez: otro reinicio ya no encuentra nada.
+        antes = len(self.telegram.mensajes)
+        self.servicio = self.nuevo_servicio()
+        self.assertEqual(self.telegram.mensajes[antes:], [])
+
+    def test_una_ventana_que_termino_no_se_avisa_como_interrumpida_al_reiniciar(self):
+        # Defecto: no sacar la ventana del estado al terminar: cada reinicio avisaría un corte
+        # que no pasó.
+        self.apretar_ventana(self.ofrecer_ventana("V1", "V2"))
+        self.lanzador.terminar("impugnar_con_ventana", {"ok": True, "sin_revisar": [], "videos": [
+            {"ok": True, "video_id": v, "titulo": f"Banda - {v}", "reclamos": 1, "impugnados": 1, "fallos": []}
+            for v in ("V1", "V2")
+        ]})
+        self.servicio.paso()
+        antes = len(self.telegram.mensajes)
+        self.servicio = self.nuevo_servicio()
+        self.assertEqual(self.telegram.mensajes[antes:], [])
 
     def test_una_ventana_que_termina_sin_responder_manda_a_studio_y_no_se_ofrece_de_nuevo(self):
         # Defecto: ofrecer otra ventana cuando la primera pudo haber impugnado algo, y

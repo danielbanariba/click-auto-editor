@@ -180,14 +180,25 @@ Only then it reads Studio, inside the `programar` lock (`leer_retiro_en_studio`)
 `/video/<id>/edit` and clicks only the "Retirado" notice and the "Revisar problemas" button
 of its tooltip. That tooltip says "...es un duplicado de otro que se ha retirado...". The dialog
 says who filed the takedown ("De:"), for which content, and when. Anything else, or a page that
-cannot be read, keeps the old `no_existe` notice. For a copy, `programar` returns
+cannot be read, keeps the old `no_existe` notice. Once the tooltip has confirmed the copy, a
+screenshot that fails (browser or disk error) does not lose it: the result is still
+`copia_retirada`, with `captura_studio` None, and the question goes without the photo. For a copy, `programar` returns
 `motivo = copia_retirada`, removes the video from `pendientes.json` (it can never be published)
-and adds its album to the published registry if it is not there yet. The service sends one
+and adds its album to the published registry if it is not there yet. `album_registrado` says
+whether there was an album to add: a video with no entry in `pendientes.json` (one released from
+a claim) has none. The service sends one
 Telegram question with only "🗑️ Eliminar video": "No se puede publicar porque es copia de
 otro video que YouTube retiró por derechos de autor", the title, those lines, the Studio link and
-the screenshot. The button runs `eliminar_video --retirado`, which calls `videos.delete` without
-the `videos.list` check (it would always answer `no_existe`). If YouTube refuses, the failure
-notice gives the Studio link to delete it by hand.
+the screenshot. Only when `album_registrado` is true does it add that the album is in the
+registry and is not rendered or uploaded again. The button runs `eliminar_video --retirado`,
+which calls `videos.delete` without
+the `videos.list` check (it would always answer `no_existe`). The question keeps the title and
+the notice that the video was deleted names it, because `--retirado` returns the id as title (a
+question saved before this keeps the id). If YouTube refuses, the failure
+notice gives the Studio link to delete it by hand. A 404 from `videos.delete` returns
+`motivo = no_encontrado`: the notice says YouTube does not find the video (it may have been
+deleted already) and gives the Studio link, instead of "Sigue en YouTube", which any other API
+error keeps.
 
 A claimed video with no blacklist match gets a different Telegram question: its
 title, the claimants, the `/claims` link, the Studio screenshot and a note that
@@ -204,7 +215,14 @@ else). The press runs `impugnar_con_ventana` for that video, and the service rep
 result in one message. If the verification was not passed in time, the report offers the window
 again for what was left. A window run that ends with no result (`sin_respuesta`) may have
 sent something, so the notice lists the `/claims` links to check and offers nothing.
-`seguir_impugnaciones` also reads the `servicio_impugnar_con_ventana_*.out` logs.
+`seguir_impugnaciones` also reads the `servicio_impugnar_con_ventana_*.out` logs. The notice of
+a single dispute that asks for the verification keeps the step's `Log:` line, like the other
+failure notices. The press drops the videos that are already in the running «Impugnar todos»
+batch or in another running window (if none is left, one line says they are already being
+disputed and no window opens). The window's videos stay in `ventanas_en_curso`
+(`data/agente/servicio.json`) until it ends. If the service restarts meanwhile, the window died
+with it: the service sends one notice with each video's `/claims` link and does not launch it
+again, since it may have sent a dispute.
 
 Disputing (`impugnar`) reuses the recipe of `10. inpunar_video.py`: for each claim
 whose "Tomar medidas" is visible and enabled it opens the form, picks "Licencia",
@@ -234,20 +252,26 @@ JSON reports `reclamos`, `impugnados`, `fallos` and a `captura` of `/claims`. A
 video with no disputable claims returns `motivo = sin_reclamos_impugnables`.
 
 `seguir_impugnaciones` follows the disputes once a day; the service launches it right after
-`apelar`. It takes the videos from the `servicio_impugnar_*.out` logs with at least one claim
+`apelar`, unless `apelar` failed with `sin_sesion_en_studio` (the follow-up would fail the same
+way and repeat the notice). It takes the videos from the `servicio_impugnar_*.out` logs with at least one claim
 disputed, opens their `/claims` and only reads it (it never presses anything). Each claim is
 a `ytcr-video-content-list-row`: its name is the song and the artist, and its status is the
 text of `#impact-container` without its buttons. The first read of a video is the baseline,
 kept in `data/agente/impugnaciones.json`. After that, a status that changed (the day count
-of "Caduca dentro de N días" does not count) or a claim that is no longer listed is a change:
-it is written there and reported once in one Telegram message, with the old and new text and
+of "Caduca dentro de N días" does not count, nor does "1 día" instead of "N días") or a claim
+that is no longer listed is a change: it is written there and reported once in one Telegram message, with the old and new text and
 the `/claims` link. A page with neither the list nor Studio's "no claims" notice, or with
 rows that do not match the "Ver detalles" buttons, is a failure and changes nothing. The list
 draws in parts and Studio may show the "no claims" notice for a moment first, so a read
 with a claim missing, or with none, counts only when a re-read of the same page
 `PAUSA_RELECTURA_RECLAMOS_S` (10 s) later sees the same; two re-reads that keep changing are
-a failure. A video with no claim "en proceso" is no longer followed. The run holds the `programar` lock, looks
+a failure. A video with no claim "en proceso" is no longer followed, unless the service
+disputes another of its claims later (a `servicio_impugnar_*.out` log written after its last
+read): then it is followed again. The run holds the `programar` lock, looks
 first at the videos checked longest ago and stops after 30 min (`TIEMPO_MAXIMO_SEGUIMIENTO_S`).
+A video whose read fails (a browser error, or a `/claims` that cannot be read) gets its check
+time updated, so it goes to the end of the next run and does not hold back the rest; if the
+browser or the session is not available, which fails every video, none is marked.
 
 When a video stops being followed, the run reports it once. If `/claims` shows no claims, it
 goes in `liberados` and the service runs `programar --video-id <id> --reclamo no` without
@@ -255,7 +279,9 @@ asking: monetization on and published now or at the first free moment, like an u
 video (the title comes from `programados.jsonl`, since the video is no longer pending). If
 it still has a claim (the dispute was rejected, or another claim remains), it goes in
 `rechazados` with each claim's status and a `/claims` screenshot, and the service asks
-"Conservar" or "🗑️ Eliminar video"; Eliminar runs `eliminar_video` with its usual check.
+"Conservar" or "🗑️ Eliminar video"; Eliminar runs `eliminar_video` with its usual check. The
+screenshot is taken before the video is saved as finished: if it fails with a disk or browser
+error, the video is not closed and its question comes in the next run.
 
 `/mapear_canal` (also written `/mapear-canal`; in the bot's menu) runs `mapear_canal` once.
 The step takes the parked videos from the API: the private ones scheduled more than a year
@@ -268,7 +294,8 @@ scheduled them). It reads each `/claims` under the `programar` lock and presses 
   `lista_negra`, and the service asks the usual blacklist question unless one is already open
   for that video. Anything else goes in `sin_impugnar`.
 - Claims, none disputable: `en_proceso`. A page that cannot be read: `fallos`. A browser error
-  stops the run, and the first video left goes to the end of the next run.
+  stops the run, and the video being read goes to the end of the next run (if the browser did
+  not even open, nothing was read and no video is marked).
 
 The run stops after 30 min (`TIEMPO_MAXIMO_MAPEO_S`); the rest comes back in `sin_revisar`.
 `data/agente/mapeo_canal.json` keeps when each video was last read, so the next run starts
@@ -343,7 +370,12 @@ after 10 in a row (`MAX_SIN_ABRIR`): it is usually a passing Studio failure, the
 not recorded and it is tried again the next day. Appealing a video well resets both counts.
 The "Revisar un problema" dialog does not close with Escape: it is closed with its X and
 then "Salir". The service reports what was sent, what was not confirmed and what failed
-in one Telegram message, and stays silent when there was nothing to appeal.
+in one Telegram message, and stays silent when there was nothing to appeal. This report and the
+follow-up's are saved in `avisos_pendientes` (`data/agente/servicio.json`) before they are sent
+and leave it only when Telegram accepts them: a message Telegram refuses goes out again on the
+next steps, and after `INTENTOS_AVISO` (5) refusals while Telegram answers it is dropped, so a
+text Telegram never accepts cannot block the next ones. With Telegram down it waits and spends
+no attempts.
 
 The same daily walk follows up what was sent (`enviando`, `enviado`, `no_confirmado`
 with no `resultado`), also after the send limit is reached. Following up has its own

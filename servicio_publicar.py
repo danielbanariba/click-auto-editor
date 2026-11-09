@@ -45,6 +45,9 @@ ESPERA_TELEGRAM_S = 20
 PAUSA_TELEGRAM_MAX_S = 60
 REINTENTO_S = 30 * 60
 INTENTOS_PROGRAMAR = 3  # fallos seguidos de `programar` antes de preguntar
+# Veces que Telegram puede rechazar un aviso de resultado, con Telegram respondiendo, antes de
+# descartarlo: un texto que nunca acepta no puede frenar los avisos que vienen detrás.
+INTENTOS_AVISO = 5
 INTERVALO_APELACIONES_S = 24 * 3600
 # Cuántos álbumes apartados por ya publicados lista el aviso; del resto solo dice cuántos son.
 MAX_APARTADOS_EN_AVISO = 10
@@ -431,16 +434,24 @@ class Servicio:
         # despues_de_lista: el álbum que estaba en pantalla al tocar ▶️; se pregunta al terminar.
         # lote_impugnar: el «Impugnar todos» en curso: los videos que faltan (el primero se está
         # impugnando) y lo que salió con los anteriores.
+        # avisos_pendientes: avisos de resultados ya anotados en apelaciones.json o
+        # impugnaciones.json que Telegram todavía no recibió: [{"texto", "intentos"}].
+        # ventanas_en_curso: los videos (video_id, titulo) de las ventanas de «Impugnar con
+        # ventana» lanzadas y sin terminar: si el servicio se reinicia, la ventana muere con él.
         self.estado = {
             "offset": 0, "preguntas": {}, "rechazados": [], "subidos": [], "aceptados": [],
             "aleatorio": False, "modo_lista": False, "lista": [], "despues_de_lista": None,
-            "lote_impugnar": None,
+            "lote_impugnar": None, "avisos_pendientes": [], "ventanas_en_curso": [],
         }
         self.tareas = []
         self.inicios = {}  # proceso -> momento en que se lanzó
         self.largos_avisados = set()  # procesos que pasaron su límite y ya se avisó
         self.reintentos = []
         self.fallos_programar = {}  # video_id -> fallos seguidos que llegaron al reintento genérico
+        # video_id -> título de la copia retirada que se está borrando: `eliminar_video --retirado`
+        # no consulta el video y devuelve el id como título. Si se pierde en un reinicio, el aviso
+        # nombra el id.
+        self.titulos_por_borrar = {}
         self.album_pausado_hasta = 0.0
         self.avisos = set()
         # Álbumes publicados que no se pudieron mover: se avisan una vez (avisos se vacía en cada render).
@@ -464,7 +475,22 @@ class Servicio:
         # interrumpido y el lote sigue con el próximo.
         if self.estado["lote_impugnar"] and self.estado["lote_impugnar"]["videos"]:
             self.anotar_en_el_lote({"ok": False, "motivo": "interrumpido"})
+        self.avisar_ventanas_interrumpidas()
         self.enviar_preguntas()
+        self.enviar_avisos_pendientes()
+
+    def avisar_ventanas_interrumpidas(self):
+        """La ventana de «Impugnar con ventana» murió con el reinicio. Pudo haber enviado un
+        reclamo que Studio todavía no muestra impugnado: no se relanza, solo se avisa con los
+        enlaces para mirarlo."""
+        videos = self.estado["ventanas_en_curso"]
+        if not videos:
+            return
+        lineas = [f"🖥 El servicio se reinició con la ventana de «Impugnar con ventana» abierta. Videos: {len(videos)}"]
+        lineas += lineas_de_impugnacion([{**video, "motivo": "interrumpido"} for video in videos])
+        self.estado["ventanas_en_curso"] = []
+        for parte in partir_en_mensajes(lineas):
+            self.avisar_con_reintento(parte)
 
     def guardar(self):
         self.ruta_estado.parent.mkdir(parents=True, exist_ok=True)
@@ -480,6 +506,7 @@ class Servicio:
         self.revisar_reintentos()
         self.revisar_apelaciones()
         self.enviar_preguntas()
+        self.enviar_avisos_pendientes()
         self.avanzar_album()
         self.atender_telegram()
 
@@ -833,16 +860,20 @@ class Servicio:
         """YouTube retiró el video por ser copia de otro: avisa y solo ofrece borrarlo."""
         titulo = resultado.get("titulo") or video_id
         datos = "".join(f"{linea}\n" for linea in resultado.get("detalle") or [])
+        registro = (
+            ", y el álbum está en el registro de publicados: no se vuelve a renderizar ni a subir"
+            if resultado.get("album_registrado") else ""
+        )
         self.preguntar(
             "copia_retirada",
             "🚫 No se puede publicar porque es copia de otro video que YouTube retiró por derechos "
             f"de autor:\n\"{titulo}\"\n{datos}\n"
-            "Ya no queda pendiente de programar, y el álbum está en el registro de publicados: no se "
-            "vuelve a renderizar ni a subir.\n"
+            f"Ya no queda pendiente de programar{registro}.\n"
             f"https://studio.youtube.com/video/{video_id}/edit\n\n"
             "¿Lo elimino de YouTube? No se puede deshacer.",
             foto=resultado.get("captura_studio"),
             video_id=video_id,
+            titulo=resultado.get("titulo"),
         )
 
     def preguntar_por_impugnar(self, resultado, video_id):
@@ -895,7 +926,10 @@ class Servicio:
             detalle = f" ({fallo['detalle']})" if fallo.get("detalle") else ""
             texto += f"\n• {causa}{detalle}"
         if pidio_verificacion({"fallos": fallos}):
-            self.preguntar_por_ventana([f"{texto}\n{enlace}"], [{"video_id": video_id, "titulo": titulo}], foto=foto)
+            lineas = [f"{texto}\n{enlace}"]
+            if resultado.get("log"):
+                lineas.append(f"Log: {resultado['log']}")
+            self.preguntar_por_ventana(lineas, [{"video_id": video_id, "titulo": titulo}], foto=foto)
             return
         texto += f"\nRevisa en Studio cuáles quedaron impugnados y termina a mano lo que falte:\n{enlace}"
         if resultado.get("log"):
@@ -906,8 +940,10 @@ class Servicio:
         """Avisa qué se mandó y qué resolvió YouTube; si no hubo nada, no manda nada.
 
         Después lanza `seguir_impugnaciones`: así las dos lecturas diarias de Studio van seguidas.
+        Sin sesión en Studio no lo lanza: fallaría igual y repetiría el mismo aviso.
         """
-        self.lanzar_paso("seguir_impugnaciones")
+        if resultado.get("motivo") != "sin_sesion_en_studio":
+            self.lanzar_paso("seguir_impugnaciones")
         videos = resultado.get("videos") or []
         resueltos = resultado.get("resultados") or []
         fallos = resultado.get("fallos") or []
@@ -968,7 +1004,7 @@ class Servicio:
             return
         if motivo or fallos:
             lineas.append(f"Log: {resultado.get('log')}")
-        self.avisar("\n".join(["📨 Apelaciones de hoy"] + lineas))
+        self.avisar_con_reintento("\n".join(["📨 Apelaciones de hoy"] + lineas))
 
     def tras_seguir_impugnaciones(self, resultado, argumentos):
         """Avisa qué reclamos impugnados cambiaron en Studio; si nada cambió, no manda nada.
@@ -1007,7 +1043,7 @@ class Servicio:
         if lineas:
             if motivo or fallos:
                 lineas.append(f"Log: {resultado.get('log')}")
-            self.avisar("\n".join(lineas))
+            self.avisar_con_reintento("\n".join(lineas))
         for liberado in resultado.get("liberados") or []:
             # Studio ya lo leyó dos veces sin reclamos: sin la espera ni otra revisión.
             self.lanzar_paso("programar", "--video-id", liberado["video_id"], "--reclamo", "no")
@@ -1142,6 +1178,10 @@ class Servicio:
     def tras_impugnar_con_ventana(self, resultado, argumentos):
         """Un solo informe de lo que salió en la ventana. Si la verificación no se pasó a tiempo,
         vuelve a ofrecer la ventana para lo que quedó."""
+        self.estado["ventanas_en_curso"] = [
+            v for v in self.estado["ventanas_en_curso"] if v["video_id"] not in argumentos[2::2]
+        ]
+        self.guardar()
         videos = resultado.get("videos") or []
         motivo = resultado.get("motivo")
         sin_revisar = resultado.get("sin_revisar")
@@ -1189,12 +1229,20 @@ class Servicio:
 
     def tras_eliminar_video(self, resultado, argumentos):
         video_id = valor(argumentos, "--video-id")
+        titulo = self.titulos_por_borrar.pop(video_id, None) or resultado.get("titulo") or video_id
         if resultado.get("ok"):
-            self.avisar(f"🗑 Borré el video \"{resultado.get('titulo') or video_id}\" de YouTube.")
+            self.avisar(f"🗑 Borré el video \"{titulo}\" de YouTube.")
             return
         if resultado.get("motivo") == "no_existe":
             # Ya lo habían borrado (a mano, o un intento cuya respuesta se perdió).
             self.avisar(f"ℹ️ El video {video_id} ya no está en YouTube: ya estaba borrado.")
+            return
+        if resultado.get("motivo") == "no_encontrado":
+            # videos.delete respondió 404: pudo no existir ya, así que no se afirma que sigue.
+            self.avisar(
+                f"❓ YouTube no encuentra el video {video_id}: puede que ya estuviera borrado. "
+                f"Mira en Studio si sigue:\nhttps://studio.youtube.com/video/{video_id}/edit"
+            )
             return
         self.avisar(
             f"❌ No pude borrar el video {video_id} ({resultado.get('motivo')}). Sigue en YouTube; "
@@ -1208,6 +1256,34 @@ class Servicio:
             self.telegram.mandar(texto, foto=foto)
         except ERRORES_TELEGRAM as exc:
             log.warning("No se pudo mandar el aviso (%s): %s", exc, texto)
+
+    def avisar_con_reintento(self, texto):
+        """Un aviso cuyo resultado ya quedó anotado en disco: se guarda antes de mandarlo y solo
+        sale de la lista cuando Telegram lo recibe, así que un rechazo no lo pierde."""
+        self.estado["avisos_pendientes"].append({"texto": texto, "intentos": 0})
+        self.guardar()
+        self.enviar_avisos_pendientes()
+
+    def enviar_avisos_pendientes(self):
+        """Manda, en orden, los avisos que Telegram todavía no recibió. Con Telegram sin responder
+        no cuenta el intento (el aviso espera a que vuelva); con Telegram respondiendo, un aviso
+        que lo rechaza INTENTOS_AVISO veces se descarta."""
+        pendientes = self.estado["avisos_pendientes"]
+        while pendientes:
+            aviso = pendientes[0]
+            try:
+                self.telegram.mandar(aviso["texto"])
+            except ERRORES_TELEGRAM as exc:
+                if self.fallos_telegram:
+                    return
+                aviso["intentos"] += 1
+                if aviso["intentos"] < INTENTOS_AVISO:
+                    log.warning("Telegram rechazó un aviso (intento %d); reintento: %s", aviso["intentos"], exc)
+                    self.guardar()
+                    return
+                log.warning("Descarto un aviso que Telegram rechazó %d veces (%s): %s", INTENTOS_AVISO, exc, aviso["texto"])
+            pendientes.pop(0)
+            self.guardar()
 
     def avisar_una_vez(self, clave, texto):
         if clave not in self.avisos:
@@ -1488,14 +1564,31 @@ class Servicio:
             self.impugnar_siguiente_del_lote()
 
     def respuesta_impugnar_ventana(self, accion, pregunta):
+        # Un video que ya está en el lote de «Impugnar todos» o en otra ventana en curso no se
+        # vuelve a correr: Studio lo atendería de nuevo, uno detrás del otro, por el candado.
+        en_curso = {video["video_id"] for video in (self.estado["lote_impugnar"] or {}).get("videos", [])}
+        for argumentos, _ in self.tareas:
+            if argumentos[0] == "impugnar_con_ventana":
+                en_curso.update(argumentos[2::2])
+        videos = [video for video in pregunta["videos"] if video["video_id"] not in en_curso]
+        if not videos:
+            self.avisar("ℹ️ Esos videos ya se están impugnando (en «Impugnar todos» o en otra ventana): no abro otra.")
+            return
+        self.estado["ventanas_en_curso"] += [
+            {"video_id": video["video_id"], "titulo": video.get("titulo")} for video in videos
+        ]
+        self.guardar()
         argumentos = ["impugnar_con_ventana"]
-        for video in pregunta["videos"]:
+        for video in videos:
             argumentos += ["--video-id", video["video_id"]]
         self.lanzar_paso(*argumentos)
 
     def respuesta_copia_retirada(self, accion, pregunta):
-        # La API no lista un video retirado por copia: se borra sin la comprobación de siempre.
-        self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"], "--retirado")
+        if accion == "eliminar_video":
+            if pregunta.get("titulo"):
+                self.titulos_por_borrar[pregunta["video_id"]] = pregunta["titulo"]
+            # La API no lista un video retirado por copia: se borra sin la comprobación de siempre.
+            self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"], "--retirado")
 
     def respuesta_impugnacion_rechazada(self, accion, pregunta):
         if accion == "eliminar_video":
