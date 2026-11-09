@@ -446,6 +446,10 @@ class Servicio:
         self.largos_avisados = set()  # procesos que pasaron su límite y ya se avisó
         self.reintentos = []
         self.fallos_programar = {}  # video_id -> fallos seguidos que llegaron al reintento genérico
+        # video_id -> título de la copia retirada que se está borrando: `eliminar_video --retirado`
+        # no consulta el video y devuelve el id como título. Si se pierde en un reinicio, el aviso
+        # nombra el id.
+        self.titulos_por_borrar = {}
         self.album_pausado_hasta = 0.0
         self.avisos = set()
         # Álbumes publicados que no se pudieron mover: se avisan una vez (avisos se vacía en cada render).
@@ -840,16 +844,20 @@ class Servicio:
         """YouTube retiró el video por ser copia de otro: avisa y solo ofrece borrarlo."""
         titulo = resultado.get("titulo") or video_id
         datos = "".join(f"{linea}\n" for linea in resultado.get("detalle") or [])
+        registro = (
+            ", y el álbum está en el registro de publicados: no se vuelve a renderizar ni a subir"
+            if resultado.get("album_registrado") else ""
+        )
         self.preguntar(
             "copia_retirada",
             "🚫 No se puede publicar porque es copia de otro video que YouTube retiró por derechos "
             f"de autor:\n\"{titulo}\"\n{datos}\n"
-            "Ya no queda pendiente de programar, y el álbum está en el registro de publicados: no se "
-            "vuelve a renderizar ni a subir.\n"
+            f"Ya no queda pendiente de programar{registro}.\n"
             f"https://studio.youtube.com/video/{video_id}/edit\n\n"
             "¿Lo elimino de YouTube? No se puede deshacer.",
             foto=resultado.get("captura_studio"),
             video_id=video_id,
+            titulo=resultado.get("titulo"),
         )
 
     def preguntar_por_impugnar(self, resultado, video_id):
@@ -1198,12 +1206,20 @@ class Servicio:
 
     def tras_eliminar_video(self, resultado, argumentos):
         video_id = valor(argumentos, "--video-id")
+        titulo = self.titulos_por_borrar.pop(video_id, None) or resultado.get("titulo") or video_id
         if resultado.get("ok"):
-            self.avisar(f"🗑 Borré el video \"{resultado.get('titulo') or video_id}\" de YouTube.")
+            self.avisar(f"🗑 Borré el video \"{titulo}\" de YouTube.")
             return
         if resultado.get("motivo") == "no_existe":
             # Ya lo habían borrado (a mano, o un intento cuya respuesta se perdió).
             self.avisar(f"ℹ️ El video {video_id} ya no está en YouTube: ya estaba borrado.")
+            return
+        if resultado.get("motivo") == "no_encontrado":
+            # videos.delete respondió 404: pudo no existir ya, así que no se afirma que sigue.
+            self.avisar(
+                f"❓ YouTube no encuentra el video {video_id}: puede que ya estuviera borrado. "
+                f"Mira en Studio si sigue:\nhttps://studio.youtube.com/video/{video_id}/edit"
+            )
             return
         self.avisar(
             f"❌ No pude borrar el video {video_id} ({resultado.get('motivo')}). Sigue en YouTube; "
@@ -1532,6 +1548,8 @@ class Servicio:
 
     def respuesta_copia_retirada(self, accion, pregunta):
         if accion == "eliminar_video":
+            if pregunta.get("titulo"):
+                self.titulos_por_borrar[pregunta["video_id"]] = pregunta["titulo"]
             # La API no lista un video retirado por copia: se borra sin la comprobación de siempre.
             self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"], "--retirado")
 

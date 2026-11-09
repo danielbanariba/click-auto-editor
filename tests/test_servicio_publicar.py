@@ -932,6 +932,64 @@ class TestCopiaRetirada(BaseServicio):
             self.lanzador.lanzados("eliminar_video"), [["eliminar_video", "--video-id", "VID1", "--retirado"]]
         )
 
+    def copia_retirada(self, **extra):
+        self.terminar_programar({
+            "ok": False, "motivo": "copia_retirada", "video_id": "VID1",
+            "titulo": "🇩🇪 Naked Whipper - Chapel Defilement (2025)", "detalle": [], "captura_studio": None, **extra,
+        })
+        (pregunta,) = [m for m in self.telegram.mensajes if m["botones"]]
+        return pregunta
+
+    def eliminar_y_terminar(self, resultado):
+        """Aprieta Eliminar, deja que `eliminar_video` termine con `resultado` y devuelve el aviso."""
+        self.telegram.apretar(self.ultima_pregunta(), self.ELIMINAR)
+        self.servicio.paso()
+        self.lanzador.terminar("eliminar_video", {"video_id": "VID1", "log": "/logs/eliminar.out", **resultado})
+        self.servicio.paso()
+        return self.telegram.mensajes[-1]["texto"]
+
+    def test_el_aviso_de_borrado_nombra_el_album_y_no_el_id(self):
+        # Defecto: con --retirado `eliminar_video` no consulta el video y devuelve el id como
+        # título: el aviso decía «Borré el video "VID1"» en vez del nombre del álbum.
+        self.copia_retirada()
+        aviso = self.eliminar_y_terminar({"ok": True, "titulo": "VID1"})
+        self.assertIn("🇩🇪 Naked Whipper - Chapel Defilement (2025)", aviso)
+        self.assertNotIn("VID1", aviso)
+
+    def test_una_pregunta_guardada_sin_titulo_borra_y_avisa_con_el_id_como_antes(self):
+        # Comportamiento previo: una pregunta de antes del cambio no trae `titulo`.
+        self.copia_retirada()
+        for pregunta in self.servicio.estado["preguntas"].values():
+            pregunta.pop("titulo", None)
+        aviso = self.eliminar_y_terminar({"ok": True, "titulo": "VID1"})
+        self.assertIn("Borré el video \"VID1\"", aviso)
+
+    def test_un_404_al_borrar_dice_que_youtube_no_lo_encuentra_y_no_que_sigue(self):
+        # Defecto: un 404 de videos.delete puede ser un video que ya no existía, pero el aviso
+        # afirmaba «Sigue en YouTube». Cualquier otro error de la API conserva el aviso de siempre.
+        self.copia_retirada()
+        aviso = self.eliminar_y_terminar({"ok": False, "motivo": "no_encontrado"})
+        self.assertIn("YouTube no encuentra el video VID1", aviso)
+        self.assertIn("https://studio.youtube.com/video/VID1/edit", aviso)
+        self.assertNotIn("Sigue en YouTube", aviso)
+
+    def test_otro_error_de_la_api_al_borrar_sigue_diciendo_que_el_video_sigue_en_youtube(self):
+        # Comportamiento previo: solo el 404 cambia; un 403 no borró nada y el video sigue.
+        self.copia_retirada()
+        aviso = self.eliminar_y_terminar({"ok": False, "motivo": "error_api"})
+        self.assertIn("Sigue en YouTube", aviso)
+
+    def test_el_aviso_solo_dice_que_el_album_esta_en_el_registro_si_quedo_anotado(self):
+        # Defecto: sin entrada en pendientes (o sin álbum) `programar` no anota nada, pero el
+        # aviso aseguraba que el álbum no se vuelve a renderizar ni a subir.
+        for registrado in (True, False):
+            with self.subTest(album_registrado=registrado):
+                self.telegram.mensajes.clear()
+                texto = self.copia_retirada(album_registrado=registrado)["texto"]
+                self.assertIn("Ya no queda pendiente de programar", texto)
+                self.assertEqual("registro de publicados" in texto, registrado)
+                self.servicio.estado["preguntas"].clear()
+
     def test_un_video_que_no_existe_sigue_con_el_aviso_de_siempre(self):
         # Comportamiento previo: `no_existe` avisa una vez, sin pregunta.
         self.terminar_programar({"ok": False, "motivo": "no_existe", "status": {}, "video_id": "VID1"})

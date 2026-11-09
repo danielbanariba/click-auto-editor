@@ -182,12 +182,21 @@ of its tooltip. That tooltip says "...es un duplicado de otro que se ha retirado
 says who filed the takedown ("De:"), for which content, and when. Anything else, or a page that
 cannot be read, keeps the old `no_existe` notice. For a copy, `programar` returns
 `motivo = copia_retirada`, removes the video from `pendientes.json` (it can never be published)
-and adds its album to the published registry if it is not there yet. The service sends one
+and adds its album to the published registry if it is not there yet. `album_registrado` says
+whether there was an album to add: a video with no entry in `pendientes.json` (one released from
+a claim) has none. The service sends one
 Telegram question with only "🗑️ Eliminar video": "No se puede publicar porque es copia de
 otro video que YouTube retiró por derechos de autor", the title, those lines, the Studio link and
-the screenshot. The button runs `eliminar_video --retirado`, which calls `videos.delete` without
-the `videos.list` check (it would always answer `no_existe`). If YouTube refuses, the failure
-notice gives the Studio link to delete it by hand.
+the screenshot. Only when `album_registrado` is true does it add that the album is in the
+registry and is not rendered or uploaded again. The button runs `eliminar_video --retirado`,
+which calls `videos.delete` without
+the `videos.list` check (it would always answer `no_existe`). The question keeps the title and
+the notice that the video was deleted names it, because `--retirado` returns the id as title (a
+question saved before this keeps the id). If YouTube refuses, the failure
+notice gives the Studio link to delete it by hand. A 404 from `videos.delete` returns
+`motivo = no_encontrado`: the notice says YouTube does not find the video (it may have been
+deleted already) and gives the Studio link, instead of "Sigue en YouTube", which any other API
+error keeps.
 
 A claimed video with no blacklist match gets a different Telegram question: its
 title, the claimants, the `/claims` link, the Studio screenshot and a note that

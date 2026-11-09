@@ -1405,6 +1405,9 @@ def apartar_copia_retirada(video_id, titulo, retiro, log):
         "titulo": titulo,
         "detalle": retiro.get("detalle", []),
         "captura_studio": retiro.get("captura_studio"),
+        # El aviso solo puede decir que el álbum está en el registro si hay álbum (sin entrada en
+        # pendientes no se anota nada); True también cuando ya estaba anotado.
+        "album_registrado": bool(album),
         "log": str(log),
     }
 
@@ -2491,6 +2494,9 @@ def eliminar_video(video_id, retirado=False, uploader=None):
             return {"ok": False, "motivo": "sin_credenciales", "video_id": video_id, "log": str(log)}
         except HttpError as exc:
             print(f"Error YouTube API: {exc}")
+            if getattr(exc.resp, "status", None) == 404:
+                # Puede ser un video que ya no existía: el servicio no debe decir que sigue en YouTube.
+                return {"ok": False, "motivo": "no_encontrado", "video_id": video_id, "log": str(log)}
             return {
                 "ok": False,
                 "motivo": "error_api",
