@@ -337,17 +337,27 @@ characters):
 written before the send button is pressed (`enviando`), so a cut or crash never sends
 twice, and nothing is ever sent twice to a video in that file. A send whose form does
 not close is `no_confirmado`. It sends at most `LIMITE_APELACIONES` (10) per run, age
-first. It runs under the `programar` lock and stops after 3 failures in a row. The
-"Revisar un problema" dialog does not close with Escape: it is closed with its X and
+first. It runs under the `programar` lock and stops after 3 failures in a row, except
+a dialog that does not open (`dialogo_desconocido`), which is counted apart and stops it only
+after 10 in a row (`MAX_SIN_ABRIR`): it is usually a passing Studio failure, the video is
+not recorded and it is tried again the next day. Appealing a video well resets both counts.
+The "Revisar un problema" dialog does not close with Escape: it is closed with its X and
 then "Salir". The service reports what was sent, what was not confirmed and what failed
 in one Telegram message, and stays silent when there was nothing to appeal.
 
 The same daily walk follows up what was sent (`enviando`, `enviado`, `no_confirmado`
-with no `resultado`), also after the send limit is reached. For age, it opens the
+with no `resultado`), also after the send limit is reached. Following up has its own
+cap of 15 min (`TIEMPO_MAXIMO_SEGUIMIENTOS_S`) inside the 45 min of the run
+(`TIEMPO_MAXIMO_S`): once it is spent the follow-ups are skipped, the list is still walked,
+and the sends keep the rest of the time. For age, it opens the
 problem dialog and only reads it: a first line "Apelación rechazada" is `rechazada`.
-Limited ads have no formal rejection. A followed-up video that is no longer in a list
-walked to its last page is `aceptada` (an empty list proves nothing, so nothing is
-accepted from it). The result is written to the entry (`resultado`, `detalle_resultado`,
+Limited ads have no formal rejection. A followed-up video that is missing from a list
+walked to its last page is first marked `ausente` (a date in its entry; `estado` and
+`resultado` stay as they are, and `--sin-enviar` writes nothing). It is `aceptada` only if
+the next run finds it missing again: a video also leaves the list when it is deleted or
+made private, and the result is written once. If it shows up in the list again, the mark is
+removed (an empty list proves nothing, so nothing is marked or accepted from it). The
+result is written to the entry (`resultado`, `detalle_resultado`,
 `fecha_resultado`) and reported once in the same Telegram message, with the Studio link.
 A follow-up that cannot be read is listed apart ("No pude ver cómo va la apelación") and
 does not count toward the 3 failures that stop the run. The follow-up opens the tooltip's

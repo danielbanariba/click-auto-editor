@@ -12,6 +12,7 @@ import contextlib
 import json
 import shutil
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -228,6 +229,22 @@ class StudioFalso:
         return ruta.fulfill(status=200, body=redireccion, content_type="text/html")
 
 
+class RelojFalso:
+    """El `time` de studio_apelaciones con un desfase que el test sube a mano.
+
+    Simula los minutos que Studio tarda sin esperarlos, y el resto (esperas, pausas) sigue siendo real.
+    """
+
+    def __init__(self):
+        self.desfase = 0.0
+
+    def monotonic(self):
+        return time.monotonic() + self.desfase
+
+    def __getattr__(self, nombre):
+        return getattr(time, nombre)
+
+
 class TestApelar(unittest.TestCase):
     def setUp(self):
         if sync_playwright is None:
@@ -405,19 +422,53 @@ class TestApelar(unittest.TestCase):
         self.assertEqual([a["id"] for a in studio.apelaciones], ["videoID0001"])
         self.assertEqual([r["video_id"] for r in resultado["resultados"]], ["videoID0003"])
 
-    def test_una_apelacion_cuyo_video_salio_de_la_lista_se_avisa_como_aceptada(self):
-        # Defecto: YouTube acepta una apelación sacando el video de la lista, y eso nunca se avisaba.
+    def test_una_apelacion_cuyo_video_sigue_fuera_de_la_lista_en_la_corrida_siguiente_se_avisa_como_aceptada(self):
+        # Defecto: YouTube acepta una apelación sacando el video de la lista, y eso nunca se avisaba;
+        # y darla por aceptada a la primera ausencia (video borrado, privado o lista que cambió)
+        # dejaba un falso "aceptada" para siempre, porque el resultado se anota una sola vez.
         self.registrar({
             "edad:videoID0001": {"estado": "enviado", "tipo": "edad", "video_id": "videoID0001", "titulo": "Uno"},
             "anuncios:videoID0002": {"estado": "enviado", "tipo": "anuncios", "video_id": "videoID0002", "titulo": "Dos"},
         })
         studio = StudioFalso([video("videoID0003", edad="rechazada"), video("videoID0004", anuncios="otro")])
-        resultado = self.apelar(studio)
+        primera = self.apelar(studio)
+        self.assertEqual(primera["resultados"], [])
+        for clave in ("edad:videoID0001", "anuncios:videoID0002"):
+            anotado = self.anotados()[clave]
+            self.assertIn("ausente", anotado)
+            self.assertEqual(anotado["estado"], "enviado")
+            self.assertNotIn("resultado", anotado)
+        segunda = self.apelar(studio)
         self.assertEqual(
-            [(r["tipo"], r["video_id"], r["titulo"], r["resultado"]) for r in resultado["resultados"]],
+            [(r["tipo"], r["video_id"], r["titulo"], r["resultado"]) for r in segunda["resultados"]],
             [("edad", "videoID0001", "Uno", "aceptada"), ("anuncios", "videoID0002", "Dos", "aceptada")],
         )
         self.assertEqual(self.anotados()["anuncios:videoID0002"]["resultado"], "aceptada")
+
+    def test_un_video_que_vuelve_a_la_lista_pierde_la_marca_de_ausente(self):
+        # Defecto: un video que falta una vez y vuelve conservaba la marca, y su próxima ausencia
+        # ya lo daba por aceptado sin que fueran dos corridas seguidas.
+        self.registrar({
+            "edad:videoID0001": {"estado": "enviado", "tipo": "edad", "video_id": "videoID0001", "titulo": "Uno"},
+        })
+        studio = StudioFalso([video("videoID0003", edad="rechazada")])
+        self.apelar(studio)
+        self.assertIn("ausente", self.anotados()["edad:videoID0001"])
+        studio.videos.append(video("videoID0001", edad="enviada"))
+        self.apelar(studio)
+        self.assertNotIn("ausente", self.anotados()["edad:videoID0001"])
+        studio.videos.pop()
+        resultado = self.apelar(studio)
+        self.assertEqual(resultado["resultados"], [])
+        self.assertNotIn("resultado", self.anotados()["edad:videoID0001"])
+
+    def test_en_la_prueba_en_seco_la_ausencia_de_un_video_no_se_anota(self):
+        # Defecto: la prueba en seco escribía en el registro real y contaba como una de las dos
+        # corridas seguidas.
+        antes = {"edad:videoID0001": {"estado": "enviado", "tipo": "edad", "video_id": "videoID0001"}}
+        self.registrar(antes)
+        self.apelar(StudioFalso([video("videoID0003", edad="rechazada")]), sin_enviar=True)
+        self.assertEqual(self.anotados(), antes)
 
     def test_una_lista_sin_recorrer_hasta_el_final_no_da_nada_por_aceptado(self):
         # Defecto: dar por aceptada una apelación porque su video no estaba en las páginas vistas.
@@ -427,6 +478,7 @@ class TestApelar(unittest.TestCase):
             resultado = self.apelar(studio)
         self.assertEqual(resultado["resultados"], [])
         self.assertNotIn("resultado", self.anotados()["edad:videoID0003"])
+        self.assertNotIn("ausente", self.anotados()["edad:videoID0003"])
 
     def test_una_lista_vacia_no_da_nada_por_aceptado(self):
         # Defecto: una lista que no llegó a cargar (sin filas) daba por aceptado todo lo pendiente.
@@ -434,6 +486,7 @@ class TestApelar(unittest.TestCase):
         resultado = self.apelar(StudioFalso([]))
         self.assertEqual(resultado["resultados"], [])
         self.assertNotIn("resultado", self.anotados()["edad:videoID0001"])
+        self.assertNotIn("ausente", self.anotados()["edad:videoID0001"])
 
     def test_un_resultado_que_no_se_puede_leer_es_un_fallo_de_revision_sin_tocar_el_registro(self):
         # Defecto: un seguimiento que falla se perdía en silencio o se avisaba como "no pude apelar".
@@ -457,6 +510,37 @@ class TestApelar(unittest.TestCase):
         self.assertNotIn("motivo", resultado)
         self.assertEqual([f.get("revision") for f in resultado["fallos"]], [True, True, True])
 
+    def test_los_seguimientos_tienen_su_propio_tiempo_y_no_le_quitan_el_suyo_a_los_envios(self):
+        # Defecto: seguimientos y envíos gastaban los mismos 45 min; con varias apelaciones
+        # esperando resultado se acababa el tiempo antes de llegar a mandar las nuevas. El
+        # seguimiento que no se puede leer también gasta tiempo (espera el diálogo).
+        pendientes = [f"videoID000{i}" for i in range(1, 6)]
+        for legible in (True, False):
+            with self.subTest(legible=legible):
+                self.registrar({f"edad:{v}": {"estado": "enviado"} for v in pendientes})
+                botones = {} if legible else {"botones": ["Otra cosa"]}
+                studio = StudioFalso(
+                    [{**video(v, edad="enviada"), **botones} for v in pendientes] + [video("videoID0006", edad="apelable")]
+                )
+                reloj = RelojFalso()
+                seguidos = []
+
+                def seguimiento_de_diez_minutos(pagina, fila):
+                    seguidos.append(fila["video_id"])
+                    reloj.desfase += 10 * 60
+                    return sa._revisar_edad(pagina, fila)
+
+                with (
+                    mock.patch.object(sa, "time", reloj),
+                    mock.patch.object(sa, "ESPERA_DIALOGO_S", 1),
+                    mock.patch.dict(sa.REVISAR, {"edad": seguimiento_de_diez_minutos}),
+                ):
+                    resultado = self.apelar(studio)
+                self.assertEqual([a["id"] for a in studio.apelaciones], ["videoID0006"])
+                self.assertNotIn("motivo", resultado)
+                # Los seguimientos que quedaban se saltaron: los 45 min de la corrida siguen siendo el techo.
+                self.assertLess(len(seguidos), len(pendientes))
+
     def test_un_resultado_leido_entre_envios_fallidos_no_reinicia_la_cuenta(self):
         # Defecto: un resultado leído entre dos envíos fallidos ponía la cuenta en cero, y un
         # formulario roto se volvía a probar con cada video del atraso.
@@ -469,9 +553,50 @@ class TestApelar(unittest.TestCase):
             roto("videoID0001"), video("videoID0002", edad="rechazada"), roto("videoID0003"),
             video("videoID0004", edad="rechazada"), roto("videoID0005"), video("videoID0006", edad="apelable"),
         ])
-        resultado = self.apelar(studio)
+        with mock.patch.object(sa, "MAX_SIN_ABRIR", 3):  # estos fallos son diálogos que no se abren
+            resultado = self.apelar(studio)
         self.assertEqual(resultado["motivo"], "demasiados_fallos")
         self.assertEqual(studio.apelaciones, [])
+
+    def test_tres_dialogos_que_no_se_abren_no_frenan_el_resto_de_la_lista(self):
+        # Defecto: un fallo pasajero de Studio (el diálogo no se abre) contaba como tres fallos
+        # seguidos y cortaba la corrida: los videos de más abajo no se apelaban nunca. Esos
+        # videos no se anotan, así que mañana se reintentan solos.
+        sin_abrir = [{**video(v, edad="apelable"), "botones": ["Otra cosa"]}
+                     for v in ("videoID0001", "videoID0002", "videoID0003")]
+        studio = StudioFalso(sin_abrir + [video("videoID0004", edad="apelable")])
+        with mock.patch.object(sa, "ESPERA_DIALOGO_S", 1):
+            resultado = self.apelar(studio)
+        self.assertEqual([a["id"] for a in studio.apelaciones], ["videoID0004"])
+        self.assertNotIn("motivo", resultado)
+        self.assertEqual([f["motivo"] for f in resultado["fallos"]], ["dialogo_desconocido"] * 3)
+        self.assertEqual(list(self.anotados()), ["edad:videoID0004"])
+
+    def test_los_dialogos_sin_abrir_se_cuentan_de_nuevo_despues_de_apelar_bien_un_video(self):
+        # Defecto: la cuenta de diálogos sin abrir no se reiniciaba al apelar bien un video, y
+        # una corrida con fallos pasajeros salteados se cortaba aunque Studio siguiera funcionando.
+        def roto(video_id):
+            return {**video(video_id, edad="apelable"), "botones": ["Otra cosa"]}
+
+        studio = StudioFalso([
+            roto("videoID0001"), roto("videoID0002"), video("videoID0003", edad="apelable"),
+            roto("videoID0004"), roto("videoID0005"), video("videoID0006", edad="apelable"),
+        ])
+        with mock.patch.object(sa, "MAX_SIN_ABRIR", 3), mock.patch.object(sa, "ESPERA_DIALOGO_S", 1):
+            resultado = self.apelar(studio)
+        self.assertEqual([a["id"] for a in studio.apelaciones], ["videoID0003", "videoID0006"])
+        self.assertNotIn("motivo", resultado)
+
+    def test_otros_fallos_siguen_cortando_la_corrida_a_los_tres_seguidos(self):
+        # Defecto: aplicar el tope holgado de los diálogos sin abrir a todo fallo, y probar un
+        # formulario roto con cada video del atraso.
+        rotos = [{**video(v, edad="apelable"), "botones": []} for v in ("videoID0001", "videoID0002", "videoID0003")]
+        studio = StudioFalso(rotos + [video("videoID0004", edad="apelable")])
+        with mock.patch.object(sa, "INTENTOS_AVISO", 1), mock.patch.object(sa, "ESPERA_AVISO_S", 1):
+            resultado = self.apelar(studio)
+        self.assertEqual(resultado["motivo"], "demasiados_fallos")
+        self.assertEqual(studio.apelaciones, [])
+        self.assertEqual([f["motivo"] for f in resultado["fallos"]], ["aviso_no_disponible"] * 3)
 
     def test_sin_sesion_en_studio_no_manda_nada_y_lo_dice(self):
         studio = StudioFalso([video("videoID0001", edad="apelable")], sin_sesion=True)

@@ -77,7 +77,12 @@ ESPERA_CONFIRMACION_S = 20
 PAUSA_S = 1.5
 MAX_PAGINAS = 50
 MAX_FALLOS = 3  # fallos seguidos (sin enviar nada) antes de dejar la corrida para mañana
+# Diálogos que no se abren, seguidos: suelen ser un fallo pasajero de Studio y el video no queda en
+# el registro (mañana se reintenta), así que se tolera más que otros fallos antes de cortar.
+MAX_SIN_ABRIR = 10
 TIEMPO_MAXIMO_S = 45 * 60
+# Lo que pueden gastar los seguimientos dentro de TIEMPO_MAXIMO_S: el resto es de los envíos.
+TIEMPO_MAXIMO_SEGUIMIENTOS_S = 15 * 60
 
 JS_FILAS = """() => Array.from(document.querySelectorAll('ytcp-video-row')).map(fila => {
     const enlace = Array.from(fila.querySelectorAll('a[href]'))
@@ -424,14 +429,19 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
     y lo cierra sin enviarlo. `capturar(nombre)` guarda una captura y devuelve su ruta.
 
     Las apelaciones ya mandadas se miran en el mismo recorrido, también después del límite:
-    "Apelación rechazada" es un rechazo, y un video que ya no está en una lista recorrida
-    hasta el final es una aceptada. Cada resultado se anota y sale una sola vez en
-    `resumen["resultados"]`.
+    "Apelación rechazada" es un rechazo, y un video que falta en una lista recorrida hasta
+    el final dos corridas seguidas es una aceptada (la primera ausencia solo anota `ausente`
+    en su entrada, y reaparecer en la lista la quita). Cada resultado se anota y sale una
+    sola vez en `resumen["resultados"]`. Mirarlas tiene su propio tope de tiempo
+    (`TIEMPO_MAXIMO_SEGUIMIENTOS_S`) dentro de los `TIEMPO_MAXIMO_S` de la corrida: gastado,
+    se saltan y el resto del tiempo es de los envíos.
     """
     resumen = {"videos": [], "fallos": [], "resultados": []}
     inicio = time.monotonic()
     enviados = 0
     fallos_seguidos = 0
+    sin_abrir_seguidos = 0
+    en_seguimientos = 0.0  # segundos gastados leyendo resultados de apelaciones ya mandadas
 
     def anotar_resultado(clave, base, resultado, detalle=None):
         resumen["resultados"].append({**base, "resultado": resultado, "detalle": detalle})
@@ -446,13 +456,17 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
         for tipo in TIPOS:
             recorrido = {"vistos": set(), "completo": False}
             for fila in candidatos(pagina, canal, tipo, registro, recorrido):
-                if time.monotonic() - inicio > TIEMPO_MAXIMO_S:
+                ahora = time.monotonic()
+                if ahora - inicio > TIEMPO_MAXIMO_S:
                     return resumen
                 clave = f"{tipo}:{fila['video_id']}"
                 base = {"tipo": tipo, "video_id": fila["video_id"], "titulo": fila["titulo"]}
                 seguimiento = clave in registro
                 if seguimiento and tipo not in REVISAR:
                     continue
+                if seguimiento and en_seguimientos > TIEMPO_MAXIMO_SEGUIMIENTOS_S:
+                    print(f"{clave}: sin revisar, se acabó el tiempo de los seguimientos")
+                    continue  # la lista se sigue recorriendo: los envíos conservan el resto de la corrida
                 if not seguimiento and not sin_enviar and enviados >= limite:
                     continue  # hoy no se manda nada más, pero la lista se sigue mirando por los resultados
                 fecha = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -474,7 +488,14 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
                     print(f"No se pudo {'revisar' if seguimiento else 'apelar'} {clave}: {exc}")
                     cerrar_dialogos(pagina)
                     if seguimiento:
+                        en_seguimientos += time.monotonic() - ahora
                         continue  # no poder leer un resultado no frena las apelaciones nuevas
+                    if exc.motivo == "dialogo_desconocido":
+                        sin_abrir_seguidos += 1
+                        if sin_abrir_seguidos >= MAX_SIN_ABRIR:
+                            resumen["motivo"] = "demasiados_fallos"
+                            return resumen
+                        continue
                     fallos_seguidos += 1
                     if fallos_seguidos >= MAX_FALLOS:
                         resumen["motivo"] = "demasiados_fallos"
@@ -484,8 +505,10 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
                     if hecho:
                         anotar_resultado(clave, base, hecho["resultado"], hecho["detalle"])
                     cerrar_dialogos(pagina)
+                    en_seguimientos += time.monotonic() - ahora
                     continue
                 fallos_seguidos = 0
+                sin_abrir_seguidos = 0
                 if hecho["estado"] in ("enviado", "no_confirmado"):
                     enviados += 1
                 if hecho["estado"] in ("enviado", "no_confirmado", "listo") and capturar:
@@ -498,12 +521,23 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
                 if hecho["estado"] == "listo":
                     break  # la prueba en seco llena un solo formulario de cada tipo
             # Sin filas no hay prueba de que la lista cargó: nada se da por aceptado.
-            if recorrido["completo"] and recorrido["vistos"]:
+            if recorrido["vistos"]:
                 for clave, datos in list(registro.items()):
                     tipo_de_clave, video_id = clave.split(":", 1)
-                    if tipo_de_clave == tipo and espera_resultado(datos) and video_id not in recorrido["vistos"]:
-                        base = {"tipo": tipo, "video_id": video_id, "titulo": datos.get("titulo")}
-                        anotar_resultado(clave, base, "aceptada")
+                    if tipo_de_clave != tipo or not espera_resultado(datos):
+                        continue
+                    if video_id in recorrido["vistos"]:
+                        if "ausente" in datos and not sin_enviar:  # volvió a la lista
+                            anotar(clave, {k: v for k, v in datos.items() if k != "ausente"})
+                    elif recorrido["completo"]:
+                        # Un video también sale de la lista si se borra, se vuelve privado o la
+                        # lista cambia: la primera ausencia solo se marca, la segunda seguida es
+                        # la aceptada.
+                        if "ausente" in datos:
+                            base = {"tipo": tipo, "video_id": video_id, "titulo": datos.get("titulo")}
+                            anotar_resultado(clave, base, "aceptada")
+                        elif not sin_enviar:
+                            anotar(clave, {**datos, "ausente": time.strftime("%Y-%m-%dT%H:%M:%S")})
     except ErrorDeApelacion as exc:
         resumen.update(motivo=exc.motivo, detalle=exc.detalle)
     except PlaywrightError as exc:
