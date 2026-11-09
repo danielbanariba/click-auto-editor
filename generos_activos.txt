@@ -2,6 +2,7 @@ ID	Articulos	Nombre
 2	13	Atmospheric Death Metal
 7	13	Beatdown Hardcore
 8	13	Black Metal
+10	13	Blackened Death Metal
 12	13	Blasting Brutal Death Metal
 13	13	Brutal Death Metal
 14	13	Brutal Deathcore
@@ -9,6 +10,7 @@ ID	Articulos	Nombre
 19	13	Death Metal
 20	13	Death 'N' Roll
 21	13	Deathcore
+22	13	Deathgrind
 25	13	Doom Metal
 28	13	Depressive Suicidal Black Metal
 32	13	Folk Metal
@@ -21,7 +23,11 @@ ID	Articulos	Nombre
 50	13	Melodic Black Metal
 51	13	Melodic Death Metal
 54	13	Noise
+60	13	Old School Death Metal
+62	13	Porngrind
 65	13	Powerviolence
+68	13	Progressive Death Metal
+73	13	Slamming Brutal Deathcore
 75	13	Slamming Brutal Death Metal
 81	13	Slamming Deathcore
 86	13	Sludge
