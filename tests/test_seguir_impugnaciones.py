@@ -329,14 +329,14 @@ class TestSeguirImpugnaciones(unittest.TestCase):
         self.assertEqual([c["ahora"] for c in sana["cambios"]], [RECHAZADA])
         self.assertEqual(fallida["cambios"], [])
 
-    def seguir_con_la_lista_a_medio_dibujar(self, filas_al_principio):
+    def seguir_con_la_lista_a_medio_dibujar(self, filas_al_principio, ms_hasta_el_resto=1500):
         self.impugnado("V1", 2, "Banda - Uno")
         dos = [("Canción A", "Artista", EN_REVISION.format(dias=29)),
                ("Canción B", "Artista", EN_REVISION.format(dias=29))]
         studio = StudioFalso({"V1": dos})
         self.seguir(studio)
         studio.reclamos["V1"] = dos[:filas_al_principio]
-        studio.despues["V1"] = (1500, dos)  # el resto de la lista llega 1,5 s después
+        studio.despues["V1"] = (ms_hasta_el_resto, dos)  # el resto de la lista llega después
         resultado = self.seguir(studio)
         guardado = json.loads(self.registro.read_text(encoding="utf-8"))["V1"]
         return resultado, guardado
@@ -351,6 +351,16 @@ class TestSeguirImpugnaciones(unittest.TestCase):
         # Defecto: el aviso de "sin reclamos" que Studio muestra un rato antes de la lista daba
         # todo por retirado y el video dejaba de seguirse.
         resultado, guardado = self.seguir_con_la_lista_a_medio_dibujar(0)
+        self.assertEqual((resultado["cambios"], resultado["fallos"]), ([], []))
+        self.assertEqual(sorted(guardado["reclamos"]), ["Canción A — Artista", "Canción B — Artista"])
+        self.assertFalse(guardado["terminado"])
+
+    def test_un_aviso_de_sin_reclamos_que_dura_mas_que_la_pausa_no_libera_el_video(self):
+        # Defecto: con el aviso de "sin reclamos" en pantalla más que la pausa entre lecturas, la
+        # segunda lectura lo veía igual, la lista vacía valía y el servicio publicaba solo un
+        # video con reclamo. Aquí el aviso dura 6 s contra una pausa de 3 s.
+        resultado, guardado = self.seguir_con_la_lista_a_medio_dibujar(0, ms_hasta_el_resto=6000)
+        self.assertEqual(resultado["liberados"], [])
         self.assertEqual((resultado["cambios"], resultado["fallos"]), ([], []))
         self.assertEqual(sorted(guardado["reclamos"]), ["Canción A — Artista", "Canción B — Artista"])
         self.assertFalse(guardado["terminado"])

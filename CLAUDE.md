@@ -264,10 +264,11 @@ the `/claims` link. A page with neither the list nor Studio's "no claims" notice
 rows that do not match the "Ver detalles" buttons, is a failure and changes nothing. The list
 draws in parts and Studio may show the "no claims" notice for a moment first, so a read
 with a claim missing, or with none, counts only when a re-read of the same page
-`PAUSA_RELECTURA_RECLAMOS_S` (10 s) later sees the same; two re-reads that keep changing are
-a failure. A video with no claim "en proceso" is no longer followed, unless the service
-disputes another of its claims later (a `servicio_impugnar_*.out` log written after its last
-read): then it is followed again. The run holds the `programar` lock, looks
+`PAUSA_RELECTURA_RECLAMOS_S` (10 s) later sees the same, and 30 s later when the list is empty
+(an empty list frees the video, and the service then publishes it by itself); two re-reads that
+keep changing are a failure. A video with no claim "en proceso" is no longer followed, unless
+the service disputes another of its claims later (a `servicio_impugnar_*.out` log written after
+its last read): then it is followed again. The run holds the `programar` lock, looks
 first at the videos checked longest ago and stops after 30 min (`TIEMPO_MAXIMO_SEGUIMIENTO_S`).
 A video whose read fails (a browser error, or a `/claims` that cannot be read) gets its check
 time updated, so it goes to the end of the next run and does not hold back the rest; if the
@@ -287,7 +288,7 @@ error, the video is not closed and its question comes in the next run.
 The step takes the parked videos from the API: the private ones scheduled more than a year
 ahead among the last `ESCANEO_PROGRAMADOS` uploads (claimed videos go two years ahead, whoever
 scheduled them). It reads each `/claims` under the `programar` lock and presses nothing.
-- No claims, in two reads: the video goes in `liberados`, and the service runs
+- No claims, in two reads 30 s apart: the video goes in `liberados`, and the service runs
   `programar --reclamo no` (unless one is already running for that video).
 - An enabled "Tomar medidas": the step reads the claimants. If they cannot be read, the video
   goes in `fallos`: without them the blacklist cannot be checked. A blacklist match goes in
