@@ -265,8 +265,13 @@ rows that do not match the "Ver detalles" buttons, is a failure and changes noth
 draws in parts and Studio may show the "no claims" notice for a moment first, so a read
 with a claim missing, or with none, counts only when a re-read of the same page
 `PAUSA_RELECTURA_RECLAMOS_S` (10 s) later sees the same; two re-reads that keep changing are
-a failure. A video with no claim "en proceso" is no longer followed. The run holds the `programar` lock, looks
+a failure. A video with no claim "en proceso" is no longer followed, unless the service
+disputes another of its claims later (a `servicio_impugnar_*.out` log written after its last
+read): then it is followed again. The run holds the `programar` lock, looks
 first at the videos checked longest ago and stops after 30 min (`TIEMPO_MAXIMO_SEGUIMIENTO_S`).
+A video whose read fails (a browser error, or a `/claims` that cannot be read) gets its check
+time updated, so it goes to the end of the next run and does not hold back the rest; if the
+browser or the session is not available, which fails every video, none is marked.
 
 When a video stops being followed, the run reports it once. If `/claims` shows no claims, it
 goes in `liberados` and the service runs `programar --video-id <id> --reclamo no` without
@@ -274,7 +279,9 @@ asking: monetization on and published now or at the first free moment, like an u
 video (the title comes from `programados.jsonl`, since the video is no longer pending). If
 it still has a claim (the dispute was rejected, or another claim remains), it goes in
 `rechazados` with each claim's status and a `/claims` screenshot, and the service asks
-"Conservar" or "🗑️ Eliminar video"; Eliminar runs `eliminar_video` with its usual check.
+"Conservar" or "🗑️ Eliminar video"; Eliminar runs `eliminar_video` with its usual check. The
+screenshot is taken before the video is saved as finished: if it fails with a disk or browser
+error, the video is not closed and its question comes in the next run.
 
 `/mapear_canal` (also written `/mapear-canal`; in the bot's menu) runs `mapear_canal` once.
 The step takes the parked videos from the API: the private ones scheduled more than a year
