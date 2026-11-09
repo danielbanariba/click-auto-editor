@@ -288,7 +288,7 @@ error, the video is not closed and its question comes in the next run.
 The step takes the parked videos from the API: the private ones scheduled more than a year
 ahead among the last `ESCANEO_PROGRAMADOS` uploads (claimed videos go two years ahead, whoever
 scheduled them). It reads each `/claims` under the `programar` lock and presses nothing.
-- No claims, in two reads: the video goes in `liberados`, and the service runs
+- No claims, in two reads 30 s apart: the video goes in `liberados`, and the service runs
   `programar --reclamo no` (unless one is already running for that video).
 - An enabled "Tomar medidas": the step reads the claimants. If they cannot be read, the video
   goes in `fallos`: without them the blacklist cannot be checked. A blacklist match goes in
