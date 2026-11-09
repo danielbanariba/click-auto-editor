@@ -769,8 +769,16 @@ def elegir_tipo(type_value):
 
 
 def tipo_de_deathgrind(datos):
-    """Tipo de disco de un post o release; la API lo da en `releaseTypes` (antes, `type`)."""
-    return elegir_tipo(datos.get("releaseTypes") or datos.get("type") or datos.get("type_id"))
+    """Tipo de disco de un post o release; la API lo da en `releaseTypes` (antes, `type`).
+
+    Prueba cada campo en orden y se queda con el primero que da un tipo: un `releaseTypes`
+    con ids que no conoce no tapa a `type` ni a `type_id`.
+    """
+    for campo in ("releaseTypes", "type", "type_id"):
+        tipo = elegir_tipo(datos.get(campo))
+        if tipo:
+            return tipo
+    return None
 
 
 def tipo_por_carpeta(nombre_carpeta):

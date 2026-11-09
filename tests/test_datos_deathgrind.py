@@ -259,3 +259,16 @@ def test_un_ep_de_deathgrind_se_sube_como_full_ep_aunque_la_carpeta_no_lo_diga(
 
     assert "FULL EP" in datos["title"].upper()
     assert "FULL ALBUM" not in datos["title"].upper()
+
+
+@pytest.mark.parametrize(
+    "datos, esperado",
+    [
+        pytest.param({"releaseTypes": [], "type": [1]}, "Album", id="releaseTypes_vacio_cae_a_type"),
+        pytest.param({"type_id": 4}, "Single", id="solo_type_id"),
+        pytest.param({"releaseTypes": [99], "type": [2]}, "EP", id="releaseTypes_desconocido_cae_a_type"),
+    ],
+)
+def test_el_tipo_sale_del_primer_campo_que_da_un_tipo_conocido(uploader, datos, esperado):
+    # Un `releaseTypes` vacío o con ids que no conoce no tapa a `type` ni a `type_id`.
+    assert uploader.tipo_de_deathgrind(datos) == esperado
