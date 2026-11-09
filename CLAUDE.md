@@ -180,7 +180,9 @@ Only then it reads Studio, inside the `programar` lock (`leer_retiro_en_studio`)
 `/video/<id>/edit` and clicks only the "Retirado" notice and the "Revisar problemas" button
 of its tooltip. That tooltip says "...es un duplicado de otro que se ha retirado...". The dialog
 says who filed the takedown ("De:"), for which content, and when. Anything else, or a page that
-cannot be read, keeps the old `no_existe` notice. For a copy, `programar` returns
+cannot be read, keeps the old `no_existe` notice. Once the tooltip has confirmed the copy, a
+screenshot that fails (browser or disk error) does not lose it: the result is still
+`copia_retirada`, with `captura_studio` None, and the question goes without the photo. For a copy, `programar` returns
 `motivo = copia_retirada`, removes the video from `pendientes.json` (it can never be published)
 and adds its album to the published registry if it is not there yet. `album_registrado` says
 whether there was an album to add: a video with no entry in `pendientes.json` (one released from

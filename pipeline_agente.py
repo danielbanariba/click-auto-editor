@@ -1349,13 +1349,13 @@ def leer_retiro_en_studio(video_id, abrir_studio=None):
 
     Solo lee: pulsa el aviso "Retirado" y "Revisar problemas", que abren información, y nada
     dentro del diálogo. Devuelve `estado` "copia_retirada" (con `detalle`, las líneas de quién
-    pidió la retirada, y `captura_studio`) solo cuando Studio dice que es una copia; cualquier
-    otra cosa, o una página que no se pudo leer, es "otro".
+    pidió la retirada, y `captura_studio`, None si la captura falló) solo cuando Studio dice que
+    es una copia; cualquier otra cosa, o una página que no se pudo leer, es "otro".
     """
     from playwright.sync_api import Error as PlaywrightError
 
     captura = DIR_CAPTURAS / f"retiro_{video_id}.png"
-    captura.parent.mkdir(parents=True, exist_ok=True)
+    captura_tomada = None
     try:
         with (abrir_studio or pagina_de_studio)() as pagina:
             try:
@@ -1380,13 +1380,19 @@ def leer_retiro_en_studio(video_id, abrir_studio=None):
                 except PlaywrightError as exc:
                     # El globo ya dice que es una copia: sin el diálogo solo falta quién la pidió.
                     print(f"No se pudo leer el diálogo del retiro: {exc}")
-                pagina.screenshot(path=str(captura))
+                try:
+                    captura.parent.mkdir(parents=True, exist_ok=True)
+                    pagina.screenshot(path=str(captura))
+                    captura_tomada = str(captura)
+                except (PlaywrightError, OSError) as exc:
+                    # La copia ya está confirmada: sin foto sigue siendo una copia.
+                    print(f"No se pudo tomar la captura del retiro: {exc}")
             except PlaywrightError as exc:
                 print(f"Error leyendo el retiro en Studio: {exc}")
                 return {"estado": "otro", "motivo": "error_navegador"}
     except NavegadorNoDisponible as exc:
         return {"estado": "otro", "motivo": exc.motivo}
-    return {"estado": "copia_retirada", "detalle": detalle, "captura_studio": str(captura)}
+    return {"estado": "copia_retirada", "detalle": detalle, "captura_studio": captura_tomada}
 
 
 def apartar_copia_retirada(video_id, titulo, retiro, log):
