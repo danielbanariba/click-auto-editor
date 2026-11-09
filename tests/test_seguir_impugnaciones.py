@@ -286,5 +286,18 @@ class TestSeguirImpugnaciones(unittest.TestCase):
         self.assertFalse(guardado["terminado"])
 
 
+class TestCompararReclamos(unittest.TestCase):
+    def test_pasar_de_dias_a_un_dia_no_es_un_cambio_pero_un_estado_distinto_si(self):
+        # Defecto: "Caduca dentro de 1 día" contra "N días" contaba como cambio de estado y daba
+        # un aviso de más al final del plazo.
+        antes = {"Canción A": EN_REVISION.format(dias=2), "Canción B": EN_REVISION.format(dias=2)}
+        reclamos = [
+            {"reclamo": "Canción A", "estado": "Impugnación en proceso de revisión. Caduca dentro de 1 día."},
+            {"reclamo": "Canción B", "estado": RECHAZADA},
+        ]
+        _, cambios = pa.comparar_reclamos(antes, reclamos)
+        self.assertEqual([(c["reclamo"], c["ahora"]) for c in cambios], [("Canción B", RECHAZADA)])
+
+
 if __name__ == "__main__":
     unittest.main()

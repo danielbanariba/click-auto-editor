@@ -258,8 +258,8 @@ disputed, opens their `/claims` and only reads it (it never presses anything). E
 a `ytcr-video-content-list-row`: its name is the song and the artist, and its status is the
 text of `#impact-container` without its buttons. The first read of a video is the baseline,
 kept in `data/agente/impugnaciones.json`. After that, a status that changed (the day count
-of "Caduca dentro de N días" does not count) or a claim that is no longer listed is a change:
-it is written there and reported once in one Telegram message, with the old and new text and
+of "Caduca dentro de N días" does not count, nor does "1 día" instead of "N días") or a claim
+that is no longer listed is a change: it is written there and reported once in one Telegram message, with the old and new text and
 the `/claims` link. A page with neither the list nor Studio's "no claims" notice, or with
 rows that do not match the "Ver detalles" buttons, is a failure and changes nothing. The list
 draws in parts and Studio may show the "no claims" notice for a moment first, so a read

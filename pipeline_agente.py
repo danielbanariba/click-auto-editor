@@ -2156,10 +2156,11 @@ def confirmar_reclamos(pagina, video_id, antes, reclamos):
 
 def comparar_reclamos(antes, reclamos):
     """Lo leído como {reclamo: estado} y los cambios contra `antes`: un estado distinto o un
-    reclamo que ya no está (`ahora` None). La cuenta de días ("Caduca dentro de N días") no
-    es un cambio. Sin `antes`, la lectura es la base y no hay cambios."""
+    reclamo que ya no está (`ahora` None). La cuenta de días ("Caduca dentro de N días" o
+    "1 día") no es un cambio. Sin `antes`, la lectura es la base y no hay cambios."""
     ahora = {reclamo["reclamo"]: reclamo["estado"] for reclamo in reclamos}
-    sin_numeros = lambda texto: re.sub(r"\d+", "#", texto)
+    # "1 día" y "N días" son la misma cuenta: se igualan junto con los números.
+    sin_numeros = lambda texto: re.sub(r"\bd[ií]as?\b", "día", re.sub(r"\d+", "#", texto))
     cambios = [
         {"reclamo": nombre, "antes": estado, "ahora": ahora.get(nombre)}
         for nombre, estado in antes.items()
