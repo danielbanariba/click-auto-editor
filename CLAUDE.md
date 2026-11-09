@@ -234,7 +234,8 @@ JSON reports `reclamos`, `impugnados`, `fallos` and a `captura` of `/claims`. A
 video with no disputable claims returns `motivo = sin_reclamos_impugnables`.
 
 `seguir_impugnaciones` follows the disputes once a day; the service launches it right after
-`apelar`. It takes the videos from the `servicio_impugnar_*.out` logs with at least one claim
+`apelar`, unless `apelar` failed with `sin_sesion_en_studio` (the follow-up would fail the same
+way and repeat the notice). It takes the videos from the `servicio_impugnar_*.out` logs with at least one claim
 disputed, opens their `/claims` and only reads it (it never presses anything). Each claim is
 a `ytcr-video-content-list-row`: its name is the song and the artist, and its status is the
 text of `#impact-container` without its buttons. The first read of a video is the baseline,

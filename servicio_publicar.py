@@ -913,8 +913,10 @@ class Servicio:
         """Avisa qué se mandó y qué resolvió YouTube; si no hubo nada, no manda nada.
 
         Después lanza `seguir_impugnaciones`: así las dos lecturas diarias de Studio van seguidas.
+        Sin sesión en Studio no lo lanza: fallaría igual y repetiría el mismo aviso.
         """
-        self.lanzar_paso("seguir_impugnaciones")
+        if resultado.get("motivo") != "sin_sesion_en_studio":
+            self.lanzar_paso("seguir_impugnaciones")
         videos = resultado.get("videos") or []
         resueltos = resultado.get("resultados") or []
         fallos = resultado.get("fallos") or []

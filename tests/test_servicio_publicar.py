@@ -1323,6 +1323,20 @@ class TestApelaciones(BaseServicio):
         self.servicio.paso()
         self.assertEqual(len(self.telegram.mensajes), antes)
 
+    def test_sin_sesion_en_studio_no_lanza_el_seguimiento_y_avisa_el_problema_una_vez(self):
+        # Defecto: `seguir_impugnaciones` se lanzaba tras cada `apelar`, también cuando `apelar`
+        # no tenía sesión: el segundo paso falla igual y el mismo problema llegaba dos veces.
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar(
+            "apelar",
+            {"ok": False, "motivo": "sin_sesion_en_studio", "videos": [], "fallos": [], "log": "/logs/apelar.log"},
+        )
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("seguir_impugnaciones"), [])
+        (aviso,) = [m for m in self.telegram.mensajes if sp.MOTIVOS_APELACION["sin_sesion_en_studio"] in m["texto"]]
+        self.assertIn("Sigo mañana", aviso["texto"])
+
 
 class TestAvisosPendientes(BaseServicio):
     """`apelar` y `seguir_impugnaciones` anotan su resultado antes de que el servicio lo avise:
