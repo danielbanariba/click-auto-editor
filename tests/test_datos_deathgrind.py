@@ -134,15 +134,21 @@ def test_sin_countries_el_pais_sale_de_location(uploader):
 
 
 class SesionPorCursor:
-    """Responde la página que pide el cursor, como /posts/search y /posts/filter."""
+    """Responde la página que pide el cursor, como /posts/search y /posts/filter.
 
-    def __init__(self, paginas):
+    Pasado `limite` pedidos falla: un bucle sin guarda no cuelga la prueba, la pone en rojo.
+    """
+
+    def __init__(self, paginas, limite=10):
         self.paginas = paginas
         self.pedidas = []
+        self.limite = limite
 
     def get(self, url, params=None, timeout=None):
         params = dict(params or {})
         self.pedidas.append((url.rsplit("/api", 1)[-1], params))
+        if len(self.pedidas) > self.limite:
+            raise AssertionError(f"más de {self.limite} pedidos: el bucle no corta")
         for (final, cursor), datos in self.paginas.items():
             if url.endswith(final) and params.get("cursor") == cursor:
                 return Respuesta(200, datos)
@@ -176,6 +182,67 @@ def test_la_busqueda_por_genero_sigue_el_cursor(uploader):
 
     assert encontrado["postId"] == 2
     assert sesion.pedidas[-1] == ("/posts/filter", {"genres": 13, "cursor": "c1"})
+
+
+SIN_RESULTADOS = {"posts": [], "hasMore": False, "nextCursor": None}
+
+
+def paginas_de(ruta, paginas):
+    """Las páginas de `ruta` por cursor; /posts/filter solo se pide tras una búsqueda sin resultados."""
+    previas = {("/posts/search", None): SIN_RESULTADOS} if ruta == "/posts/filter" else {}
+    return previas | {(ruta, cursor): pagina for cursor, pagina in paginas.items()}
+
+
+def pedidas_de(sesion, ruta):
+    return [params for url, params in sesion.pedidas if url == ruta]
+
+
+def buscar_con_solo_las_guardas_del_cursor(uploader, monkeypatch, sesion):
+    # Sin caché ni tope de páginas, solo la guarda del cursor puede cortar el bucle.
+    monkeypatch.setenv("DEATHGRIND_CACHE", "0")
+    monkeypatch.setenv("DEATHGRIND_SEARCH_PAGES", "0")
+    monkeypatch.setenv("DEATHGRIND_GENRE_PAGES", "0")
+    return uploader.buscar_release_en_api(sesion, "Banda", "Disco", GENEROS, allow_genre_fallback=True)
+
+
+@pytest.mark.parametrize("ruta", ["/posts/search", "/posts/filter"])
+def test_la_busqueda_corta_si_el_servidor_repite_el_cursor(uploader, monkeypatch, ruta):
+    # Si no cortara, pediría a DeathGrind sin fin: gasta cuota y termina en rate limit.
+    trabada = {"posts": [post_de(1, "Otra", "Disco")], "hasMore": True, "nextCursor": "c1"}
+    sesion = SesionPorCursor(paginas_de(ruta, {None: trabada, "c1": trabada}))
+
+    encontrado = buscar_con_solo_las_guardas_del_cursor(uploader, monkeypatch, sesion)
+
+    assert encontrado is None
+    assert len(pedidas_de(sesion, ruta)) == 2
+
+
+@pytest.mark.parametrize("ruta", ["/posts/search", "/posts/filter"])
+def test_la_busqueda_corta_si_hasmore_viene_sin_cursor(uploader, monkeypatch, ruta):
+    # Sin `nextCursor` no hay página siguiente que pedir: volver a pedir la primera la repetiría.
+    sin_cursor = {"posts": [post_de(1, "Otra", "Disco")], "hasMore": True, "nextCursor": None}
+    sesion = SesionPorCursor(paginas_de(ruta, {None: sin_cursor}))
+
+    encontrado = buscar_con_solo_las_guardas_del_cursor(uploader, monkeypatch, sesion)
+
+    assert encontrado is None
+    assert len(pedidas_de(sesion, ruta)) == 1
+
+
+def test_la_busqueda_para_en_el_tope_de_paginas_aunque_los_cursores_sean_nuevos(uploader, monkeypatch):
+    monkeypatch.setenv("DEATHGRIND_CACHE", "0")
+    monkeypatch.setenv("DEATHGRIND_SEARCH_PAGES", "2")
+    otra = post_de(1, "Otra", "Disco")
+    cursores = [None] + [f"c{n}" for n in range(1, 9)]
+    sesion = SesionPorCursor({
+        ("/posts/search", cursor): {"posts": [otra], "hasMore": True, "nextCursor": f"c{n}"}
+        for n, cursor in enumerate(cursores, start=1)
+    })
+
+    encontrado = uploader.buscar_release_en_api(sesion, "Banda", "Disco", GENEROS)
+
+    assert encontrado is None
+    assert len(sesion.pedidas) == 2
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="requiere ffmpeg")
