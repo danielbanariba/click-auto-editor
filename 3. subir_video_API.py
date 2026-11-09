@@ -768,6 +768,11 @@ def elegir_tipo(type_value):
     return None
 
 
+def tipo_de_deathgrind(datos):
+    """Tipo de disco de un post o release; la API lo da en `releaseTypes` (antes, `type`)."""
+    return elegir_tipo(datos.get("releaseTypes") or datos.get("type") or datos.get("type_id"))
+
+
 def tipo_por_carpeta(nombre_carpeta):
     """Tipo según el sufijo del scraper ("Banda - Disco (2009) [EP]"), para cuando DeathGrind no lo sabe."""
     return "EP" if re.search(r"\[EP\]", nombre_carpeta, re.IGNORECASE) else None
@@ -1217,16 +1222,17 @@ def buscar_release_en_api(
             if match_post(post, band_name, album_name):
                 return post
 
-        offset = data.get("offset")
-        seen_offsets = set()
-        while data.get("hasMore") and offset is not None:
+        # La siguiente página se pide con el `nextCursor` de esta
+        cursor = data.get("nextCursor")
+        seen_cursors = set()
+        while data.get("hasMore") and cursor is not None:
             if max_pages is not None and page_count >= max_pages:
                 break
-            if offset in seen_offsets:
+            if cursor in seen_cursors:
                 break
-            seen_offsets.add(offset)
+            seen_cursors.add(cursor)
             data = api_get(
-                session, "/posts/search", params={"q": query, "offset": offset}
+                session, "/posts/search", params={"q": query, "cursor": cursor}
             )
             if not data:
                 break
@@ -1235,22 +1241,22 @@ def buscar_release_en_api(
             for post in posts:
                 if match_post(post, band_name, album_name):
                     return post
-            offset = data.get("offset")
+            cursor = data.get("nextCursor")
 
     if not allow_genre_fallback or not generos:
         return None
 
     max_genre_pages = deathgrind_genre_page_limit()
     for genre_id, _genre_name in generos:
-        offset = None
+        cursor = None
         page_count = 0
-        seen_offsets = set()
+        seen_cursors = set()
         while True:
             if max_genre_pages is not None and page_count >= max_genre_pages:
                 break
             params = {"genres": genre_id}
-            if offset is not None:
-                params["offset"] = offset
+            if cursor is not None:
+                params["cursor"] = cursor
             data = api_get(session, "/posts/filter", params=params)
             if not data:
                 break
@@ -1261,10 +1267,10 @@ def buscar_release_en_api(
                     return post
             if not data.get("hasMore"):
                 break
-            offset = data.get("offset")
-            if offset is None or offset in seen_offsets:
+            cursor = data.get("nextCursor")
+            if cursor is None or cursor in seen_cursors:
                 break
-            seen_offsets.add(offset)
+            seen_cursors.add(cursor)
             time.sleep(DELAY_ENTRE_PAGINAS)
     return None
 
@@ -2452,7 +2458,7 @@ def build_preview_title(folder_path, repertorio):
 
     release_tipo = None
     if release:
-        release_tipo = elegir_tipo(release.get("type") or release.get("type_id"))
+        release_tipo = tipo_de_deathgrind(release)
     tipo_full = formatear_tipo_full(release_tipo or tipo_por_carpeta(folder_path.name))
     return f"{band} - {album} ({tipo_full})"
 
@@ -2994,7 +3000,7 @@ def procesar_carpeta(
     csv_country = None
 
     if post:
-        release_tipo = elegir_tipo(post.get("type") or post.get("type_id"))
+        release_tipo = tipo_de_deathgrind(post)
         release_year = extraer_anio(post)
         genre_text = extraer_genero(post, generos_lookup)
         post_id = post.get("postId") or post.get("post_id") or post.get("id")
@@ -3018,9 +3024,7 @@ def procesar_carpeta(
                     or obtener_band_id(post_detail, band)
                 )
             if not release_tipo:
-                release_tipo = elegir_tipo(
-                    post_detail.get("type") or post_detail.get("type_id")
-                )
+                release_tipo = tipo_de_deathgrind(post_detail)
             if not release_year:
                 release_year = extraer_anio(post_detail)
             if not genre_text:
