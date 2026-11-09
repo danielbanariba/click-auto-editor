@@ -353,6 +353,18 @@ def ultimo_json(ruta):
     return None
 
 
+def argumentos_del_paso(argumentos):
+    """Pega a `--video-id` un id que empieza con «-» (YouTube los da): suelto, argparse lo toma
+    por otra opción y el paso termina con «expected one argument». Los demás quedan igual."""
+    salida = []
+    for argumento in argumentos:
+        if salida and salida[-1] == "--video-id" and argumento.startswith("-"):
+            salida[-1] = f"--video-id={argumento}"
+        else:
+            salida.append(argumento)
+    return salida
+
+
 class Proceso:
     """Un paso de pipeline_agente.py corriendo aparte; su JSON final es el resultado."""
 
@@ -362,7 +374,7 @@ class Proceso:
         self.salida = pa.DIR_LOGS / f"servicio_{argumentos[0]}_{marca}.out"
         with open(self.salida, "w", encoding="utf-8") as archivo:
             self.popen = subprocess.Popen(
-                comando or [sys.executable, "pipeline_agente.py", *argumentos],
+                comando or [sys.executable, "pipeline_agente.py", *argumentos_del_paso(argumentos)],
                 cwd=PROJECT_ROOT,
                 stdout=archivo,
                 stderr=subprocess.STDOUT,
