@@ -287,7 +287,8 @@ scheduled them). It reads each `/claims` under the `programar` lock and presses 
   `lista_negra`, and the service asks the usual blacklist question unless one is already open
   for that video. Anything else goes in `sin_impugnar`.
 - Claims, none disputable: `en_proceso`. A page that cannot be read: `fallos`. A browser error
-  stops the run, and the first video left goes to the end of the next run.
+  stops the run, and the video being read goes to the end of the next run (if the browser did
+  not even open, nothing was read and no video is marked).
 
 The run stops after 30 min (`TIEMPO_MAXIMO_MAPEO_S`); the rest comes back in `sin_revisar`.
 `data/agente/mapeo_canal.json` keeps when each video was last read, so the next run starts

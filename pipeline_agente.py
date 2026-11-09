@@ -2373,6 +2373,7 @@ def mapear_canal(uploader=None, abrir_studio=pagina_de_studio, modulo=None, leer
         pendientes = sorted(videos, key=lambda video: mapeo.get(video["video_id"], ""))
         print(f"{len(videos)} videos aparcados por un reclamo")
         resumen = {"aparcados": len(videos), **listas, "sin_revisar": pendientes, **base}
+        leyendo = None  # el video que se está leyendo; sin él (el navegador ni abrió) nada se sella
         try:
             if pendientes:
                 modulo = modulo or impugnador()
@@ -2386,19 +2387,20 @@ def mapear_canal(uploader=None, abrir_studio=pagina_de_studio, modulo=None, leer
                         if len(pendientes) < len(videos) and time.monotonic() - inicio > TIEMPO_MAXIMO_MAPEO_S:
                             print("Se acabó el tiempo de la corrida: el resto va primero la próxima vez.")
                             break
-                        video = pendientes[0]
+                        video = leyendo = pendientes[0]
                         lista, datos = mirar_video_aparcado(pagina, video, modulo, leer_reclamantes, lista_negra)
                         print(f"{video['video_id']}: {lista}")
                         listas[lista].append(datos)
                         pendientes.pop(0)
+                        leyendo = None
                         mapeo[video["video_id"]] = datetime.now().isoformat(timespec="seconds")
                         guardar_mapeo(mapeo)
         except errores_del_paso_de_studio() as exc:
             detalle = f"{type(exc).__name__}: {exc}"[:200]
             print(f"No se pudieron leer los reclamos en Studio: {detalle}")
-            if pendientes:
+            if leyendo:
                 # El video en que falló pasa al final: si falla siempre, no frena a los demás.
-                mapeo[pendientes[0]["video_id"]] = datetime.now().isoformat(timespec="seconds")
+                mapeo[leyendo["video_id"]] = datetime.now().isoformat(timespec="seconds")
                 guardar_mapeo(mapeo)
             motivo = exc.motivo if isinstance(exc, NavegadorNoDisponible) else "error_navegador"
             return {**resumen, "ok": False, "motivo": motivo, "detalle": detalle}
