@@ -1531,8 +1531,9 @@ class Servicio:
         self.lanzar_paso(*argumentos)
 
     def respuesta_copia_retirada(self, accion, pregunta):
-        # La API no lista un video retirado por copia: se borra sin la comprobación de siempre.
-        self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"], "--retirado")
+        if accion == "eliminar_video":
+            # La API no lista un video retirado por copia: se borra sin la comprobación de siempre.
+            self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"], "--retirado")
 
     def respuesta_impugnacion_rechazada(self, accion, pregunta):
         if accion == "eliminar_video":
