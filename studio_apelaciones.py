@@ -77,6 +77,9 @@ ESPERA_CONFIRMACION_S = 20
 PAUSA_S = 1.5
 MAX_PAGINAS = 50
 MAX_FALLOS = 3  # fallos seguidos (sin enviar nada) antes de dejar la corrida para mañana
+# Diálogos que no se abren, seguidos: suelen ser un fallo pasajero de Studio y el video no queda en
+# el registro (mañana se reintenta), así que se tolera más que otros fallos antes de cortar.
+MAX_SIN_ABRIR = 10
 TIEMPO_MAXIMO_S = 45 * 60
 # Lo que pueden gastar los seguimientos dentro de TIEMPO_MAXIMO_S: el resto es de los envíos.
 TIEMPO_MAXIMO_SEGUIMIENTOS_S = 15 * 60
@@ -437,6 +440,7 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
     inicio = time.monotonic()
     enviados = 0
     fallos_seguidos = 0
+    sin_abrir_seguidos = 0
     en_seguimientos = 0.0  # segundos gastados leyendo resultados de apelaciones ya mandadas
 
     def anotar_resultado(clave, base, resultado, detalle=None):
@@ -486,6 +490,12 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
                     if seguimiento:
                         en_seguimientos += time.monotonic() - ahora
                         continue  # no poder leer un resultado no frena las apelaciones nuevas
+                    if exc.motivo == "dialogo_desconocido":
+                        sin_abrir_seguidos += 1
+                        if sin_abrir_seguidos >= MAX_SIN_ABRIR:
+                            resumen["motivo"] = "demasiados_fallos"
+                            return resumen
+                        continue
                     fallos_seguidos += 1
                     if fallos_seguidos >= MAX_FALLOS:
                         resumen["motivo"] = "demasiados_fallos"
@@ -498,6 +508,7 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
                     en_seguimientos += time.monotonic() - ahora
                     continue
                 fallos_seguidos = 0
+                sin_abrir_seguidos = 0
                 if hecho["estado"] in ("enviado", "no_confirmado"):
                     enviados += 1
                 if hecho["estado"] in ("enviado", "no_confirmado", "listo") and capturar:

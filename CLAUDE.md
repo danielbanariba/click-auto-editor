@@ -337,8 +337,11 @@ characters):
 written before the send button is pressed (`enviando`), so a cut or crash never sends
 twice, and nothing is ever sent twice to a video in that file. A send whose form does
 not close is `no_confirmado`. It sends at most `LIMITE_APELACIONES` (10) per run, age
-first. It runs under the `programar` lock and stops after 3 failures in a row. The
-"Revisar un problema" dialog does not close with Escape: it is closed with its X and
+first. It runs under the `programar` lock and stops after 3 failures in a row, except
+a dialog that does not open (`dialogo_desconocido`), which is counted apart and stops it only
+after 10 in a row (`MAX_SIN_ABRIR`): it is usually a passing Studio failure, the video is
+not recorded and it is tried again the next day. Appealing a video well resets both counts.
+The "Revisar un problema" dialog does not close with Escape: it is closed with its X and
 then "Salir". The service reports what was sent, what was not confirmed and what failed
 in one Telegram message, and stays silent when there was nothing to appeal.
 

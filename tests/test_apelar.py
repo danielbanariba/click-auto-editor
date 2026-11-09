@@ -553,9 +553,50 @@ class TestApelar(unittest.TestCase):
             roto("videoID0001"), video("videoID0002", edad="rechazada"), roto("videoID0003"),
             video("videoID0004", edad="rechazada"), roto("videoID0005"), video("videoID0006", edad="apelable"),
         ])
-        resultado = self.apelar(studio)
+        with mock.patch.object(sa, "MAX_SIN_ABRIR", 3):  # estos fallos son diálogos que no se abren
+            resultado = self.apelar(studio)
         self.assertEqual(resultado["motivo"], "demasiados_fallos")
         self.assertEqual(studio.apelaciones, [])
+
+    def test_tres_dialogos_que_no_se_abren_no_frenan_el_resto_de_la_lista(self):
+        # Defecto: un fallo pasajero de Studio (el diálogo no se abre) contaba como tres fallos
+        # seguidos y cortaba la corrida: los videos de más abajo no se apelaban nunca. Esos
+        # videos no se anotan, así que mañana se reintentan solos.
+        sin_abrir = [{**video(v, edad="apelable"), "botones": ["Otra cosa"]}
+                     for v in ("videoID0001", "videoID0002", "videoID0003")]
+        studio = StudioFalso(sin_abrir + [video("videoID0004", edad="apelable")])
+        with mock.patch.object(sa, "ESPERA_DIALOGO_S", 1):
+            resultado = self.apelar(studio)
+        self.assertEqual([a["id"] for a in studio.apelaciones], ["videoID0004"])
+        self.assertNotIn("motivo", resultado)
+        self.assertEqual([f["motivo"] for f in resultado["fallos"]], ["dialogo_desconocido"] * 3)
+        self.assertEqual(list(self.anotados()), ["edad:videoID0004"])
+
+    def test_los_dialogos_sin_abrir_se_cuentan_de_nuevo_despues_de_apelar_bien_un_video(self):
+        # Defecto: la cuenta de diálogos sin abrir no se reiniciaba al apelar bien un video, y
+        # una corrida con fallos pasajeros salteados se cortaba aunque Studio siguiera funcionando.
+        def roto(video_id):
+            return {**video(video_id, edad="apelable"), "botones": ["Otra cosa"]}
+
+        studio = StudioFalso([
+            roto("videoID0001"), roto("videoID0002"), video("videoID0003", edad="apelable"),
+            roto("videoID0004"), roto("videoID0005"), video("videoID0006", edad="apelable"),
+        ])
+        with mock.patch.object(sa, "MAX_SIN_ABRIR", 3), mock.patch.object(sa, "ESPERA_DIALOGO_S", 1):
+            resultado = self.apelar(studio)
+        self.assertEqual([a["id"] for a in studio.apelaciones], ["videoID0003", "videoID0006"])
+        self.assertNotIn("motivo", resultado)
+
+    def test_otros_fallos_siguen_cortando_la_corrida_a_los_tres_seguidos(self):
+        # Defecto: aplicar el tope holgado de los diálogos sin abrir a todo fallo, y probar un
+        # formulario roto con cada video del atraso.
+        rotos = [{**video(v, edad="apelable"), "botones": []} for v in ("videoID0001", "videoID0002", "videoID0003")]
+        studio = StudioFalso(rotos + [video("videoID0004", edad="apelable")])
+        with mock.patch.object(sa, "INTENTOS_AVISO", 1), mock.patch.object(sa, "ESPERA_AVISO_S", 1):
+            resultado = self.apelar(studio)
+        self.assertEqual(resultado["motivo"], "demasiados_fallos")
+        self.assertEqual(studio.apelaciones, [])
+        self.assertEqual([f["motivo"] for f in resultado["fallos"]], ["aviso_no_disponible"] * 3)
 
     def test_sin_sesion_en_studio_no_manda_nada_y_lo_dice(self):
         studio = StudioFalso([video("videoID0001", edad="apelable")], sin_sesion=True)
