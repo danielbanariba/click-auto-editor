@@ -115,6 +115,8 @@ BASE_URL = "https://deathgrind.club"
 API_URL = f"{BASE_URL}/api"
 DELAY_BASE_429 = 30
 MAX_RETRIES_429 = int(os.environ.get("DEATHGRIND_MAX_429", "1"))
+# Páginas de /posts/search que mira el render, las mismas que la subida (DEATHGRIND_SEARCH_PAGES).
+PAGINAS_BUSQUEDA_POST = 3
 
 CENSORED_DIR = Path(
     "/mnt/Entretenimiento/01_edicion_automatizada/Censurado"
@@ -1644,14 +1646,21 @@ def buscar_post_id_en_api(session, band_name, album_name):
         if match_post(post, band_name, album_name):
             return post.get("postId") or post.get("id")
 
-    # La siguiente página se pide con el `nextCursor` de esta
+    # La siguiente página se pide con el `nextCursor` de esta. El tope de páginas y los
+    # cursores ya pedidos cortan a un servidor que repite el mismo cursor con `hasMore`.
+    paginas = 1
     cursor = data.get("nextCursor")
+    cursores_pedidos = set()
     while data.get("hasMore") and cursor is not None:
+        if paginas >= PAGINAS_BUSQUEDA_POST or cursor in cursores_pedidos:
+            break
+        cursores_pedidos.add(cursor)
         data = api_get(
             session, "/posts/search", params={"q": query, "cursor": cursor}
         )
         if not data:
             break
+        paginas += 1
         posts = data.get("posts", [])
         for post in posts:
             if match_post(post, band_name, album_name):
