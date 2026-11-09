@@ -108,7 +108,9 @@ systemctl --user restart publicar-albumes        # after changing the code
 ```
 
 Each step is a `pipeline_agente.py` subcommand that prints one JSON line;
-logs, screenshots and state go to `data/agente/` (gitignored).
+logs, screenshots and state go to `data/agente/` (gitignored). A video id that starts with "-"
+(YouTube gives some) goes as `--video-id=<id>`: written apart, argparse reads it as another
+option and the step ends with "expected one argument". The service does it by itself.
 
 ```bash
 env/bin/python pipeline_agente.py buscar [--aleatorio] [--excluir NAME]...  # next album (or a random one) (cola, Album/, EP/), skipping the excluded ones, without rendering: its folder, cover and YouTube search screenshot; already published ones → Ya publicados/

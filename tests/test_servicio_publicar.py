@@ -2123,6 +2123,28 @@ class TestConexiones(unittest.TestCase):
         self.assertTrue(resultado["ok"])
         self.assertIn("por_aprobar", resultado)
 
+    def test_un_id_que_empieza_con_guion_llega_entero_al_paso(self):
+        # YouTube da ids que empiezan con «-». Suelto después de --video-id, argparse lo toma
+        # por otra opción y el paso termina con «expected one argument» sin hacer nada.
+        logs = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, logs)
+        casos = {
+            "programar": (["programar", "--video-id", "-trLTTpeDEs", "--esperar"], ["-trLTTpeDEs"]),
+            "un id normal": (["eliminar_video", "--video-id", "VID1"], ["VID1"]),
+            "varios ids": (
+                ["impugnar_con_ventana", "--video-id", "-xiG2-NDCGY", "--video-id", "VID2"],
+                ["-xiG2-NDCGY", "VID2"],
+            ),
+        }
+        for caso, (argumentos, esperados) in casos.items():
+            with self.subTest(caso), mock.patch.object(pa, "DIR_LOGS", logs), \
+                    mock.patch.object(sp.subprocess, "Popen") as popen:
+                sp.Proceso(argumentos)
+                comando = popen.call_args.args[0]
+                self.assertEqual(comando[1], "pipeline_agente.py")
+                leidos = pa.parse_args(comando[2:]).video_id
+                self.assertEqual(leidos if isinstance(leidos, list) else [leidos], esperados)
+
 
 class TestImpugnarConVentana(BaseServicio):
     """La ventana impugna varios videos con una sola verificación y avisa una vez."""
