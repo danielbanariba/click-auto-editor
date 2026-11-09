@@ -12,6 +12,7 @@ import contextlib
 import json
 import shutil
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -226,6 +227,22 @@ class StudioFalso:
         # Al entrar, Studio lleva a la página del canal.
         redireccion = '<script>location.replace("/channel/UCcanalFalso/videos")</script>'
         return ruta.fulfill(status=200, body=redireccion, content_type="text/html")
+
+
+class RelojFalso:
+    """El `time` de studio_apelaciones con un desfase que el test sube a mano.
+
+    Simula los minutos que Studio tarda sin esperarlos, y el resto (esperas, pausas) sigue siendo real.
+    """
+
+    def __init__(self):
+        self.desfase = 0.0
+
+    def monotonic(self):
+        return time.monotonic() + self.desfase
+
+    def __getattr__(self, nombre):
+        return getattr(time, nombre)
 
 
 class TestApelar(unittest.TestCase):
@@ -492,6 +509,37 @@ class TestApelar(unittest.TestCase):
         self.assertEqual([c["id"] for c in studio.comentarios], ["videoID0005"])
         self.assertNotIn("motivo", resultado)
         self.assertEqual([f.get("revision") for f in resultado["fallos"]], [True, True, True])
+
+    def test_los_seguimientos_tienen_su_propio_tiempo_y_no_le_quitan_el_suyo_a_los_envios(self):
+        # Defecto: seguimientos y envíos gastaban los mismos 45 min; con varias apelaciones
+        # esperando resultado se acababa el tiempo antes de llegar a mandar las nuevas. El
+        # seguimiento que no se puede leer también gasta tiempo (espera el diálogo).
+        pendientes = [f"videoID000{i}" for i in range(1, 6)]
+        for legible in (True, False):
+            with self.subTest(legible=legible):
+                self.registrar({f"edad:{v}": {"estado": "enviado"} for v in pendientes})
+                botones = {} if legible else {"botones": ["Otra cosa"]}
+                studio = StudioFalso(
+                    [{**video(v, edad="enviada"), **botones} for v in pendientes] + [video("videoID0006", edad="apelable")]
+                )
+                reloj = RelojFalso()
+                seguidos = []
+
+                def seguimiento_de_diez_minutos(pagina, fila):
+                    seguidos.append(fila["video_id"])
+                    reloj.desfase += 10 * 60
+                    return sa._revisar_edad(pagina, fila)
+
+                with (
+                    mock.patch.object(sa, "time", reloj),
+                    mock.patch.object(sa, "ESPERA_DIALOGO_S", 1),
+                    mock.patch.dict(sa.REVISAR, {"edad": seguimiento_de_diez_minutos}),
+                ):
+                    resultado = self.apelar(studio)
+                self.assertEqual([a["id"] for a in studio.apelaciones], ["videoID0006"])
+                self.assertNotIn("motivo", resultado)
+                # Los seguimientos que quedaban se saltaron: los 45 min de la corrida siguen siendo el techo.
+                self.assertLess(len(seguidos), len(pendientes))
 
     def test_un_resultado_leido_entre_envios_fallidos_no_reinicia_la_cuenta(self):
         # Defecto: un resultado leído entre dos envíos fallidos ponía la cuenta en cero, y un

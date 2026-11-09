@@ -78,6 +78,8 @@ PAUSA_S = 1.5
 MAX_PAGINAS = 50
 MAX_FALLOS = 3  # fallos seguidos (sin enviar nada) antes de dejar la corrida para mañana
 TIEMPO_MAXIMO_S = 45 * 60
+# Lo que pueden gastar los seguimientos dentro de TIEMPO_MAXIMO_S: el resto es de los envíos.
+TIEMPO_MAXIMO_SEGUIMIENTOS_S = 15 * 60
 
 JS_FILAS = """() => Array.from(document.querySelectorAll('ytcp-video-row')).map(fila => {
     const enlace = Array.from(fila.querySelectorAll('a[href]'))
@@ -427,12 +429,15 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
     "Apelación rechazada" es un rechazo, y un video que falta en una lista recorrida hasta
     el final dos corridas seguidas es una aceptada (la primera ausencia solo anota `ausente`
     en su entrada, y reaparecer en la lista la quita). Cada resultado se anota y sale una
-    sola vez en `resumen["resultados"]`.
+    sola vez en `resumen["resultados"]`. Mirarlas tiene su propio tope de tiempo
+    (`TIEMPO_MAXIMO_SEGUIMIENTOS_S`) dentro de los `TIEMPO_MAXIMO_S` de la corrida: gastado,
+    se saltan y el resto del tiempo es de los envíos.
     """
     resumen = {"videos": [], "fallos": [], "resultados": []}
     inicio = time.monotonic()
     enviados = 0
     fallos_seguidos = 0
+    en_seguimientos = 0.0  # segundos gastados leyendo resultados de apelaciones ya mandadas
 
     def anotar_resultado(clave, base, resultado, detalle=None):
         resumen["resultados"].append({**base, "resultado": resultado, "detalle": detalle})
@@ -447,13 +452,17 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
         for tipo in TIPOS:
             recorrido = {"vistos": set(), "completo": False}
             for fila in candidatos(pagina, canal, tipo, registro, recorrido):
-                if time.monotonic() - inicio > TIEMPO_MAXIMO_S:
+                ahora = time.monotonic()
+                if ahora - inicio > TIEMPO_MAXIMO_S:
                     return resumen
                 clave = f"{tipo}:{fila['video_id']}"
                 base = {"tipo": tipo, "video_id": fila["video_id"], "titulo": fila["titulo"]}
                 seguimiento = clave in registro
                 if seguimiento and tipo not in REVISAR:
                     continue
+                if seguimiento and en_seguimientos > TIEMPO_MAXIMO_SEGUIMIENTOS_S:
+                    print(f"{clave}: sin revisar, se acabó el tiempo de los seguimientos")
+                    continue  # la lista se sigue recorriendo: los envíos conservan el resto de la corrida
                 if not seguimiento and not sin_enviar and enviados >= limite:
                     continue  # hoy no se manda nada más, pero la lista se sigue mirando por los resultados
                 fecha = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -475,6 +484,7 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
                     print(f"No se pudo {'revisar' if seguimiento else 'apelar'} {clave}: {exc}")
                     cerrar_dialogos(pagina)
                     if seguimiento:
+                        en_seguimientos += time.monotonic() - ahora
                         continue  # no poder leer un resultado no frena las apelaciones nuevas
                     fallos_seguidos += 1
                     if fallos_seguidos >= MAX_FALLOS:
@@ -485,6 +495,7 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
                     if hecho:
                         anotar_resultado(clave, base, hecho["resultado"], hecho["detalle"])
                     cerrar_dialogos(pagina)
+                    en_seguimientos += time.monotonic() - ahora
                     continue
                 fallos_seguidos = 0
                 if hecho["estado"] in ("enviado", "no_confirmado"):

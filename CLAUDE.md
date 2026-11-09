@@ -343,7 +343,10 @@ then "Salir". The service reports what was sent, what was not confirmed and what
 in one Telegram message, and stays silent when there was nothing to appeal.
 
 The same daily walk follows up what was sent (`enviando`, `enviado`, `no_confirmado`
-with no `resultado`), also after the send limit is reached. For age, it opens the
+with no `resultado`), also after the send limit is reached. Following up has its own
+cap of 15 min (`TIEMPO_MAXIMO_SEGUIMIENTOS_S`) inside the 45 min of the run
+(`TIEMPO_MAXIMO_S`): once it is spent the follow-ups are skipped, the list is still walked,
+and the sends keep the rest of the time. For age, it opens the
 problem dialog and only reads it: a first line "Apelación rechazada" is `rechazada`.
 Limited ads have no formal rejection. A followed-up video that is missing from a list
 walked to its last page is first marked `ausente` (a date in its entry; `estado` and
