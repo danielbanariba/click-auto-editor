@@ -255,15 +255,21 @@ class _RespuestaApi:
 
 
 class _SesionPorCursor:
-    """Responde la página de /posts/search que pide el cursor."""
+    """Responde la página de /posts/search que pide el cursor.
 
-    def __init__(self, paginas):
+    Pasado `limite` pedidos falla: un bucle sin guarda no cuelga la prueba, la pone en rojo.
+    """
+
+    def __init__(self, paginas, limite=10):
         self.paginas = paginas
         self.pedidas = []
+        self.limite = limite
 
     def get(self, url, params=None, timeout=None):
         params = dict(params or {})
         self.pedidas.append(params)
+        if len(self.pedidas) > self.limite:
+            raise AssertionError(f"más de {self.limite} pedidos: el bucle no corta")
         if url.endswith("/posts/search") and params.get("cursor") in self.paginas:
             return _RespuestaApi(200, self.paginas[params.get("cursor")])
         return _RespuestaApi(404)
@@ -279,3 +285,25 @@ def test_la_busqueda_del_post_sigue_el_cursor(render_mod):
 
     assert render_mod.buscar_post_id_en_api(sesion, "Banda", "Disco") == 2
     assert sesion.pedidas[1] == {"q": "Banda Disco", "cursor": "c1"}
+
+
+def test_la_busqueda_del_post_corta_si_el_servidor_repite_el_cursor(render_mod):
+    # Si no cortara, pediría a DeathGrind sin fin con cada álbum que se renderiza.
+    trabada = {"posts": [{"postId": 1, "bands": [{"name": "Otra"}], "album": "Disco"}],
+               "hasMore": True, "nextCursor": "c1"}
+    sesion = _SesionPorCursor({None: trabada, "c1": trabada})
+
+    assert render_mod.buscar_post_id_en_api(sesion, "Banda", "Disco") is None
+    assert len(sesion.pedidas) == 2
+
+
+def test_la_busqueda_del_post_para_en_el_tope_de_paginas_aunque_los_cursores_sean_nuevos(render_mod):
+    otra = {"postId": 1, "bands": [{"name": "Otra"}], "album": "Disco"}
+    cursores = [None] + [f"c{n}" for n in range(1, 9)]
+    sesion = _SesionPorCursor({
+        cursor: {"posts": [otra], "hasMore": True, "nextCursor": f"c{n}"}
+        for n, cursor in enumerate(cursores, start=1)
+    })
+
+    assert render_mod.buscar_post_id_en_api(sesion, "Banda", "Disco") is None
+    assert len(sesion.pedidas) == render_mod.PAGINAS_BUSQUEDA_POST
