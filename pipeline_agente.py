@@ -2036,7 +2036,9 @@ P_IMPUGNACION_PENDIENTE = re.compile(r"en proceso", re.IGNORECASE)
 TIEMPO_MAXIMO_SEGUIMIENTO_S = 30 * 60
 # Una lista que todavía se dibuja muestra menos filas, o un rato el aviso de "sin reclamos":
 # un reclamo que falta, o ninguno, cuenta solo si otra lectura unos segundos después ve lo mismo.
+# Una lista vacía espera el triple (30 s): dar por liberado un video con reclamo lo publica solo.
 PAUSA_RELECTURA_RECLAMOS_S = 10
+ESPERA_EXTRA_LISTA_VACIA = 3
 RELECTURAS_DE_RECLAMOS = 2
 
 # Una fila por reclamo de /claims (visto en vivo el 2026-11-04): sus renglones (canción,
@@ -2145,14 +2147,15 @@ def leer_reclamos(pagina, video_id, recargar=True):
 
 def confirmar_reclamos(pagina, video_id, antes, reclamos):
     """`reclamos` si están todos los de `antes` y la lista no está vacía; si no, relee la misma
-    página tras una pausa y vale cuando dos lecturas seguidas coinciden. None si no coinciden."""
+    página tras una pausa (el triple si la lista está vacía) y vale cuando dos lecturas seguidas
+    coinciden. None si no coinciden."""
     relecturas = 0
     while reclamos is not None and (
         not reclamos or not set(antes) <= {reclamo["reclamo"] for reclamo in reclamos}
     ):
         if relecturas == RELECTURAS_DE_RECLAMOS:
             return None
-        time.sleep(PAUSA_RELECTURA_RECLAMOS_S)
+        time.sleep(PAUSA_RELECTURA_RECLAMOS_S * (1 if reclamos else ESPERA_EXTRA_LISTA_VACIA))
         otra = leer_reclamos(pagina, video_id, recargar=False)
         relecturas += 1
         if otra == reclamos:
