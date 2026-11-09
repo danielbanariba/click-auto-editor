@@ -424,9 +424,10 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
     y lo cierra sin enviarlo. `capturar(nombre)` guarda una captura y devuelve su ruta.
 
     Las apelaciones ya mandadas se miran en el mismo recorrido, también después del límite:
-    "Apelación rechazada" es un rechazo, y un video que ya no está en una lista recorrida
-    hasta el final es una aceptada. Cada resultado se anota y sale una sola vez en
-    `resumen["resultados"]`.
+    "Apelación rechazada" es un rechazo, y un video que falta en una lista recorrida hasta
+    el final dos corridas seguidas es una aceptada (la primera ausencia solo anota `ausente`
+    en su entrada, y reaparecer en la lista la quita). Cada resultado se anota y sale una
+    sola vez en `resumen["resultados"]`.
     """
     resumen = {"videos": [], "fallos": [], "resultados": []}
     inicio = time.monotonic()
@@ -498,12 +499,23 @@ def apelar_videos(pagina, registro, anotar, limite, sin_enviar=False, capturar=N
                 if hecho["estado"] == "listo":
                     break  # la prueba en seco llena un solo formulario de cada tipo
             # Sin filas no hay prueba de que la lista cargó: nada se da por aceptado.
-            if recorrido["completo"] and recorrido["vistos"]:
+            if recorrido["vistos"]:
                 for clave, datos in list(registro.items()):
                     tipo_de_clave, video_id = clave.split(":", 1)
-                    if tipo_de_clave == tipo and espera_resultado(datos) and video_id not in recorrido["vistos"]:
-                        base = {"tipo": tipo, "video_id": video_id, "titulo": datos.get("titulo")}
-                        anotar_resultado(clave, base, "aceptada")
+                    if tipo_de_clave != tipo or not espera_resultado(datos):
+                        continue
+                    if video_id in recorrido["vistos"]:
+                        if "ausente" in datos and not sin_enviar:  # volvió a la lista
+                            anotar(clave, {k: v for k, v in datos.items() if k != "ausente"})
+                    elif recorrido["completo"]:
+                        # Un video también sale de la lista si se borra, se vuelve privado o la
+                        # lista cambia: la primera ausencia solo se marca, la segunda seguida es
+                        # la aceptada.
+                        if "ausente" in datos:
+                            base = {"tipo": tipo, "video_id": video_id, "titulo": datos.get("titulo")}
+                            anotar_resultado(clave, base, "aceptada")
+                        elif not sin_enviar:
+                            anotar(clave, {**datos, "ausente": time.strftime("%Y-%m-%dT%H:%M:%S")})
     except ErrorDeApelacion as exc:
         resumen.update(motivo=exc.motivo, detalle=exc.detalle)
     except PlaywrightError as exc:

@@ -405,19 +405,53 @@ class TestApelar(unittest.TestCase):
         self.assertEqual([a["id"] for a in studio.apelaciones], ["videoID0001"])
         self.assertEqual([r["video_id"] for r in resultado["resultados"]], ["videoID0003"])
 
-    def test_una_apelacion_cuyo_video_salio_de_la_lista_se_avisa_como_aceptada(self):
-        # Defecto: YouTube acepta una apelación sacando el video de la lista, y eso nunca se avisaba.
+    def test_una_apelacion_cuyo_video_sigue_fuera_de_la_lista_en_la_corrida_siguiente_se_avisa_como_aceptada(self):
+        # Defecto: YouTube acepta una apelación sacando el video de la lista, y eso nunca se avisaba;
+        # y darla por aceptada a la primera ausencia (video borrado, privado o lista que cambió)
+        # dejaba un falso "aceptada" para siempre, porque el resultado se anota una sola vez.
         self.registrar({
             "edad:videoID0001": {"estado": "enviado", "tipo": "edad", "video_id": "videoID0001", "titulo": "Uno"},
             "anuncios:videoID0002": {"estado": "enviado", "tipo": "anuncios", "video_id": "videoID0002", "titulo": "Dos"},
         })
         studio = StudioFalso([video("videoID0003", edad="rechazada"), video("videoID0004", anuncios="otro")])
-        resultado = self.apelar(studio)
+        primera = self.apelar(studio)
+        self.assertEqual(primera["resultados"], [])
+        for clave in ("edad:videoID0001", "anuncios:videoID0002"):
+            anotado = self.anotados()[clave]
+            self.assertIn("ausente", anotado)
+            self.assertEqual(anotado["estado"], "enviado")
+            self.assertNotIn("resultado", anotado)
+        segunda = self.apelar(studio)
         self.assertEqual(
-            [(r["tipo"], r["video_id"], r["titulo"], r["resultado"]) for r in resultado["resultados"]],
+            [(r["tipo"], r["video_id"], r["titulo"], r["resultado"]) for r in segunda["resultados"]],
             [("edad", "videoID0001", "Uno", "aceptada"), ("anuncios", "videoID0002", "Dos", "aceptada")],
         )
         self.assertEqual(self.anotados()["anuncios:videoID0002"]["resultado"], "aceptada")
+
+    def test_un_video_que_vuelve_a_la_lista_pierde_la_marca_de_ausente(self):
+        # Defecto: un video que falta una vez y vuelve conservaba la marca, y su próxima ausencia
+        # ya lo daba por aceptado sin que fueran dos corridas seguidas.
+        self.registrar({
+            "edad:videoID0001": {"estado": "enviado", "tipo": "edad", "video_id": "videoID0001", "titulo": "Uno"},
+        })
+        studio = StudioFalso([video("videoID0003", edad="rechazada")])
+        self.apelar(studio)
+        self.assertIn("ausente", self.anotados()["edad:videoID0001"])
+        studio.videos.append(video("videoID0001", edad="enviada"))
+        self.apelar(studio)
+        self.assertNotIn("ausente", self.anotados()["edad:videoID0001"])
+        studio.videos.pop()
+        resultado = self.apelar(studio)
+        self.assertEqual(resultado["resultados"], [])
+        self.assertNotIn("resultado", self.anotados()["edad:videoID0001"])
+
+    def test_en_la_prueba_en_seco_la_ausencia_de_un_video_no_se_anota(self):
+        # Defecto: la prueba en seco escribía en el registro real y contaba como una de las dos
+        # corridas seguidas.
+        antes = {"edad:videoID0001": {"estado": "enviado", "tipo": "edad", "video_id": "videoID0001"}}
+        self.registrar(antes)
+        self.apelar(StudioFalso([video("videoID0003", edad="rechazada")]), sin_enviar=True)
+        self.assertEqual(self.anotados(), antes)
 
     def test_una_lista_sin_recorrer_hasta_el_final_no_da_nada_por_aceptado(self):
         # Defecto: dar por aceptada una apelación porque su video no estaba en las páginas vistas.
@@ -427,6 +461,7 @@ class TestApelar(unittest.TestCase):
             resultado = self.apelar(studio)
         self.assertEqual(resultado["resultados"], [])
         self.assertNotIn("resultado", self.anotados()["edad:videoID0003"])
+        self.assertNotIn("ausente", self.anotados()["edad:videoID0003"])
 
     def test_una_lista_vacia_no_da_nada_por_aceptado(self):
         # Defecto: una lista que no llegó a cargar (sin filas) daba por aceptado todo lo pendiente.
@@ -434,6 +469,7 @@ class TestApelar(unittest.TestCase):
         resultado = self.apelar(StudioFalso([]))
         self.assertEqual(resultado["resultados"], [])
         self.assertNotIn("resultado", self.anotados()["edad:videoID0001"])
+        self.assertNotIn("ausente", self.anotados()["edad:videoID0001"])
 
     def test_un_resultado_que_no_se_puede_leer_es_un_fallo_de_revision_sin_tocar_el_registro(self):
         # Defecto: un seguimiento que falla se perdía en silencio o se avisaba como "no pude apelar".
