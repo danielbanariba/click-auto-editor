@@ -45,6 +45,9 @@ ESPERA_TELEGRAM_S = 20
 PAUSA_TELEGRAM_MAX_S = 60
 REINTENTO_S = 30 * 60
 INTENTOS_PROGRAMAR = 3  # fallos seguidos de `programar` antes de preguntar
+# Veces que Telegram puede rechazar un aviso de resultado, con Telegram respondiendo, antes de
+# descartarlo: un texto que nunca acepta no puede frenar los avisos que vienen detrás.
+INTENTOS_AVISO = 5
 INTERVALO_APELACIONES_S = 24 * 3600
 # Cuántos álbumes apartados por ya publicados lista el aviso; del resto solo dice cuántos son.
 MAX_APARTADOS_EN_AVISO = 10
@@ -431,10 +434,12 @@ class Servicio:
         # despues_de_lista: el álbum que estaba en pantalla al tocar ▶️; se pregunta al terminar.
         # lote_impugnar: el «Impugnar todos» en curso: los videos que faltan (el primero se está
         # impugnando) y lo que salió con los anteriores.
+        # avisos_pendientes: avisos de resultados ya anotados en apelaciones.json o
+        # impugnaciones.json que Telegram todavía no recibió: [{"texto", "intentos"}].
         self.estado = {
             "offset": 0, "preguntas": {}, "rechazados": [], "subidos": [], "aceptados": [],
             "aleatorio": False, "modo_lista": False, "lista": [], "despues_de_lista": None,
-            "lote_impugnar": None,
+            "lote_impugnar": None, "avisos_pendientes": [],
         }
         self.tareas = []
         self.inicios = {}  # proceso -> momento en que se lanzó
@@ -465,6 +470,7 @@ class Servicio:
         if self.estado["lote_impugnar"] and self.estado["lote_impugnar"]["videos"]:
             self.anotar_en_el_lote({"ok": False, "motivo": "interrumpido"})
         self.enviar_preguntas()
+        self.enviar_avisos_pendientes()
 
     def guardar(self):
         self.ruta_estado.parent.mkdir(parents=True, exist_ok=True)
@@ -480,6 +486,7 @@ class Servicio:
         self.revisar_reintentos()
         self.revisar_apelaciones()
         self.enviar_preguntas()
+        self.enviar_avisos_pendientes()
         self.avanzar_album()
         self.atender_telegram()
 
@@ -968,7 +975,7 @@ class Servicio:
             return
         if motivo or fallos:
             lineas.append(f"Log: {resultado.get('log')}")
-        self.avisar("\n".join(["📨 Apelaciones de hoy"] + lineas))
+        self.avisar_con_reintento("\n".join(["📨 Apelaciones de hoy"] + lineas))
 
     def tras_seguir_impugnaciones(self, resultado, argumentos):
         """Avisa qué reclamos impugnados cambiaron en Studio; si nada cambió, no manda nada.
@@ -1007,7 +1014,7 @@ class Servicio:
         if lineas:
             if motivo or fallos:
                 lineas.append(f"Log: {resultado.get('log')}")
-            self.avisar("\n".join(lineas))
+            self.avisar_con_reintento("\n".join(lineas))
         for liberado in resultado.get("liberados") or []:
             # Studio ya lo leyó dos veces sin reclamos: sin la espera ni otra revisión.
             self.lanzar_paso("programar", "--video-id", liberado["video_id"], "--reclamo", "no")
@@ -1208,6 +1215,34 @@ class Servicio:
             self.telegram.mandar(texto, foto=foto)
         except ERRORES_TELEGRAM as exc:
             log.warning("No se pudo mandar el aviso (%s): %s", exc, texto)
+
+    def avisar_con_reintento(self, texto):
+        """Un aviso cuyo resultado ya quedó anotado en disco: se guarda antes de mandarlo y solo
+        sale de la lista cuando Telegram lo recibe, así que un rechazo no lo pierde."""
+        self.estado["avisos_pendientes"].append({"texto": texto, "intentos": 0})
+        self.guardar()
+        self.enviar_avisos_pendientes()
+
+    def enviar_avisos_pendientes(self):
+        """Manda, en orden, los avisos que Telegram todavía no recibió. Con Telegram sin responder
+        no cuenta el intento (el aviso espera a que vuelva); con Telegram respondiendo, un aviso
+        que lo rechaza INTENTOS_AVISO veces se descarta."""
+        pendientes = self.estado["avisos_pendientes"]
+        while pendientes:
+            aviso = pendientes[0]
+            try:
+                self.telegram.mandar(aviso["texto"])
+            except ERRORES_TELEGRAM as exc:
+                if self.fallos_telegram:
+                    return
+                aviso["intentos"] += 1
+                if aviso["intentos"] < INTENTOS_AVISO:
+                    log.warning("Telegram rechazó un aviso (intento %d); reintento: %s", aviso["intentos"], exc)
+                    self.guardar()
+                    return
+                log.warning("Descarto un aviso que Telegram rechazó %d veces (%s): %s", INTENTOS_AVISO, exc, aviso["texto"])
+            pendientes.pop(0)
+            self.guardar()
 
     def avisar_una_vez(self, clave, texto):
         if clave not in self.avisos:

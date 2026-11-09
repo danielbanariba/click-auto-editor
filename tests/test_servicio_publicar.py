@@ -1324,6 +1324,109 @@ class TestApelaciones(BaseServicio):
         self.assertEqual(len(self.telegram.mensajes), antes)
 
 
+class TestAvisosPendientes(BaseServicio):
+    """`apelar` y `seguir_impugnaciones` anotan su resultado antes de que el servicio lo avise:
+    si Telegram rechaza el mensaje, el aviso tiene que llegar en un paso posterior."""
+
+    DIA = sp.INTERVALO_APELACIONES_S
+    APELACION = {
+        "ok": True, "fallos": [],
+        "videos": [{"tipo": "edad", "video_id": "ID1", "titulo": "Banda - Uno", "estado": "enviado"}],
+    }
+    SEGUIMIENTO = {
+        "ok": True, "fallos": [],
+        "cambios": [{"video_id": "V1", "titulo": "Banda - Dos", "reclamo": "Canción B — Artista",
+                     "antes": "En revisión", "ahora": "El reclamante ha rechazado tu impugnación."}],
+    }
+
+    def telegram_que_rechaza(self, rechaza):
+        """`mandar` lanza ErrorTelegram mientras `rechaza(texto)` sea verdadero."""
+        def mandar(texto, botones=None, foto=None):
+            if rechaza(texto):
+                raise sp.ErrorTelegram("sendMessage: Bad Request")
+            return TelegramFalso.mandar(self.telegram, texto, botones=botones, foto=foto)
+
+        self.telegram.mandar = mandar
+
+    def telegram_que_rechaza_una_vez(self, fragmento):
+        """El primer mensaje que trae `fragmento` es rechazado; los demás pasan. Devuelve los
+        rechazos que faltan: vacío cuando ya rechazó ese mensaje."""
+        rechazos = [True]
+        self.telegram_que_rechaza(lambda texto: fragmento in texto and bool(rechazos) and rechazos.pop())
+        return rechazos
+
+    def recibidos(self, fragmento):
+        return [m["texto"] for m in self.telegram.mensajes if fragmento in m["texto"]]
+
+    def test_el_aviso_de_la_apelacion_que_telegram_rechaza_llega_en_el_paso_siguiente_una_sola_vez(self):
+        # Defecto: `avisar` traga el error de Telegram y el resultado ya quedó anotado en
+        # apelaciones.json: el aviso no salía nunca.
+        rechazos = self.telegram_que_rechaza_una_vez("Banda - Uno")
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar("apelar", self.APELACION)
+        for _ in range(3):
+            self.servicio.paso()
+        self.assertEqual(rechazos, [])  # el primer envío sí fue rechazado
+        self.assertEqual(len(self.recibidos("Banda - Uno")), 1)
+        self.assertEqual(self.servicio.estado["avisos_pendientes"], [])
+
+    def test_el_aviso_del_seguimiento_que_telegram_rechaza_llega_en_el_paso_siguiente_una_sola_vez(self):
+        # Defecto: el mismo, con el resultado ya anotado en impugnaciones.json.
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar("apelar", {"ok": True, "videos": [], "fallos": []})
+        self.servicio.paso()
+        rechazos = self.telegram_que_rechaza_una_vez("Canción B")
+        self.lanzador.terminar("seguir_impugnaciones", self.SEGUIMIENTO)
+        for _ in range(3):
+            self.servicio.paso()
+        self.assertEqual(rechazos, [])  # el primer envío sí fue rechazado
+        self.assertEqual(len(self.recibidos("Canción B")), 1)
+
+    def test_el_aviso_que_no_salio_sobrevive_a_un_reinicio(self):
+        # Defecto: la cola solo en memoria: reiniciar el servicio con el aviso sin enviar lo perdía.
+        self.telegram_que_rechaza(lambda texto: "Banda - Uno" in texto)
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar("apelar", self.APELACION)
+        self.servicio.paso()
+        self.telegram_que_rechaza(lambda texto: False)
+        self.servicio = self.nuevo_servicio()
+        self.servicio.paso()
+        self.assertEqual(len(self.recibidos("Banda - Uno")), 1)
+
+    def test_con_telegram_caido_el_aviso_espera_sin_gastar_intentos(self):
+        # Defecto: contar como intento cada paso con Telegram sin responder; una caída larga
+        # descartaba el aviso, que es justo cuando más hace falta que llegue después.
+        self.telegram.falla = sp.ErrorTelegram("sin red")
+        self.telegram_que_rechaza(lambda texto: True)
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar("apelar", self.APELACION)
+        for _ in range(sp.INTENTOS_AVISO + 3):
+            self.servicio.paso()
+        self.telegram.falla = None
+        self.telegram_que_rechaza(lambda texto: False)
+        self.servicio.paso()
+        self.assertEqual(len(self.recibidos("Banda - Uno")), 1)
+
+    def test_un_aviso_que_telegram_rechaza_siempre_se_descarta_y_no_bloquea_los_demas(self):
+        # Defecto: sin tope de intentos, un texto que Telegram nunca acepta quedaba primero de la
+        # cola para siempre y los avisos de después no salían.
+        self.telegram_que_rechaza(lambda texto: "Banda - Uno" in texto)
+        self.ahora = self.DIA
+        self.servicio.paso()
+        self.lanzador.terminar("apelar", self.APELACION)
+        self.servicio.paso()
+        self.lanzador.terminar("seguir_impugnaciones", self.SEGUIMIENTO)
+        for _ in range(sp.INTENTOS_AVISO + 1):
+            self.servicio.paso()
+        self.assertEqual(len(self.recibidos("Canción B")), 1)
+        self.assertEqual(self.recibidos("Banda - Uno"), [])
+        self.assertEqual(self.servicio.estado["avisos_pendientes"], [])
+
+
 class TestProgramarFallido(BaseServicio):
     ARGUMENTOS = ["programar", "--video-id", "VID1", "--esperar"]
     REINTENTO = "⚠️ No pude programar VID1 (error_api). Reintento en 30 min."

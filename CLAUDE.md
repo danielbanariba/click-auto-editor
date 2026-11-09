@@ -340,7 +340,12 @@ not close is `no_confirmado`. It sends at most `LIMITE_APELACIONES` (10) per run
 first. It runs under the `programar` lock and stops after 3 failures in a row. The
 "Revisar un problema" dialog does not close with Escape: it is closed with its X and
 then "Salir". The service reports what was sent, what was not confirmed and what failed
-in one Telegram message, and stays silent when there was nothing to appeal.
+in one Telegram message, and stays silent when there was nothing to appeal. This report and the
+follow-up's are saved in `avisos_pendientes` (`data/agente/servicio.json`) before they are sent
+and leave it only when Telegram accepts them: a message Telegram refuses goes out again on the
+next steps, and after `INTENTOS_AVISO` (5) refusals while Telegram answers it is dropped, so a
+text Telegram never accepts cannot block the next ones. With Telegram down it waits and spends
+no attempts.
 
 The same daily walk follows up what was sent (`enviando`, `enviado`, `no_confirmado`
 with no `resultado`), also after the send limit is reached. For age, it opens the
