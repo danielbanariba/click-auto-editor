@@ -243,3 +243,39 @@ def test_otra_falla_del_render_cpp_sigue_mandando_el_album_a_error404(
     assert (resultado.success, resultado.reason) == (False, "cpp")
     assert resultado.move_to_error is True
     assert resultado.stop_requested is False
+
+
+class _RespuestaApi:
+    def __init__(self, status_code, datos=None):
+        self.status_code = status_code
+        self.datos = datos
+
+    def json(self):
+        return self.datos
+
+
+class _SesionPorCursor:
+    """Responde la página de /posts/search que pide el cursor."""
+
+    def __init__(self, paginas):
+        self.paginas = paginas
+        self.pedidas = []
+
+    def get(self, url, params=None, timeout=None):
+        params = dict(params or {})
+        self.pedidas.append(params)
+        if url.endswith("/posts/search") and params.get("cursor") in self.paginas:
+            return _RespuestaApi(200, self.paginas[params.get("cursor")])
+        return _RespuestaApi(404)
+
+
+def test_la_busqueda_del_post_sigue_el_cursor(render_mod):
+    sesion = _SesionPorCursor({
+        None: {"posts": [{"postId": 1, "bands": [{"name": "Otra"}], "album": "Disco"}],
+               "hasMore": True, "nextCursor": "c1"},
+        "c1": {"posts": [{"postId": 2, "bands": [{"name": "Banda"}], "album": "Disco"}],
+               "hasMore": False, "nextCursor": None},
+    })
+
+    assert render_mod.buscar_post_id_en_api(sesion, "Banda", "Disco") == 2
+    assert sesion.pedidas[1] == {"q": "Banda Disco", "cursor": "c1"}

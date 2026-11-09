@@ -131,3 +131,64 @@ def test_sin_countries_el_pais_sale_de_location(uploader):
     meta = pais_con_bandera(uploader, banda)
 
     assert (meta["name"], meta["flag"]) == ("Brazil", "🇧🇷")
+
+
+class SesionPorCursor:
+    """Responde la página que pide el cursor, como /posts/search y /posts/filter."""
+
+    def __init__(self, paginas):
+        self.paginas = paginas
+        self.pedidas = []
+
+    def get(self, url, params=None, timeout=None):
+        params = dict(params or {})
+        self.pedidas.append((url.rsplit("/api", 1)[-1], params))
+        for (final, cursor), datos in self.paginas.items():
+            if url.endswith(final) and params.get("cursor") == cursor:
+                return Respuesta(200, datos)
+        return Respuesta(404)
+
+
+def post_de(post_id, banda, album, **campos):
+    return {"postId": post_id, "bands": [{"name": banda}], "album": album, **campos}
+
+
+def test_la_busqueda_sigue_el_cursor_hasta_la_pagina_del_disco(uploader):
+    sesion = SesionPorCursor({
+        ("/posts/search", None): {"posts": [post_de(1, "Otra", "Disco")], "hasMore": True, "nextCursor": "c1"},
+        ("/posts/search", "c1"): {"posts": [post_de(2, "Banda", "Disco")], "hasMore": False, "nextCursor": None},
+    })
+
+    encontrado = uploader.buscar_release_en_api(sesion, "Banda", "Disco", GENEROS)
+
+    assert encontrado["postId"] == 2
+    assert sesion.pedidas[1] == ("/posts/search", {"q": "Banda Disco", "cursor": "c1"})
+
+
+def test_la_busqueda_por_genero_sigue_el_cursor(uploader):
+    sesion = SesionPorCursor({
+        ("/posts/search", None): {"posts": [], "hasMore": False, "nextCursor": None},
+        ("/posts/filter", None): {"posts": [post_de(1, "Otra", "Disco")], "hasMore": True, "nextCursor": "c1"},
+        ("/posts/filter", "c1"): {"posts": [post_de(2, "Banda", "Disco")], "hasMore": False, "nextCursor": None},
+    })
+
+    encontrado = uploader.buscar_release_en_api(sesion, "Banda", "Disco", GENEROS, allow_genre_fallback=True)
+
+    assert encontrado["postId"] == 2
+    assert sesion.pedidas[-1] == ("/posts/filter", {"genres": 13, "cursor": "c1"})
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="requiere ffmpeg")
+def test_un_ep_de_deathgrind_se_sube_como_full_ep_aunque_la_carpeta_no_lo_diga(
+    uploader, monkeypatch, tmp_path
+):
+    # La API da el tipo en `releaseTypes`, y el EP es el 9.
+    monkeypatch.setattr(uploader, "get_repertorio_csv_path", lambda: None)
+    monkeypatch.setattr(uploader, "load_playlist_links_cache", lambda: {})
+    ep = post_de(1, "Banda", "Disco", releaseTypes=[9], genres=[13])
+    monkeypatch.setattr(uploader, "esperar_release_en_api", lambda *_args: ep)
+
+    datos = uploader.procesar_carpeta(album_con_audio(tmp_path), SesionFalsa({}), GENEROS, dict(GENEROS), None)
+
+    assert "FULL EP" in datos["title"].upper()
+    assert "FULL ALBUM" not in datos["title"].upper()

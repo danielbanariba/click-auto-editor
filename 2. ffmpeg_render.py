@@ -1644,10 +1644,11 @@ def buscar_post_id_en_api(session, band_name, album_name):
         if match_post(post, band_name, album_name):
             return post.get("postId") or post.get("id")
 
-    offset = data.get("offset")
-    while data.get("hasMore") and offset is not None:
+    # La siguiente página se pide con el `nextCursor` de esta
+    cursor = data.get("nextCursor")
+    while data.get("hasMore") and cursor is not None:
         data = api_get(
-            session, "/posts/search", params={"q": query, "offset": offset}
+            session, "/posts/search", params={"q": query, "cursor": cursor}
         )
         if not data:
             break
@@ -1655,7 +1656,7 @@ def buscar_post_id_en_api(session, band_name, album_name):
         for post in posts:
             if match_post(post, band_name, album_name):
                 return post.get("postId") or post.get("id")
-        offset = data.get("offset")
+        cursor = data.get("nextCursor")
     return None
 
 
