@@ -1172,12 +1172,14 @@ class TestImpugnarDesdeTelegram(BaseServicio):
         # Defecto: el aviso decía que el servicio no puede pasar la verificación y el video
         # quedaba sin impugnar, sin forma de terminarlo desde Telegram.
         aviso = self.terminar_impugnar(
-            {"ok": False, "reclamos": 3, "impugnados": 0,
+            {"ok": False, "reclamos": 3, "impugnados": 0, "log": "/logs/impugnar.out",
              "fallos": [{"motivo": "verificacion_de_identidad", "detalle": "2fa_no_completado (timeout)"}]}
         )
         self.assertEqual([etiqueta for etiqueta, _ in aviso["botones"]], ["🖥 Impugnar con ventana"])
         self.assertIn("Verifica que eres tú", aviso["texto"])
         self.assertIn(self.ENLACE, aviso["texto"])
+        # Defecto: esta rama del aviso perdió la línea con el log del paso que traen los demás.
+        self.assertIn("Log: /logs/impugnar.out", aviso["texto"])
         self.assertEqual(self.lanzador.lanzados("impugnar_con_ventana"), [])
         self.telegram.apretar(aviso, "🖥 Impugnar con ventana")
         self.servicio.paso()
@@ -2165,6 +2167,82 @@ class TestImpugnarConVentana(BaseServicio):
             self.lanzador.lanzados("impugnar_con_ventana")[-1],
             ["impugnar_con_ventana", "--video-id", "V1", "--video-id", "V2"],
         )
+
+    def ofrecer_ventana(self, *videos):
+        """La pregunta «Impugnar con ventana» de esos videos."""
+        self.servicio.preguntar_por_ventana(
+            ["⚠️ Studio pidió verificar"], [{"video_id": v, "titulo": f"Banda - {v}"} for v in videos]
+        )
+        return self.ultima_pregunta()
+
+    def apretar_ventana(self, pregunta):
+        self.telegram.apretar(pregunta, "🖥 Impugnar con ventana")
+        self.servicio.paso()
+
+    def test_la_ventana_no_se_lanza_para_un_video_que_ya_esta_en_otra_ventana(self):
+        # Defecto: dos ventanas para el mismo video: una corrida de más en Studio, que además
+        # comparte el perfil con todo lo demás.
+        primera = self.ofrecer_ventana("V1", "V2")
+        segunda = self.ofrecer_ventana("V2", "V3")
+        tercera = self.ofrecer_ventana("V1")
+        self.apretar_ventana(primera)
+        self.apretar_ventana(segunda)
+        antes = len(self.telegram.mensajes)
+        self.apretar_ventana(tercera)
+        self.assertEqual(self.lanzador.lanzados("impugnar_con_ventana"), [
+            ["impugnar_con_ventana", "--video-id", "V1", "--video-id", "V2"],
+            ["impugnar_con_ventana", "--video-id", "V3"],
+        ])
+        (aviso,) = self.telegram.mensajes[antes:]
+        self.assertIn("ya se están impugnando", aviso["texto"])
+
+    def test_la_ventana_no_se_lanza_para_un_video_que_ya_esta_en_el_lote_de_impugnar_todos(self):
+        # Defecto: la ventana y el lote para el mismo video corren uno detrás del otro con el
+        # candado de Studio: una corrida de más.
+        sin_impugnar = [{"video_id": v, "titulo": f"Banda - {v}", "impugnables": 1, "reclamantes": ["Sello"]}
+                        for v in ("V1", "V2")]
+        listas = dict.fromkeys(("liberados", "lista_negra", "en_proceso", "fallos", "sin_revisar"), [])
+        self.servicio.lanzar_paso("mapear_canal")
+        self.lanzador.terminar("mapear_canal", {"ok": True, "aparcados": 2, **listas, "sin_impugnar": sin_impugnar})
+        self.servicio.paso()
+        self.telegram.apretar(self.ultima_pregunta(), "⚖️ Impugnar todos (2)")
+        self.servicio.paso()
+        ventana = self.ofrecer_ventana("V1", "V3")
+        self.apretar_ventana(ventana)
+        self.assertEqual(
+            self.lanzador.lanzados("impugnar_con_ventana"), [["impugnar_con_ventana", "--video-id", "V3"]]
+        )
+        self.assertEqual(self.lanzador.lanzados("impugnar"), [["impugnar", "--video-id", "V1"]])
+
+    def test_un_reinicio_con_la_ventana_abierta_avisa_con_los_links_y_no_la_relanza(self):
+        # Defecto: la ventana muere con el reinicio y nadie lo sabe: los videos quedaban sin
+        # impugnar, o se relanzaba la ventana y se impugnaba dos veces lo que pudo salir.
+        self.apretar_ventana(self.ofrecer_ventana("V1", "V2"))
+        antes = len(self.telegram.mensajes)
+        self.servicio = self.nuevo_servicio()
+        (aviso,) = self.telegram.mensajes[antes:]
+        self.assertIn(sp.MOTIVOS_IMPUGNACION["interrumpido"], aviso["texto"])
+        for video in ("V1", "V2"):
+            self.assertIn(f"Banda - {video}", aviso["texto"])
+            self.assertIn(f"https://studio.youtube.com/video/{video}/claims", aviso["texto"])
+        self.assertEqual(len(self.lanzador.lanzados("impugnar_con_ventana")), 1)
+        # Se avisa una sola vez: otro reinicio ya no encuentra nada.
+        antes = len(self.telegram.mensajes)
+        self.servicio = self.nuevo_servicio()
+        self.assertEqual(self.telegram.mensajes[antes:], [])
+
+    def test_una_ventana_que_termino_no_se_avisa_como_interrumpida_al_reiniciar(self):
+        # Defecto: no sacar la ventana del estado al terminar: cada reinicio avisaría un corte
+        # que no pasó.
+        self.apretar_ventana(self.ofrecer_ventana("V1", "V2"))
+        self.lanzador.terminar("impugnar_con_ventana", {"ok": True, "sin_revisar": [], "videos": [
+            {"ok": True, "video_id": v, "titulo": f"Banda - {v}", "reclamos": 1, "impugnados": 1, "fallos": []}
+            for v in ("V1", "V2")
+        ]})
+        self.servicio.paso()
+        antes = len(self.telegram.mensajes)
+        self.servicio = self.nuevo_servicio()
+        self.assertEqual(self.telegram.mensajes[antes:], [])
 
     def test_una_ventana_que_termina_sin_responder_manda_a_studio_y_no_se_ofrece_de_nuevo(self):
         # Defecto: ofrecer otra ventana cuando la primera pudo haber impugnado algo, y

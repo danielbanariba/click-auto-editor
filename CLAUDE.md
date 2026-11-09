@@ -215,7 +215,14 @@ else). The press runs `impugnar_con_ventana` for that video, and the service rep
 result in one message. If the verification was not passed in time, the report offers the window
 again for what was left. A window run that ends with no result (`sin_respuesta`) may have
 sent something, so the notice lists the `/claims` links to check and offers nothing.
-`seguir_impugnaciones` also reads the `servicio_impugnar_con_ventana_*.out` logs.
+`seguir_impugnaciones` also reads the `servicio_impugnar_con_ventana_*.out` logs. The notice of
+a single dispute that asks for the verification keeps the step's `Log:` line, like the other
+failure notices. The press drops the videos that are already in the running «Impugnar todos»
+batch or in another running window (if none is left, one line says they are already being
+disputed and no window opens). The window's videos stay in `ventanas_en_curso`
+(`data/agente/servicio.json`) until it ends. If the service restarts meanwhile, the window died
+with it: the service sends one notice with each video's `/claims` link and does not launch it
+again, since it may have sent a dispute.
 
 Disputing (`impugnar`) reuses the recipe of `10. inpunar_video.py`: for each claim
 whose "Tomar medidas" is visible and enabled it opens the form, picks "Licencia",

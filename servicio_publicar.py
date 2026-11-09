@@ -436,10 +436,12 @@ class Servicio:
         # impugnando) y lo que salió con los anteriores.
         # avisos_pendientes: avisos de resultados ya anotados en apelaciones.json o
         # impugnaciones.json que Telegram todavía no recibió: [{"texto", "intentos"}].
+        # ventanas_en_curso: los videos (video_id, titulo) de las ventanas de «Impugnar con
+        # ventana» lanzadas y sin terminar: si el servicio se reinicia, la ventana muere con él.
         self.estado = {
             "offset": 0, "preguntas": {}, "rechazados": [], "subidos": [], "aceptados": [],
             "aleatorio": False, "modo_lista": False, "lista": [], "despues_de_lista": None,
-            "lote_impugnar": None, "avisos_pendientes": [],
+            "lote_impugnar": None, "avisos_pendientes": [], "ventanas_en_curso": [],
         }
         self.tareas = []
         self.inicios = {}  # proceso -> momento en que se lanzó
@@ -473,8 +475,22 @@ class Servicio:
         # interrumpido y el lote sigue con el próximo.
         if self.estado["lote_impugnar"] and self.estado["lote_impugnar"]["videos"]:
             self.anotar_en_el_lote({"ok": False, "motivo": "interrumpido"})
+        self.avisar_ventanas_interrumpidas()
         self.enviar_preguntas()
         self.enviar_avisos_pendientes()
+
+    def avisar_ventanas_interrumpidas(self):
+        """La ventana de «Impugnar con ventana» murió con el reinicio. Pudo haber enviado un
+        reclamo que Studio todavía no muestra impugnado: no se relanza, solo se avisa con los
+        enlaces para mirarlo."""
+        videos = self.estado["ventanas_en_curso"]
+        if not videos:
+            return
+        lineas = [f"🖥 El servicio se reinició con la ventana de «Impugnar con ventana» abierta. Videos: {len(videos)}"]
+        lineas += lineas_de_impugnacion([{**video, "motivo": "interrumpido"} for video in videos])
+        self.estado["ventanas_en_curso"] = []
+        for parte in partir_en_mensajes(lineas):
+            self.avisar_con_reintento(parte)
 
     def guardar(self):
         self.ruta_estado.parent.mkdir(parents=True, exist_ok=True)
@@ -910,7 +926,10 @@ class Servicio:
             detalle = f" ({fallo['detalle']})" if fallo.get("detalle") else ""
             texto += f"\n• {causa}{detalle}"
         if pidio_verificacion({"fallos": fallos}):
-            self.preguntar_por_ventana([f"{texto}\n{enlace}"], [{"video_id": video_id, "titulo": titulo}], foto=foto)
+            lineas = [f"{texto}\n{enlace}"]
+            if resultado.get("log"):
+                lineas.append(f"Log: {resultado['log']}")
+            self.preguntar_por_ventana(lineas, [{"video_id": video_id, "titulo": titulo}], foto=foto)
             return
         texto += f"\nRevisa en Studio cuáles quedaron impugnados y termina a mano lo que falte:\n{enlace}"
         if resultado.get("log"):
@@ -1159,6 +1178,10 @@ class Servicio:
     def tras_impugnar_con_ventana(self, resultado, argumentos):
         """Un solo informe de lo que salió en la ventana. Si la verificación no se pasó a tiempo,
         vuelve a ofrecer la ventana para lo que quedó."""
+        self.estado["ventanas_en_curso"] = [
+            v for v in self.estado["ventanas_en_curso"] if v["video_id"] not in argumentos[2::2]
+        ]
+        self.guardar()
         videos = resultado.get("videos") or []
         motivo = resultado.get("motivo")
         sin_revisar = resultado.get("sin_revisar")
@@ -1541,8 +1564,22 @@ class Servicio:
             self.impugnar_siguiente_del_lote()
 
     def respuesta_impugnar_ventana(self, accion, pregunta):
+        # Un video que ya está en el lote de «Impugnar todos» o en otra ventana en curso no se
+        # vuelve a correr: Studio lo atendería de nuevo, uno detrás del otro, por el candado.
+        en_curso = {video["video_id"] for video in (self.estado["lote_impugnar"] or {}).get("videos", [])}
+        for argumentos, _ in self.tareas:
+            if argumentos[0] == "impugnar_con_ventana":
+                en_curso.update(argumentos[2::2])
+        videos = [video for video in pregunta["videos"] if video["video_id"] not in en_curso]
+        if not videos:
+            self.avisar("ℹ️ Esos videos ya se están impugnando (en «Impugnar todos» o en otra ventana): no abro otra.")
+            return
+        self.estado["ventanas_en_curso"] += [
+            {"video_id": video["video_id"], "titulo": video.get("titulo")} for video in videos
+        ]
+        self.guardar()
         argumentos = ["impugnar_con_ventana"]
-        for video in pregunta["videos"]:
+        for video in videos:
             argumentos += ["--video-id", video["video_id"]]
         self.lanzar_paso(*argumentos)
 
