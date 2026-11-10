@@ -413,7 +413,7 @@ class Servicio:
         self.inicios = {}  # proceso -> momento en que se lanzó
         self.largos_avisados = set()  # procesos que pasaron su límite y ya se avisó
         self.reintentos = []
-        self.fallos_programar = {}  # video_id -> fallos seguidos que llegaron al reintento genérico
+        self.fallos_programar = {}  # video_id -> fallos seguidos de `programar` que se reintentan
         # video_id -> título de la copia retirada que se está borrando: `eliminar_video --retirado`
         # no consulta el video y devuelve el id como título. Si se pierde en un reinicio, el aviso
         # nombra el id.
@@ -765,6 +765,18 @@ class Servicio:
             self.preguntar_por_reclamo(resultado, video_id)
         elif motivo == "reclamo_desconocido":
             titulo = resultado.get("titulo") or video_id
+            # Un fallo pasajero del navegador se reintenta como los demás fallos; una página que
+            # no se entiende no mejora sola, y se pregunta enseguida.
+            if resultado.get("detalle") == "error_navegador":
+                if self.reintentar_programar(
+                    video_id,
+                    argumentos,
+                    f"⚠️ No pude revisar los reclamos de \"{titulo}\" (falló el navegador). "
+                    "Reintento en 30 min.",
+                ):
+                    return
+                # La respuesta del usuario arranca de nuevo: sin fallos arrastrados.
+                self.fallos_programar.pop(video_id, None)
             self.preguntar(
                 "reclamo",
                 f"🤔 No pude saber si \"{titulo}\" tiene reclamo ({resultado.get('detalle')}).\n"
@@ -780,20 +792,28 @@ class Servicio:
         elif motivo == "no_es_privado":
             self.avisar(f"⚠️ {video_id} ya no es privado: no lo programo.")
         else:
-            fallos = self.fallos_programar.get(video_id, 0) + 1
-            self.fallos_programar[video_id] = fallos
-            if fallos < INTENTOS_PROGRAMAR:
-                self.avisar(f"⚠️ No pude programar {video_id} ({motivo}). Reintento en 30 min.")
-                self.reintentos.append((self.reloj() + REINTENTO_S, argumentos))
-            else:
+            if not self.reintentar_programar(
+                video_id, argumentos, f"⚠️ No pude programar {video_id} ({motivo}). Reintento en 30 min."
+            ):
                 self.preguntar(
                     "reprogramar",
-                    f"⚠️ No pude programar {video_id} ({motivo}) después de {fallos} intentos.\n\n"
-                    "¿Reintento?",
+                    f"⚠️ No pude programar {video_id} ({motivo}) después de "
+                    f"{self.fallos_programar[video_id]} intentos.\n\n¿Reintento?",
                     video_id=video_id,
                     # El mismo comando que falló: si traía --reclamo, se respeta.
                     argumentos=list(argumentos),
                 )
+
+    def reintentar_programar(self, video_id, argumentos, aviso):
+        """Cuenta un fallo seguido de `programar`. Mientras no lleguen a INTENTOS_PROGRAMAR avisa y
+        agenda el mismo comando a los 30 min (True); si ya llegaron, no hace nada más (False)."""
+        fallos = self.fallos_programar.get(video_id, 0) + 1
+        self.fallos_programar[video_id] = fallos
+        if fallos >= INTENTOS_PROGRAMAR:
+            return False
+        self.avisar(aviso)
+        self.reintentos.append((self.reloj() + REINTENTO_S, argumentos))
+        return True
 
     def preguntar_por_lista_negra(self, resultado, video_id):
         """Un reclamante de la lista negra: avisa y ofrece borrar el video. Nunca lo borra solo."""

@@ -148,7 +148,12 @@ exact, visible "Daniel Banariba" (`CANAL_DE_STUDIO`; "Daniel Banariba Drummer" i
 another channel). If it is not listed, the step fails with `canal_no_disponible`.
 Claim detection reads `/video/<id>/claims`; an unclear
 page returns `reclamo_desconocido` and the service asks the user instead of
-guessing, and a missing session returns `sin_sesion_en_studio`.
+guessing, and a missing session returns `sin_sesion_en_studio`. The one exception
+is `detalle = error_navegador` (the browser failed, so the page was never read):
+the service counts it like any other `programar` failure (`fallos_programar`), says
+"No pude revisar los reclamos de ... (falló el navegador). Reintento en 30 min." and
+runs the same command again, and asks the question only after `INTENTOS_PROGRAMAR` (3)
+failures in a row; that video's count then starts again, as it does after a success.
 
 The claim rows carry no claimant name. `extract_claimants_from_video`
 (`11. apelacion.py`) waits up to 30 s for the "Ver detalles" buttons, opens each

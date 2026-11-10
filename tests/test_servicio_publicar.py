@@ -1479,6 +1479,9 @@ class TestAvisosPendientes(BaseServicio):
 class TestProgramarFallido(BaseServicio):
     ARGUMENTOS = ["programar", "--video-id", "VID1", "--esperar"]
     REINTENTO = "⚠️ No pude programar VID1 (error_api). Reintento en 30 min."
+    REINTENTO_NAVEGADOR = (
+        '⚠️ No pude revisar los reclamos de "Banda - Disco" (falló el navegador). Reintento en 30 min.'
+    )
 
     def setUp(self):
         super().setUp()
@@ -1490,6 +1493,23 @@ class TestProgramarFallido(BaseServicio):
         if not any(p.salida is None for p in self.lanzador.procesos if p.argumentos[0] == "programar"):
             self.servicio.lanzar_paso(*self.ARGUMENTOS)
         self.lanzador.terminar("programar", {"ok": False, "motivo": motivo, "video_id": "VID1"})
+        self.servicio.paso()
+
+    def fallar_al_revisar_reclamos(self, detalle="error_navegador"):
+        """Como `fallar`, pero con la revisión de reclamos de Studio sin poder saber (`reclamo_desconocido`)."""
+        if not any(p.salida is None for p in self.lanzador.procesos if p.argumentos[0] == "programar"):
+            self.servicio.lanzar_paso(*self.ARGUMENTOS)
+        self.lanzador.terminar(
+            "programar",
+            {
+                "ok": False,
+                "motivo": "reclamo_desconocido",
+                "detalle": detalle,
+                "video_id": "VID1",
+                "titulo": "Banda - Disco",
+                "captura_studio": str(self.tmp / "studio.png"),
+            },
+        )
         self.servicio.paso()
 
     def esperar_reintento(self):
@@ -1584,6 +1604,74 @@ class TestProgramarFallido(BaseServicio):
         self.esperar_reintento()
         self.fallar()
 
+        self.assertEqual(self.preguntas(), [])
+
+    def test_error_del_navegador_al_revisar_reclamos_reintenta_a_los_30_minutos_sin_preguntar(self):
+        # Defecto: un fallo pasajero del navegador preguntaba "¿Tiene reclamo?" enseguida, en vez de
+        # reintentar como los demás fallos de `programar`.
+        self.fallar_al_revisar_reclamos()
+        self.assertEqual(self.textos().count(self.REINTENTO_NAVEGADOR), 1)
+        self.assertEqual(self.preguntas(), [])
+        self.assertEqual(len(self.lanzador.lanzados("programar")), 1)
+
+        self.esperar_reintento()
+        # El mismo comando que falló, no uno distinto.
+        self.assertEqual(self.lanzador.lanzados("programar"), [self.ARGUMENTOS, self.ARGUMENTOS])
+        self.fallar_al_revisar_reclamos()
+        self.assertEqual(self.textos().count(self.REINTENTO_NAVEGADOR), 2)
+        self.assertEqual(self.preguntas(), [])
+
+    def test_tercer_error_del_navegador_pregunta_el_reclamo_y_reinicia_la_cuenta(self):
+        # Defecto: reintentar sin tope (nunca preguntar) o no reiniciar la cuenta al preguntar,
+        # con lo que el próximo fallo preguntaría de nuevo sin dar los reintentos.
+        self.fallar_al_revisar_reclamos()
+        self.esperar_reintento()
+        self.fallar_al_revisar_reclamos()
+        self.esperar_reintento()
+        self.fallar_al_revisar_reclamos()
+
+        self.assertEqual(self.textos().count(self.REINTENTO_NAVEGADOR), 2)
+        self.assertEqual(len(self.preguntas()), 1)
+        pregunta = self.ultima_pregunta()
+        self.assertIn('No pude saber si "Banda - Disco" tiene reclamo (error_navegador)', pregunta["texto"])
+        self.assertIn("studio.youtube.com/video/VID1/copyright", pregunta["texto"])
+        self.assertEqual(pregunta["foto"], str(self.tmp / "studio.png"))
+        self.assertIn("Sí, tiene reclamo", dict(pregunta["botones"]))
+        # No queda nada agendado: la respuesta del usuario decide.
+        lanzados = len(self.lanzador.lanzados("programar"))
+        self.ahora += 10 * sp.REINTENTO_S
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("programar")), lanzados)
+
+        # Con la cuenta en cero, el próximo fallo vuelve a reintentar.
+        self.fallar_al_revisar_reclamos()
+        self.assertEqual(self.textos().count(self.REINTENTO_NAVEGADOR), 3)
+        self.assertEqual(len(self.preguntas()), 1)
+
+    def test_reclamo_desconocido_con_otro_detalle_pregunta_enseguida_sin_reintentar(self):
+        # Defecto: reintentar todo `reclamo_desconocido`; una página que no se entiende no mejora
+        # sola y el usuario tiene que contestar ya.
+        self.fallar_al_revisar_reclamos("texto_no_reconocido")
+
+        self.assertEqual(len(self.preguntas()), 1)
+        self.assertIn("texto_no_reconocido", self.ultima_pregunta()["texto"])
+        self.assertNotIn(self.REINTENTO_NAVEGADOR, self.textos())
+        self.ahora += 10 * sp.REINTENTO_S
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("programar")), 1)
+
+    def test_programar_exitoso_entre_errores_del_navegador_reinicia_la_cuenta(self):
+        # Defecto: contar los errores del navegador aparte de `fallos_programar`: un éxito en medio
+        # no los borraría y el segundo fallo seguido (no el tercero) ya preguntaría.
+        self.fallar_al_revisar_reclamos()
+        self.esperar_reintento()
+        self.fallar_al_revisar_reclamos()
+        self.esperar_reintento()
+        self.lanzador.terminar("programar", {"ok": True, "video_id": "VID1", "resumen": "📅 T se publica"})
+        self.servicio.paso()
+
+        self.fallar_al_revisar_reclamos()
+        self.assertEqual(self.textos().count(self.REINTENTO_NAVEGADOR), 3)
         self.assertEqual(self.preguntas(), [])
 
     def test_pregunta_abierta_no_frena_el_render_de_otros_albumes(self):
