@@ -1,4 +1,5 @@
 import contextlib
+import errno
 import fcntl
 import http.client
 import io
@@ -1771,6 +1772,9 @@ class ClienteQueFalla:
     def videos(self):
         return self
 
+    def playlistItems(self):
+        return self
+
     def list(self, **kwargs):
         return self._ejecutable()
 
@@ -1887,6 +1891,40 @@ class TestEjecutarApi(unittest.TestCase):
                 )
                 self.assertEqual(respuesta, {"items": ["ok"]})
                 self.assertEqual((cliente.llamadas, cliente.cierres), (2, 1))
+
+    def test_red_inalcanzable_se_reintenta_como_un_error_de_conexion(self):
+        # Defecto: «Network is unreachable» llega como un OSError simple, no como ConnectionError:
+        # ejecutar_api lo lanzaba al primer intento y el paso moría en un corte de red.
+        for codigo, texto in (
+            (errno.ENETUNREACH, "Network is unreachable"),
+            (errno.EHOSTUNREACH, "No route to host"),
+            (errno.ENETDOWN, "Network is down"),
+        ):
+            with self.subTest(errno=errno.errorcode[codigo]):
+                self.esperas.clear()
+                cliente = ClienteQueFalla([OSError(codigo, texto)], respuesta={"items": ["ok"]})
+                respuesta = pa.ejecutar_api(
+                    self.uploader(), {"cliente": cliente}, lambda c: c.videos().list().execute()
+                )
+                self.assertEqual(respuesta, {"items": ["ok"]})
+                self.assertEqual((cliente.llamadas, cliente.cierres), (2, 1))
+                self.assertEqual(self.esperas, [pa.ESPERA_CONEXION_S])
+
+    def test_los_oserror_que_no_son_de_red_se_lanzan_sin_reintentar(self):
+        # Defecto: tratar todo OSError como fallo de conexión reintentaría (y luego daría
+        # sin_conexion a) un archivo ausente, un permiso denegado o un error de disco.
+        errores = [
+            FileNotFoundError(errno.ENOENT, "No such file or directory"),
+            PermissionError(errno.EACCES, "Permission denied"),
+            OSError(errno.EIO, "Input/output error"),
+        ]
+        for error in errores:
+            with self.subTest(error=repr(error)):
+                cliente = ClienteQueFalla([error], respuesta={"items": ["ok"]})
+                with self.assertRaises(OSError) as contexto:
+                    pa.ejecutar_api(self.uploader(), {"cliente": cliente}, lambda c: c.videos().list().execute())
+                self.assertIs(contexto.exception, error)
+                self.assertEqual((cliente.llamadas, cliente.cierres, self.esperas), (1, 0, []))
 
     def test_agotados_los_reintentos_vuelve_a_lanzar_el_error_original(self):
         cliente = ClienteQueFalla([BrokenPipeError(32, "Broken pipe")] * 10)
@@ -2138,6 +2176,46 @@ class TestProgramarSinConexion(unittest.TestCase):
         self.assertEqual(resultado["video_id"], "V1")
         self.assertIn("Broken pipe", resultado["detalle"])
         self.assertEqual(cliente.llamadas, 1 + pa.REINTENTOS_CONEXION)
+
+    def test_red_inalcanzable_agota_los_reintentos_y_programar_responde_sin_conexion(self):
+        # Caso real (2026-11-10, 11:44): un corte de red lanzó `OSError: [Errno 101] Network is
+        # unreachable` desde consultar_video; el paso salió con un traceback, sin su línea JSON.
+        cliente = ClienteQueFalla([OSError(errno.ENETUNREACH, "Network is unreachable")] * 10)
+        resultado = pa.programar(
+            "V1", reclamo=False, activar=monetizacion_activada, uploader=uploader_para_programar(cliente)
+        )
+        self.assertFalse(resultado["ok"])
+        self.assertEqual(resultado["motivo"], "sin_conexion")
+        self.assertEqual(resultado["video_id"], "V1")
+        self.assertIn("Network is unreachable", resultado["detalle"])
+        self.assertEqual((cliente.llamadas, cliente.cierres), (1 + pa.REINTENTOS_CONEXION, pa.REINTENTOS_CONEXION))
+
+    def test_los_demas_pasos_con_la_api_tambien_responden_sin_conexion_ante_red_inalcanzable(self):
+        # Defecto: un paso que atrapa los errores de conexión por su cuenta y se queda sin la red
+        # inalcanzable: esa fuga vuelve a ser un traceback sin JSON en ese paso.
+        pasos = {
+            "eliminar_video": lambda youtube: pa.eliminar_video("V1", uploader=uploader_para_programar(youtube)),
+            "mapear_canal": lambda youtube: pa.mapear_canal(uploader=uploader_para_programar(youtube)),
+            "sembrar_publicados": lambda youtube: pa.sembrar_publicados(uploader=uploader_para_programar(youtube)),
+        }
+        for nombre, paso in pasos.items():
+            with self.subTest(paso=nombre):
+                cliente = ClienteQueFalla([OSError(errno.EHOSTUNREACH, "No route to host")] * 10)
+                resultado = paso(cliente)
+                self.assertFalse(resultado["ok"])
+                self.assertEqual(resultado["motivo"], "sin_conexion")
+                self.assertIn("No route to host", resultado["detalle"])
+                self.assertEqual(cliente.llamadas, 1 + pa.REINTENTOS_CONEXION)
+
+    def test_un_oserror_que_no_es_de_red_no_se_convierte_en_sin_conexion(self):
+        # Defecto: atrapar OSError entero en el paso esconde un archivo ausente o un permiso
+        # denegado detrás de «sin conexión», y el servicio reintentaría por una causa que no es la red.
+        cliente = ClienteQueFalla([FileNotFoundError(errno.ENOENT, "No such file or directory")] * 10)
+        with self.assertRaises(FileNotFoundError):
+            pa.programar(
+                "V1", reclamo=False, activar=monetizacion_activada, uploader=uploader_para_programar(cliente)
+            )
+        self.assertEqual((cliente.llamadas, cliente.cierres), (1, 0))
 
     def test_conexion_muerta_tras_la_espera_no_aborta_la_programacion(self):
         # Caso real: la consulta tras la espera de 5 min usa una conexión keep-alive ya cerrada.

@@ -13,6 +13,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import httplib2
+from googleapiclient.errors import HttpError
+
 try:
     from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
@@ -57,13 +60,17 @@ class Llamada:
         return self.respuesta
 
 
-class CanalFalso:
-    """La lista de subidas en páginas de [(id, privacidad, publishAt o None, título)]."""
+SUBIDO = "2026-06-03T10:15:00Z"
 
-    def __init__(self, paginas):
+
+class CanalFalso:
+    """La lista de subidas en páginas de [(id, privacidad, publishAt o None, título)]. `subidos`
+    da el snippet.publishedAt de los videos que no se subieron en SUBIDO."""
+
+    def __init__(self, paginas, subidos=None):
         self.paginas = paginas
         self.catalogo = {
-            vid: {"id": vid, "snippet": {"title": titulo},
+            vid: {"id": vid, "snippet": {"title": titulo, "publishedAt": (subidos or {}).get(vid, SUBIDO)},
                   "status": {"privacyStatus": privacidad, **({"publishAt": cuando} if cuando else {})}}
             for pagina in paginas for vid, privacidad, cuando, titulo in pagina
         }
@@ -304,6 +311,89 @@ class TestMapearCanal(unittest.TestCase):
         self.assertEqual(resultado["motivo"], "sin_sesion_en_studio")
         self.assertEqual(resultado["liberados"], [])
         self.assertEqual([v["video_id"] for v in resultado["sin_revisar"]], ["V1"])
+
+
+    def guardar_pendientes(self, *ids):
+        pa.guardar_pendientes([{"video_id": v, "titulo": v, "album": None, "subido_en": None} for v in ids])
+
+    def test_lista_los_privados_sin_fecha_que_no_estan_en_pendientes_y_nunca_abre_studio_por_ellos(self):
+        # Defecto (S2, #65): un video privado y sin fecha, fuera de pendientes.json, nunca se
+        # publica y nada avisa. Además: listar los que ya esperan su `programar` (P2), los
+        # públicos, los privados con fecha (no aparcados) o perder los de la segunda página.
+        canal = CanalFalso(
+            [
+                [("P1", "private", None, "Banda - Uno"), ("P2", "private", None, "Banda - Dos"),
+                 ("PUB", "public", None, "Banda - Pública"), ("PROG", "private", en(3), "Banda - Programado"),
+                 ("V1", "private", en(730), "Banda - Aparcado")],
+                [("P3", "private", None, "Banda - Tres")],
+            ],
+            subidos={"P3": "2026-07-09T08:00:00Z"},
+        )
+        self.guardar_pendientes("P2")
+        studio = StudioDelCanal({"V1": []})
+        resultado = self.mapear(studio, canal)
+        self.assertEqual(
+            resultado["privados_sin_programar"],
+            [
+                {"video_id": "P1", "titulo": "Banda - Uno", "subido": SUBIDO},
+                {"video_id": "P3", "titulo": "Banda - Tres", "subido": "2026-07-09T08:00:00Z"},
+            ],
+        )
+        self.assertEqual(resultado["aparcados"], 1)
+        self.assertEqual([v["video_id"] for v in resultado["liberados"]], ["V1"])
+        self.assertEqual(studio.abiertos, ["V1"])
+        self.assertEqual(studio.pulsados, [])
+
+    def test_los_privados_sin_fecha_se_buscan_en_todas_las_subidas_no_solo_en_las_ultimas(self):
+        # Defecto: copiar el tope ESCANEO_PROGRAMADOS del escaneo de aparcados: un privado sin
+        # fecha más antiguo que las últimas subidas (como el del 2026-06-03) nunca aparece.
+        canal = CanalFalso([
+            [("V1", "private", en(730), "Banda - Aparcado")],
+            [("P1", "private", None, "Banda - Viejo")],
+        ])
+        with mock.patch.object(pa, "ESCANEO_PROGRAMADOS", 1):
+            resultado = self.mapear(StudioDelCanal({"V1": []}), canal)
+        self.assertEqual([v["video_id"] for v in resultado["privados_sin_programar"]], ["P1"])
+        self.assertEqual(resultado["aparcados"], 1)
+
+    def test_sin_aparcados_la_lista_de_privados_sale_igual_y_studio_no_se_abre(self):
+        # Defecto: calcular los privados solo dentro del bloque de Studio, o devolverlos solo
+        # cuando hay aparcados: el servicio no vería el campo justo en el canal sin reclamos.
+        canal = CanalFalso([[("P1", "private", None, "Banda - Uno"), ("PUB", "public", None, "Banda - Pública")]])
+        studio = StudioDelCanal({})
+        resultado = self.mapear(studio, canal)
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(resultado["aparcados"], 0)
+        self.assertEqual([v["video_id"] for v in resultado["privados_sin_programar"]], ["P1"])
+        self.assertEqual(studio.abiertos, [])
+
+    def test_si_falla_studio_la_lista_de_privados_sale_igual(self):
+        # Defecto: el retorno del error de Studio armado sin la lista: el servicio contaría los
+        # privados solo cuando Studio anda, y ese día no preguntaría por ninguno.
+        canal = CanalFalso([[("V1", "private", en(730), "Banda - Aparcado"), ("P1", "private", None, "Banda - Uno")]])
+        resultado = self.mapear(StudioDelCanal({"V1": []}, sin_sesion=True), canal)
+        self.assertEqual(resultado["motivo"], "sin_sesion_en_studio")
+        self.assertEqual([v["video_id"] for v in resultado["privados_sin_programar"]], ["P1"])
+
+    def test_si_falla_la_busqueda_de_privados_los_aparcados_se_revisan_igual(self):
+        # Defecto: buscar los privados en la misma llamada que los aparcados: un error de la API
+        # en una página vieja del canal tiraba todo /mapear_canal y no se revisaba ningún aparcado.
+        class CanalQueFallaEnLosViejos(CanalFalso):
+            def listar_videos(self, part, id):
+                if "P1" in id.split(","):
+                    raise HttpError(httplib2.Response({"status": 500}), b"backend error")
+                return super().listar_videos(part, id)
+
+        canal = CanalQueFallaEnLosViejos([
+            [("V1", "private", en(730), "Banda - Aparcado")],
+            [("P1", "private", None, "Banda - Viejo")],
+        ])
+        with mock.patch.object(pa, "ESCANEO_PROGRAMADOS", 1):
+            resultado = self.mapear(StudioDelCanal({"V1": []}), canal)
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual([v["video_id"] for v in resultado["liberados"]], ["V1"])
+        self.assertEqual(resultado["privados_sin_programar"], [])
+        self.assertEqual(resultado["motivo_privados"], "error_api")
 
 
 class TestSubcomandoMapearCanal(unittest.TestCase):

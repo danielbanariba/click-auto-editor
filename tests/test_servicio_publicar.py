@@ -1479,6 +1479,9 @@ class TestAvisosPendientes(BaseServicio):
 class TestProgramarFallido(BaseServicio):
     ARGUMENTOS = ["programar", "--video-id", "VID1", "--esperar"]
     REINTENTO = "⚠️ No pude programar VID1 (error_api). Reintento en 30 min."
+    REINTENTO_NAVEGADOR = (
+        '⚠️ No pude revisar los reclamos de "Banda - Disco" (falló el navegador). Reintento en 30 min.'
+    )
 
     def setUp(self):
         super().setUp()
@@ -1490,6 +1493,23 @@ class TestProgramarFallido(BaseServicio):
         if not any(p.salida is None for p in self.lanzador.procesos if p.argumentos[0] == "programar"):
             self.servicio.lanzar_paso(*self.ARGUMENTOS)
         self.lanzador.terminar("programar", {"ok": False, "motivo": motivo, "video_id": "VID1"})
+        self.servicio.paso()
+
+    def fallar_al_revisar_reclamos(self, detalle="error_navegador"):
+        """Como `fallar`, pero con la revisión de reclamos de Studio sin poder saber (`reclamo_desconocido`)."""
+        if not any(p.salida is None for p in self.lanzador.procesos if p.argumentos[0] == "programar"):
+            self.servicio.lanzar_paso(*self.ARGUMENTOS)
+        self.lanzador.terminar(
+            "programar",
+            {
+                "ok": False,
+                "motivo": "reclamo_desconocido",
+                "detalle": detalle,
+                "video_id": "VID1",
+                "titulo": "Banda - Disco",
+                "captura_studio": str(self.tmp / "studio.png"),
+            },
+        )
         self.servicio.paso()
 
     def esperar_reintento(self):
@@ -1584,6 +1604,74 @@ class TestProgramarFallido(BaseServicio):
         self.esperar_reintento()
         self.fallar()
 
+        self.assertEqual(self.preguntas(), [])
+
+    def test_error_del_navegador_al_revisar_reclamos_reintenta_a_los_30_minutos_sin_preguntar(self):
+        # Defecto: un fallo pasajero del navegador preguntaba "¿Tiene reclamo?" enseguida, en vez de
+        # reintentar como los demás fallos de `programar`.
+        self.fallar_al_revisar_reclamos()
+        self.assertEqual(self.textos().count(self.REINTENTO_NAVEGADOR), 1)
+        self.assertEqual(self.preguntas(), [])
+        self.assertEqual(len(self.lanzador.lanzados("programar")), 1)
+
+        self.esperar_reintento()
+        # El mismo comando que falló, no uno distinto.
+        self.assertEqual(self.lanzador.lanzados("programar"), [self.ARGUMENTOS, self.ARGUMENTOS])
+        self.fallar_al_revisar_reclamos()
+        self.assertEqual(self.textos().count(self.REINTENTO_NAVEGADOR), 2)
+        self.assertEqual(self.preguntas(), [])
+
+    def test_tercer_error_del_navegador_pregunta_el_reclamo_y_reinicia_la_cuenta(self):
+        # Defecto: reintentar sin tope (nunca preguntar) o no reiniciar la cuenta al preguntar,
+        # con lo que el próximo fallo preguntaría de nuevo sin dar los reintentos.
+        self.fallar_al_revisar_reclamos()
+        self.esperar_reintento()
+        self.fallar_al_revisar_reclamos()
+        self.esperar_reintento()
+        self.fallar_al_revisar_reclamos()
+
+        self.assertEqual(self.textos().count(self.REINTENTO_NAVEGADOR), 2)
+        self.assertEqual(len(self.preguntas()), 1)
+        pregunta = self.ultima_pregunta()
+        self.assertIn('No pude saber si "Banda - Disco" tiene reclamo (error_navegador)', pregunta["texto"])
+        self.assertIn("studio.youtube.com/video/VID1/copyright", pregunta["texto"])
+        self.assertEqual(pregunta["foto"], str(self.tmp / "studio.png"))
+        self.assertIn("Sí, tiene reclamo", dict(pregunta["botones"]))
+        # No queda nada agendado: la respuesta del usuario decide.
+        lanzados = len(self.lanzador.lanzados("programar"))
+        self.ahora += 10 * sp.REINTENTO_S
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("programar")), lanzados)
+
+        # Con la cuenta en cero, el próximo fallo vuelve a reintentar.
+        self.fallar_al_revisar_reclamos()
+        self.assertEqual(self.textos().count(self.REINTENTO_NAVEGADOR), 3)
+        self.assertEqual(len(self.preguntas()), 1)
+
+    def test_reclamo_desconocido_con_otro_detalle_pregunta_enseguida_sin_reintentar(self):
+        # Defecto: reintentar todo `reclamo_desconocido`; una página que no se entiende no mejora
+        # sola y el usuario tiene que contestar ya.
+        self.fallar_al_revisar_reclamos("texto_no_reconocido")
+
+        self.assertEqual(len(self.preguntas()), 1)
+        self.assertIn("texto_no_reconocido", self.ultima_pregunta()["texto"])
+        self.assertNotIn(self.REINTENTO_NAVEGADOR, self.textos())
+        self.ahora += 10 * sp.REINTENTO_S
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("programar")), 1)
+
+    def test_programar_exitoso_entre_errores_del_navegador_reinicia_la_cuenta(self):
+        # Defecto: contar los errores del navegador aparte de `fallos_programar`: un éxito en medio
+        # no los borraría y el segundo fallo seguido (no el tercero) ya preguntaría.
+        self.fallar_al_revisar_reclamos()
+        self.esperar_reintento()
+        self.fallar_al_revisar_reclamos()
+        self.esperar_reintento()
+        self.lanzador.terminar("programar", {"ok": True, "video_id": "VID1", "resumen": "📅 T se publica"})
+        self.servicio.paso()
+
+        self.fallar_al_revisar_reclamos()
+        self.assertEqual(self.textos().count(self.REINTENTO_NAVEGADOR), 3)
         self.assertEqual(self.preguntas(), [])
 
     def test_pregunta_abierta_no_frena_el_render_de_otros_albumes(self):
@@ -2175,6 +2263,7 @@ class TestMapearCanal(BaseServicio):
         self.assertIn("Con la impugnación en revisión: 1", resumen["texto"])
         self.assertIn("Sin revisar (/mapear_canal sigue con ellos): 1", resumen["texto"])
         self.assertIn("https://studio.youtube.com/video/V4/claims", resumen["texto"])
+        self.assertNotIn("Privados sin fecha", resumen["texto"])
         self.assertNotIn("Sello Independiente", resumen["texto"])
         self.assertNotIn("Licencia", resumen["texto"])
 
@@ -2231,6 +2320,76 @@ class TestMapearCanal(BaseServicio):
         self.mapear(aparcados=1, liberados=liberado)
         self.mapear(aparcados=1, liberados=liberado)
         self.assertEqual(len(self.lanzador.lanzados("programar")), 1)
+
+    PROGRAMAR = "▶️ Programar"
+
+    def privados(self, *ids):
+        return [
+            {"video_id": v, "titulo": f"Banda - {v}", "subido": f"2026-06-0{n}T10:15:00Z"}
+            for n, v in enumerate(ids, start=3)
+        ]
+
+    def test_los_privados_sin_fecha_suman_una_linea_y_preguntan_aparte_cada_uno(self):
+        # Defecto (S2, #65): un video privado y sin fecha que nada avisa; o juntarlos en una sola
+        # pregunta, o preguntar sin título, fecha, link ni la advertencia de que borrar no se
+        # deshace. Nada se lanza sin apretar un botón.
+        self.mapear(aparcados=0, privados_sin_programar=self.privados("P1", "P2"))
+        (resumen,) = [m for m in self.telegram.mensajes[self.antes_del_resultado:] if not m["botones"]]
+        self.assertIn(
+            "🔒 Privados sin fecha de publicación (te pregunto aparte por cada uno): 2", resumen["texto"]
+        )
+        p1, p2 = self.preguntas()
+        for pregunta, video_id, fecha in ((p1, "P1", "2026-06-03"), (p2, "P2", "2026-06-04")):
+            self.assertEqual(self.etiquetas(pregunta), [self.PROGRAMAR, self.CONSERVAR, self.ELIMINAR])
+            for texto in (f"Banda - {video_id}", fecha, f"https://studio.youtube.com/video/{video_id}/edit",
+                          "Está privado y sin fecha de publicación: así no se publica nunca.",
+                          "Eliminar no se puede deshacer."):
+                self.assertIn(texto, pregunta["texto"])
+        self.assertNotIn("Banda - P2", p1["texto"])
+        self.assertEqual(self.lanzador.lanzados(), [["mapear_canal"]])
+
+    def test_un_segundo_mapeo_no_repite_la_pregunta_de_un_privado_que_ya_tiene_una_abierta(self):
+        # Defecto: cada /mapear_canal apilaba otra pregunta por el mismo video privado.
+        self.mapear(aparcados=0, privados_sin_programar=self.privados("P1"))
+        self.mapear(aparcados=0, privados_sin_programar=self.privados("P1", "P2"))
+        abiertas = [
+            p["video_id"] for p in self.servicio.estado["preguntas"].values() if p["tipo"] == "privado_sin_programar"
+        ]
+        self.assertEqual(sorted(abiertas), ["P1", "P2"])
+
+    def test_un_privado_que_ya_se_esta_programando_no_se_vuelve_a_preguntar(self):
+        # Defecto: un /mapear_canal que leyó la lista antes de apretar «Programar» preguntaba
+        # otra vez por el mismo video, y un segundo toque lanzaba otro `programar`.
+        self.mapear(aparcados=0, privados_sin_programar=self.privados("P1"))
+        (p1,) = self.preguntas()
+        self.telegram.apretar(p1, self.PROGRAMAR)
+        self.servicio.paso()
+        self.mapear(aparcados=0, privados_sin_programar=self.privados("P1"))
+        abiertas = [p for p in self.servicio.estado["preguntas"].values() if p["tipo"] == "privado_sin_programar"]
+        self.assertEqual(abiertas, [])
+
+    def test_si_no_pudo_buscar_los_privados_lo_dice_en_el_resumen(self):
+        # Defecto: un fallo de la API al buscar los privados que pasa en silencio: «ninguno» y
+        # «no pude mirar» se verían igual.
+        self.mapear(aparcados=0, privados_sin_programar=[], motivo_privados="error_api")
+        (resumen,) = [m for m in self.telegram.mensajes[self.antes_del_resultado:] if not m["botones"]]
+        self.assertIn("❌ No pude buscar los privados sin fecha (error_api).", resumen["texto"])
+
+    def test_cada_boton_de_un_privado_lanza_solo_su_paso_y_conservar_ninguno(self):
+        # Defecto: «Programar» sin --esperar (se queda en `esperando_margen`), «Eliminar» que
+        # borra otro video, o «Conservar» que lanza algo.
+        self.mapear(aparcados=0, privados_sin_programar=self.privados("P1", "P2", "P3"))
+        p1, p2, p3 = self.preguntas()
+        self.telegram.apretar(p1, self.PROGRAMAR)
+        self.telegram.apretar(p2, self.ELIMINAR)
+        self.telegram.apretar(p3, self.CONSERVAR)
+        self.servicio.paso()
+        self.assertEqual(
+            self.lanzador.lanzados(),
+            [["mapear_canal"], ["programar", "--video-id", "P1", "--esperar"],
+             ["eliminar_video", "--video-id", "P2"]],
+        )
+        self.assertEqual(self.servicio.estado["preguntas"], {})
 
     def test_un_mapeo_cortado_antes_de_empezar_no_dice_que_reviso_cero(self):
         # Defecto: "Revisé 0 de 0" cuando el paso ni llegó a leer la lista de subidas.

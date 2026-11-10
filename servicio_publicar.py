@@ -88,6 +88,12 @@ BOTONES = {
     # Una copia retirada nunca se va a poder publicar: no hay nada que conservar ni reintentar.
     "copia_retirada": [[("🗑️ Eliminar video", "eliminar_video")]],
     "impugnacion_rechazada": [[("Conservar", "conservar")], [("🗑️ Eliminar video", "eliminar_video")]],
+    # Un video privado sin fecha de publicación y fuera de pendientes.json: nada lo publicaría
+    # nunca. Programar lo trata como uno recién subido; borrar no se deshace, en su propia fila.
+    "privado_sin_programar": [
+        [("▶️ Programar", "programar"), ("Conservar", "conservar")],
+        [("🗑️ Eliminar video", "eliminar_video")],
+    ],
 }
 AVISO_BOTON = {
     "renderizar": "Lo renderizo y lo subo",
@@ -101,12 +107,13 @@ AVISO_BOTON = {
     "reintentar": "Reintentando…",
     "conservar": "Lo conservo",
     "eliminar_video": "Borrando el video…",
+    "programar": "Programando…",
 }
 # El menú de comandos del bot.
 COMANDOS = [
     {"command": "aleatorio", "description": "Prende o apaga la elección al azar del próximo álbum"},
     {"command": "crear_lista", "description": "Junta los álbumes que apruebes y los renderiza todos juntos"},
-    {"command": "mapear_canal", "description": "Revisa los videos aparcados por un reclamo"},
+    {"command": "mapear_canal", "description": "Revisa los aparcados por un reclamo y los privados sin fecha"},
 ]
 # Mientras haya una de estas preguntas abiertas no se renderiza otro álbum.
 # "reprogramar" no frena: el video ya está subido y no depende del render.
@@ -406,7 +413,7 @@ class Servicio:
         self.inicios = {}  # proceso -> momento en que se lanzó
         self.largos_avisados = set()  # procesos que pasaron su límite y ya se avisó
         self.reintentos = []
-        self.fallos_programar = {}  # video_id -> fallos seguidos que llegaron al reintento genérico
+        self.fallos_programar = {}  # video_id -> fallos seguidos de `programar` que se reintentan
         # video_id -> título de la copia retirada que se está borrando: `eliminar_video --retirado`
         # no consulta el video y devuelve el id como título. Si se pierde en un reinicio, el aviso
         # nombra el id.
@@ -758,6 +765,18 @@ class Servicio:
             self.preguntar_por_reclamo(resultado, video_id)
         elif motivo == "reclamo_desconocido":
             titulo = resultado.get("titulo") or video_id
+            # Un fallo pasajero del navegador se reintenta como los demás fallos; una página que
+            # no se entiende no mejora sola, y se pregunta enseguida.
+            if resultado.get("detalle") == "error_navegador":
+                if self.reintentar_programar(
+                    video_id,
+                    argumentos,
+                    f"⚠️ No pude revisar los reclamos de \"{titulo}\" (falló el navegador). "
+                    "Reintento en 30 min.",
+                ):
+                    return
+                # La respuesta del usuario arranca de nuevo: sin fallos arrastrados.
+                self.fallos_programar.pop(video_id, None)
             self.preguntar(
                 "reclamo",
                 f"🤔 No pude saber si \"{titulo}\" tiene reclamo ({resultado.get('detalle')}).\n"
@@ -773,20 +792,28 @@ class Servicio:
         elif motivo == "no_es_privado":
             self.avisar(f"⚠️ {video_id} ya no es privado: no lo programo.")
         else:
-            fallos = self.fallos_programar.get(video_id, 0) + 1
-            self.fallos_programar[video_id] = fallos
-            if fallos < INTENTOS_PROGRAMAR:
-                self.avisar(f"⚠️ No pude programar {video_id} ({motivo}). Reintento en 30 min.")
-                self.reintentos.append((self.reloj() + REINTENTO_S, argumentos))
-            else:
+            if not self.reintentar_programar(
+                video_id, argumentos, f"⚠️ No pude programar {video_id} ({motivo}). Reintento en 30 min."
+            ):
                 self.preguntar(
                     "reprogramar",
-                    f"⚠️ No pude programar {video_id} ({motivo}) después de {fallos} intentos.\n\n"
-                    "¿Reintento?",
+                    f"⚠️ No pude programar {video_id} ({motivo}) después de "
+                    f"{self.fallos_programar[video_id]} intentos.\n\n¿Reintento?",
                     video_id=video_id,
                     # El mismo comando que falló: si traía --reclamo, se respeta.
                     argumentos=list(argumentos),
                 )
+
+    def reintentar_programar(self, video_id, argumentos, aviso):
+        """Cuenta un fallo seguido de `programar`. Mientras no lleguen a INTENTOS_PROGRAMAR avisa y
+        agenda el mismo comando a los 30 min (True); si ya llegaron, no hace nada más (False)."""
+        fallos = self.fallos_programar.get(video_id, 0) + 1
+        self.fallos_programar[video_id] = fallos
+        if fallos >= INTENTOS_PROGRAMAR:
+            return False
+        self.avisar(aviso)
+        self.reintentos.append((self.reloj() + REINTENTO_S, argumentos))
+        return True
 
     def preguntar_por_lista_negra(self, resultado, video_id):
         """Un reclamante de la lista negra: avisa y ofrece borrar el video. Nunca lo borra solo."""
@@ -957,7 +984,9 @@ class Servicio:
     def tras_mapear_canal(self, resultado, argumentos):
         """Un solo mensaje, sin botones, con lo que se liberó y lo que no se pudo leer. Los
         liberados se programan como un video sin reclamo; los de la lista negra y los demás con
-        reclamo preguntan aparte, cada uno con su «Eliminar video». Nada se borra sin el botón."""
+        reclamo preguntan aparte, cada uno con su «Eliminar video». Los privados sin fecha de
+        publicación también preguntan aparte, con «Programar». Nada se programa ni se borra sin
+        el botón."""
         listas = {
             clave: resultado.get(clave) or []
             for clave in ("liberados", "sin_impugnar", "lista_negra", "en_proceso", "fallos", "sin_revisar")
@@ -980,6 +1009,11 @@ class Servicio:
             lineas.append(f"©️ Con reclamo (te pregunto aparte por cada uno si lo borro): {len(listas['sin_impugnar'])}")
         if listas["en_proceso"]:
             lineas.append(f"⏳ Con la impugnación en revisión: {len(listas['en_proceso'])}")
+        privados = resultado.get("privados_sin_programar") or []
+        if privados:
+            lineas.append(f"🔒 Privados sin fecha de publicación (te pregunto aparte por cada uno): {len(privados)}")
+        if resultado.get("motivo_privados"):
+            lineas.append(f"❌ No pude buscar los privados sin fecha ({causa_legible(resultado['motivo_privados'])}).")
         if listas["fallos"]:
             lineas.append("❌ No pude leer estos (no toqué nada):")
             for fallo in listas["fallos"]:
@@ -1012,6 +1046,29 @@ class Servicio:
                 self.preguntar_por_reclamo(
                     {**video, "con_reclamo": True, "captura_studio": video.get("captura")}, video["video_id"]
                 )
+        sin_fecha = {
+            p.get("video_id") for p in self.estado["preguntas"].values() if p["tipo"] == "privado_sin_programar"
+        }
+        for video in privados:
+            # Uno que ya se está programando (su «Programar» llegó después de leer la lista) no
+            # se vuelve a preguntar: otro toque lanzaría un segundo `programar`.
+            if video["video_id"] not in sin_fecha and video["video_id"] not in programando:
+                self.preguntar_por_privado_sin_programar(video)
+
+    def preguntar_por_privado_sin_programar(self, video):
+        """Un video privado y sin fecha de publicación que no espera su `programar`: ofrece
+        programarlo o borrarlo. Nunca hace ninguna de las dos solo."""
+        video_id = video["video_id"]
+        titulo = video.get("titulo") or video_id
+        subido = (video.get("subido") or "")[:10]  # YYYY-MM-DD de snippet.publishedAt
+        fecha = f"Subido el {subido}.\n" if subido else ""
+        self.preguntar(
+            "privado_sin_programar",
+            f"🔒 \"{titulo}\"\n{fecha}https://studio.youtube.com/video/{video_id}/edit\n\n"
+            "Está privado y sin fecha de publicación: así no se publica nunca. ¿Lo programo o lo "
+            "elimino de YouTube? Eliminar no se puede deshacer.",
+            video_id=video_id,
+        )
 
     def preguntar_por_impugnacion_rechazada(self, rechazado):
         """La impugnación terminó y el video sigue con reclamo: ofrece borrarlo. Nunca lo borra solo."""
@@ -1354,6 +1411,14 @@ class Servicio:
                 self.titulos_por_borrar[pregunta["video_id"]] = pregunta["titulo"]
             # La API no lista un video retirado por copia: se borra sin la comprobación de siempre.
             self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"], "--retirado")
+
+    def respuesta_privado_sin_programar(self, accion, pregunta):
+        if accion == "programar":
+            # El mismo comando que recibe un video recién subido: margen, reclamos, monetización.
+            self.lanzar_paso("programar", "--video-id", pregunta["video_id"], "--esperar")
+        elif accion == "eliminar_video":
+            self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"])
+        # Conservar: la pregunta ya se cerró y el video queda como está.
 
     def respuesta_impugnacion_rechazada(self, accion, pregunta):
         if accion == "eliminar_video":
