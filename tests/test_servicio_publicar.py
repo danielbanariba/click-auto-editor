@@ -2175,6 +2175,7 @@ class TestMapearCanal(BaseServicio):
         self.assertIn("Con la impugnación en revisión: 1", resumen["texto"])
         self.assertIn("Sin revisar (/mapear_canal sigue con ellos): 1", resumen["texto"])
         self.assertIn("https://studio.youtube.com/video/V4/claims", resumen["texto"])
+        self.assertNotIn("Privados sin fecha", resumen["texto"])
         self.assertNotIn("Sello Independiente", resumen["texto"])
         self.assertNotIn("Licencia", resumen["texto"])
 
@@ -2231,6 +2232,76 @@ class TestMapearCanal(BaseServicio):
         self.mapear(aparcados=1, liberados=liberado)
         self.mapear(aparcados=1, liberados=liberado)
         self.assertEqual(len(self.lanzador.lanzados("programar")), 1)
+
+    PROGRAMAR = "▶️ Programar"
+
+    def privados(self, *ids):
+        return [
+            {"video_id": v, "titulo": f"Banda - {v}", "subido": f"2026-06-0{n}T10:15:00Z"}
+            for n, v in enumerate(ids, start=3)
+        ]
+
+    def test_los_privados_sin_fecha_suman_una_linea_y_preguntan_aparte_cada_uno(self):
+        # Defecto (S2, #65): un video privado y sin fecha que nada avisa; o juntarlos en una sola
+        # pregunta, o preguntar sin título, fecha, link ni la advertencia de que borrar no se
+        # deshace. Nada se lanza sin apretar un botón.
+        self.mapear(aparcados=0, privados_sin_programar=self.privados("P1", "P2"))
+        (resumen,) = [m for m in self.telegram.mensajes[self.antes_del_resultado:] if not m["botones"]]
+        self.assertIn(
+            "🔒 Privados sin fecha de publicación (te pregunto aparte por cada uno): 2", resumen["texto"]
+        )
+        p1, p2 = self.preguntas()
+        for pregunta, video_id, fecha in ((p1, "P1", "2026-06-03"), (p2, "P2", "2026-06-04")):
+            self.assertEqual(self.etiquetas(pregunta), [self.PROGRAMAR, self.CONSERVAR, self.ELIMINAR])
+            for texto in (f"Banda - {video_id}", fecha, f"https://studio.youtube.com/video/{video_id}/edit",
+                          "Está privado y sin fecha de publicación: así no se publica nunca.",
+                          "Eliminar no se puede deshacer."):
+                self.assertIn(texto, pregunta["texto"])
+        self.assertNotIn("Banda - P2", p1["texto"])
+        self.assertEqual(self.lanzador.lanzados(), [["mapear_canal"]])
+
+    def test_un_segundo_mapeo_no_repite_la_pregunta_de_un_privado_que_ya_tiene_una_abierta(self):
+        # Defecto: cada /mapear_canal apilaba otra pregunta por el mismo video privado.
+        self.mapear(aparcados=0, privados_sin_programar=self.privados("P1"))
+        self.mapear(aparcados=0, privados_sin_programar=self.privados("P1", "P2"))
+        abiertas = [
+            p["video_id"] for p in self.servicio.estado["preguntas"].values() if p["tipo"] == "privado_sin_programar"
+        ]
+        self.assertEqual(sorted(abiertas), ["P1", "P2"])
+
+    def test_un_privado_que_ya_se_esta_programando_no_se_vuelve_a_preguntar(self):
+        # Defecto: un /mapear_canal que leyó la lista antes de apretar «Programar» preguntaba
+        # otra vez por el mismo video, y un segundo toque lanzaba otro `programar`.
+        self.mapear(aparcados=0, privados_sin_programar=self.privados("P1"))
+        (p1,) = self.preguntas()
+        self.telegram.apretar(p1, self.PROGRAMAR)
+        self.servicio.paso()
+        self.mapear(aparcados=0, privados_sin_programar=self.privados("P1"))
+        abiertas = [p for p in self.servicio.estado["preguntas"].values() if p["tipo"] == "privado_sin_programar"]
+        self.assertEqual(abiertas, [])
+
+    def test_si_no_pudo_buscar_los_privados_lo_dice_en_el_resumen(self):
+        # Defecto: un fallo de la API al buscar los privados que pasa en silencio: «ninguno» y
+        # «no pude mirar» se verían igual.
+        self.mapear(aparcados=0, privados_sin_programar=[], motivo_privados="error_api")
+        (resumen,) = [m for m in self.telegram.mensajes[self.antes_del_resultado:] if not m["botones"]]
+        self.assertIn("❌ No pude buscar los privados sin fecha (error_api).", resumen["texto"])
+
+    def test_cada_boton_de_un_privado_lanza_solo_su_paso_y_conservar_ninguno(self):
+        # Defecto: «Programar» sin --esperar (se queda en `esperando_margen`), «Eliminar» que
+        # borra otro video, o «Conservar» que lanza algo.
+        self.mapear(aparcados=0, privados_sin_programar=self.privados("P1", "P2", "P3"))
+        p1, p2, p3 = self.preguntas()
+        self.telegram.apretar(p1, self.PROGRAMAR)
+        self.telegram.apretar(p2, self.ELIMINAR)
+        self.telegram.apretar(p3, self.CONSERVAR)
+        self.servicio.paso()
+        self.assertEqual(
+            self.lanzador.lanzados(),
+            [["mapear_canal"], ["programar", "--video-id", "P1", "--esperar"],
+             ["eliminar_video", "--video-id", "P2"]],
+        )
+        self.assertEqual(self.servicio.estado["preguntas"], {})
 
     def test_un_mapeo_cortado_antes_de_empezar_no_dice_que_reviso_cero(self):
         # Defecto: "Revisé 0 de 0" cuando el paso ni llegó a leer la lista de subidas.

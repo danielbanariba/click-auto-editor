@@ -2351,6 +2351,38 @@ def videos_aparcados(uploader, cliente, ahora):
     return aparcados
 
 
+def privados_sin_fecha(uploader, yt):
+    """Los videos privados sin fecha de publicación (sin `status.publishAt`) entre TODAS las
+    subidas del canal que no están en pendientes.json: [{"video_id", "titulo", "subido"}], en el
+    orden de la lista de subidas; `subido` es snippet.publishedAt. Solo usa la API. Un video así
+    nunca se publica y ningún paso lo esperaba. Recorrer el canal entero cuesta unas 2
+    unidades de cuota por cada 50 subidas (una página de la lista y un videos.list). Cada
+    llamada pasa sola por `ejecutar_api`: un reintento no vuelve a empezar desde la primera página.
+    """
+    ids = [video_id for _, video_id in subidas_del_canal(uploader, yt)]
+    sin_fecha = []
+    for inicio in range(0, len(ids), 50):
+        lote = ids[inicio:inicio + 50]
+        videos = ejecutar_api(
+            uploader, yt, lambda c: c.videos().list(part="snippet,status", id=",".join(lote)).execute()
+        )
+        por_id = {video["id"]: video for video in videos.get("items", [])}
+        for video_id in lote:
+            video = por_id.get(video_id, {})
+            status = video.get("status", {})
+            if status.get("privacyStatus") == "private" and not status.get("publishAt"):
+                snippet = video.get("snippet", {})
+                sin_fecha.append({
+                    "video_id": video_id,
+                    "titulo": snippet.get("title") or video_id,
+                    "subido": snippet.get("publishedAt"),
+                })
+    # Pendientes se lee al terminar: un video que se subió mientras se recorría el canal ya
+    # figura ahí, y preguntar por él sería preguntar por uno que `programar` está esperando.
+    pendientes = {pendiente["video_id"] for pendiente in leer_pendientes()}
+    return [video for video in sin_fecha if video["video_id"] not in pendientes]
+
+
 def leer_mapeo():
     if not MAPEO_JSON.exists():
         return {}
@@ -2404,7 +2436,10 @@ def mapear_canal(uploader=None, abrir_studio=pagina_de_studio, modulo=None, leer
     (algún "Tomar medidas" habilitado, con sus reclamantes), `lista_negra` (como el anterior,
     pero algún reclamante está en la lista negra), `en_proceso` (tiene reclamos y ninguno se
     puede impugnar) o `fallos` (no se pudo leer). Lo que no alcanzó a mirarse en
-    TIEMPO_MAXIMO_MAPEO_S sale en `sin_revisar`. Lo lanza el servicio con /mapear_canal.
+    TIEMPO_MAXIMO_MAPEO_S sale en `sin_revisar`. Además trae `privados_sin_programar`
+    (`privados_sin_fecha`): los privados sin fecha de publicación de todo el canal que no están
+    en pendientes.json; salen de la API y Studio no los abre. Lo lanza el servicio con
+    /mapear_canal.
     """
     uploader = uploader or uploader_real()
     log = ruta_log("mapear_canal")
@@ -2416,8 +2451,9 @@ def mapear_canal(uploader=None, abrir_studio=pagina_de_studio, modulo=None, leer
         if not youtube:
             return {"ok": False, "motivo": "sin_credenciales", **base}
         ahora = datetime.now().astimezone()
+        yt = {"cliente": youtube}
         try:
-            videos = ejecutar_api(uploader, {"cliente": youtube}, lambda c: videos_aparcados(uploader, c, ahora))
+            videos = ejecutar_api(uploader, yt, lambda c: videos_aparcados(uploader, c, ahora))
         except SinCredenciales:
             return {"ok": False, "motivo": "sin_credenciales", **base}
         except HttpError as exc:
@@ -2429,10 +2465,32 @@ def mapear_canal(uploader=None, abrir_studio=pagina_de_studio, modulo=None, leer
             detalle = f"{type(exc).__name__}: {exc}"[:200]
             print(f"Sin conexion con YouTube tras {REINTENTOS_CONEXION} reintentos: {detalle}")
             return {"ok": False, "motivo": "sin_conexion", "detalle": detalle, **base}
+        # Aparte de los aparcados: si recorrer todo el canal falla, los aparcados se revisan igual.
+        privados, motivo_privados = [], None
+        try:
+            privados = privados_sin_fecha(uploader, yt)
+        except SinCredenciales:
+            motivo_privados = "sin_credenciales"
+        except HttpError as exc:
+            print(f"Error YouTube API al buscar los privados sin fecha: {exc}")
+            motivo_privados = "error_api"
+        except POSIBLES_ERRORES_DE_CONEXION as exc:
+            if not es_error_de_conexion(exc):
+                raise
+            print(f"Sin conexion con YouTube al buscar los privados sin fecha: {type(exc).__name__}: {exc}")
+            motivo_privados = "sin_conexion"
         mapeo = leer_mapeo()
         pendientes = sorted(videos, key=lambda video: mapeo.get(video["video_id"], ""))
         print(f"{len(videos)} videos aparcados por un reclamo")
-        resumen = {"aparcados": len(videos), **listas, "sin_revisar": pendientes, **base}
+        print(f"{len(privados)} videos privados sin fecha de publicación fuera de pendientes.json")
+        resumen = {
+            "aparcados": len(videos),
+            "privados_sin_programar": privados,
+            **({"motivo_privados": motivo_privados} if motivo_privados else {}),
+            **listas,
+            "sin_revisar": pendientes,
+            **base,
+        }
         leyendo = None  # el video que se está leyendo; sin él (el navegador ni abrió) nada se sella
         try:
             if pendientes:
@@ -2800,7 +2858,10 @@ def parse_args(argv=None):
 
     sub.add_parser(
         "mapear_canal",
-        help="Vuelve a mirar en Studio los videos aparcados por un reclamo (solo lectura).",
+        help=(
+            "Vuelve a mirar en Studio los videos aparcados por un reclamo y busca los privados "
+            "sin fecha de publicación (solo lectura)."
+        ),
     )
 
     p = sub.add_parser(

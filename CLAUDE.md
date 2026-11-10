@@ -124,7 +124,7 @@ env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # dispu
 env/bin/python pipeline_agente.py impugnar_con_ventana --video-id ID [--video-id ID]... [--sin-enviar]  # the same for several videos, in one visible Brave window that waits for the user to pass "Verifica que eres tú"; manual use only, the service never launches it
 env/bin/python pipeline_agente.py apelar [--sin-enviar] [--limite N]  # appeals age restrictions and limited ads in Hebrew (in the user's name); --sin-enviar fills one form of each kind and closes it
 env/bin/python pipeline_agente.py seguir_impugnaciones  # reads /claims of the disputed videos and reports what changed (read-only)
-env/bin/python pipeline_agente.py mapear_canal  # reads /claims of every video parked by a claim and sorts them (read-only)
+env/bin/python pipeline_agente.py mapear_canal  # reads /claims of every video parked by a claim and sorts them; lists the private videos with no date (read-only)
 env/bin/python pipeline_agente.py estado [--esperar-render]  # unscheduled uploads, rendered albums awaiting approval, render running
 env/bin/python pipeline_agente.py sembrar_publicados  # loads the channel titles (1 quota unit per 50 videos) and the albums the service deleted or uploaded into the published registry
 ```
@@ -303,6 +303,29 @@ claimants, `/claims` link, "Conservar" and "🗑️ Eliminar video" (it has no s
 takes one only for the blacklist matches). A video that already has an open question of that
 kind is not asked again, so running `/mapear_canal` twice does not repeat them. Nothing is
 deleted without a press on "🗑️ Eliminar video", and nothing is disputed.
+
+`mapear_canal` also returns `privados_sin_programar`: the private videos with no
+`status.publishAt` among ALL the channel's uploads (not only the last `ESCANEO_PROGRAMADOS`)
+whose id is not in `pendientes.json`, as `[{"video_id", "titulo", "subido"}]` (`subido` is
+`snippet.publishedAt`). Such a video is never published and nothing waits for it. It comes from
+the API only (`privados_sin_fecha`): Studio is never opened for these videos, and the parked-video
+scan does not change. Reading every upload costs about 2 quota units per 50 uploads (one
+`playlistItems.list` page and one `videos.list`), so a channel of 1,000 uploads spends about 40
+units per run, on top of the parked-video scan. The list is in the result whenever `aparcados`
+is, also when no video is parked (Studio is then not opened) or when Studio fails. This search
+runs after the parked-video scan and on its own (each page and each `videos.list` through
+`ejecutar_api`): if it fails, the parked videos are still reviewed, the list comes empty with
+`motivo_privados`, and the summary says "❌ No pude buscar los privados sin fecha (...)". The service
+adds one line to the summary, "🔒 Privados sin fecha de publicación (te pregunto aparte por cada
+uno): N", and then one question per video (kind `privado_sin_programar`): title, upload date,
+`/video/<id>/edit` link, "▶️ Programar", "Conservar" and, on its own row, "🗑️ Eliminar video". A
+video that already has an open question of that kind, or whose `programar` is running, is not
+asked again. "▶️ Programar" runs
+`programar --video-id ID --esperar`, the command an upload gets (60-minute margin, claim check,
+monetization, publish or schedule); that step adds the video to `pendientes.json`, and its
+notices name it by id, since the title is only known for videos this pipeline uploaded.
+"🗑️ Eliminar video" runs `eliminar_video`. "Conservar" only closes the question, so the next
+`/mapear_canal` asks again. Nothing is scheduled or deleted without a press.
 
 `impugnar_con_ventana` disputes one or several videos, one after another, in one visible
 Brave window (`pagina_de_studio(visible=True)`) on the user's desktop. Passing "Verifica que
