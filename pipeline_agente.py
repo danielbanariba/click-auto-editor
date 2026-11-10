@@ -15,6 +15,7 @@ decida el paso siguiente; el resto de la salida va a data/agente/logs/.
 """
 import argparse
 import contextlib
+import errno
 import fcntl
 import functools
 import importlib.util
@@ -87,6 +88,12 @@ ERRORES_DE_CONEXION = (
     httplib2.ServerNotFoundError,
     TransportError,
 )
+# «Red inalcanzable» llega de httplib2 como un OSError simple, no como un ConnectionError, y
+# solo se distingue de un archivo ausente o un permiso denegado por su errno.
+ERRNOS_DE_RED = frozenset({errno.ENETUNREACH, errno.EHOSTUNREACH, errno.ENETDOWN})
+# Lo que hay que atrapar para después decidir con `es_error_de_conexion`: un `except` solo
+# entiende de clases, y el errno no es una.
+POSIBLES_ERRORES_DE_CONEXION = (*ERRORES_DE_CONEXION, OSError)
 PROCESO_RENDER = "ffmpeg_render.py"
 ESPERA_RENDER_MAX_S = 6 * 3600
 ESCANEO_PROGRAMADOS = int(os.environ.get("AGENTE_ESCANEO_PROGRAMADOS", "500"))
@@ -1030,6 +1037,18 @@ def subir(carpeta, uploader=None, sin_deathgrind=False, raices=RAICES_BORRABLES)
 # ---------------------------------------------------------------------------
 
 
+def es_error_de_conexion(exc):
+    """Si `exc` es un fallo de la red y no de la máquina: los ERRORES_DE_CONEXION más los
+    OSError de red inalcanzable (ERRNOS_DE_RED). Los demás OSError (archivos, permisos) no.
+
+    Es la única definición: `ejecutar_api` y cada paso que convierte el fallo en `sin_conexion`
+    atrapan POSIBLES_ERRORES_DE_CONEXION y vuelven a lanzar lo que no pase por aquí.
+    """
+    if isinstance(exc, ERRORES_DE_CONEXION):
+        return True
+    return isinstance(exc, OSError) and exc.errno in ERRNOS_DE_RED
+
+
 def ejecutar_api(uploader, yt, llamada):
     fallos_de_conexion = 0
     while True:
@@ -1043,7 +1062,9 @@ def ejecutar_api(uploader, yt, llamada):
             if not uploader.is_invalid_grant_error(exc):
                 raise
             print(f"Token revocado/expirado: {exc}. Rotando...")
-        except ERRORES_DE_CONEXION as exc:
+        except POSIBLES_ERRORES_DE_CONEXION as exc:
+            if not es_error_de_conexion(exc):
+                raise
             # Tras una espera larga Google ya cerró la conexión keep-alive. httplib2
             # re-lanza EPIPE/ECONNRESET sin cerrar ese socket, así que se descartan
             # las conexiones para que el reintento abra una nueva.
@@ -1644,7 +1665,9 @@ def programar(
         except HttpError as exc:
             print(f"Error YouTube API: {exc}")
             return {"ok": False, "motivo": "error_api", "detalle": str(exc), "log": str(log)}
-        except ERRORES_DE_CONEXION as exc:
+        except POSIBLES_ERRORES_DE_CONEXION as exc:
+            if not es_error_de_conexion(exc):
+                raise
             detalle = f"{type(exc).__name__}: {exc}"[:200]
             print(f"Sin conexion con YouTube tras {REINTENTOS_CONEXION} reintentos: {detalle}")
             return {
@@ -2400,7 +2423,9 @@ def mapear_canal(uploader=None, abrir_studio=pagina_de_studio, modulo=None, leer
         except HttpError as exc:
             print(f"Error YouTube API: {exc}")
             return {"ok": False, "motivo": "error_api", "detalle": str(exc)[:200], **base}
-        except ERRORES_DE_CONEXION as exc:
+        except POSIBLES_ERRORES_DE_CONEXION as exc:
+            if not es_error_de_conexion(exc):
+                raise
             detalle = f"{type(exc).__name__}: {exc}"[:200]
             print(f"Sin conexion con YouTube tras {REINTENTOS_CONEXION} reintentos: {detalle}")
             return {"ok": False, "motivo": "sin_conexion", "detalle": detalle, **base}
@@ -2547,7 +2572,9 @@ def eliminar_video(video_id, retirado=False, uploader=None):
                 "detalle": str(exc)[:200],
                 "log": str(log),
             }
-        except ERRORES_DE_CONEXION as exc:
+        except POSIBLES_ERRORES_DE_CONEXION as exc:
+            if not es_error_de_conexion(exc):
+                raise
             detalle = f"{type(exc).__name__}: {exc}"[:200]
             print(f"Sin conexion con YouTube tras {REINTENTOS_CONEXION} reintentos: {detalle}")
             return {
@@ -2635,7 +2662,9 @@ def sembrar_publicados(uploader=None):
         except HttpError as exc:
             print(f"Error YouTube API: {exc}")
             return {"ok": False, "motivo": "error_api", "detalle": str(exc)[:200], "log": str(log)}
-        except ERRORES_DE_CONEXION as exc:
+        except POSIBLES_ERRORES_DE_CONEXION as exc:
+            if not es_error_de_conexion(exc):
+                raise
             detalle = f"{type(exc).__name__}: {exc}"[:200]
             print(f"Sin conexion con YouTube tras {REINTENTOS_CONEXION} reintentos: {detalle}")
             return {"ok": False, "motivo": "sin_conexion", "detalle": detalle, "log": str(log)}

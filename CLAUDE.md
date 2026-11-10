@@ -505,4 +505,9 @@ Central config for all scripts. Key settings:
   16 GB on 2026-11-03): it is not the album's fault, so the render stops without moving
   the album to Error404 and the service asks "Reintentar" before rendering another one
 - Playwright sleeps are calibrated; reducing them breaks YouTube Studio automation
+- A network outage reaches the API calls as a plain `OSError` ("Network is unreachable", "No route to host",
+  "Network is down": `ENETUNREACH`, `EHOSTUNREACH`, `ENETDOWN`), not as a `ConnectionError`. `es_error_de_conexion`
+  (`pipeline_agente.py`) counts it as a connection failure like any other: `ejecutar_api` retries it
+  `REINTENTOS_CONEXION` times and the steps then return `motivo = sin_conexion`. Any other `OSError` (missing
+  file, permissions) is neither retried nor turned into `sin_conexion`
 - `12. mapear_playlists.py` runs as a systemd service (`systemd/mapear_playlists.service`, installed as a copy in `/etc/systemd/system/`) with auto-restart
