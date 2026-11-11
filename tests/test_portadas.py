@@ -26,11 +26,11 @@ class TestElegirPortada(unittest.TestCase):
 
     def test_sin_cover_salta_las_propagandas_de_deathgrind_y_elige_la_primera_por_nombre(self):
         self.crear("DGC - PURE HATRED.jpg", "DGC Pure Hatred.jpeg", "DGC.jpg", "DGCx.jpg",
-                   "DGC - PURE HATRED_shadow.png", "Cover_2023.jpg", "Cover_2018.jpg", "notas.txt")
-        self.assertEqual(elegir_portada(self.carpeta), self.carpeta / "Cover_2018.jpg")
+                   "DGC - PURE HATRED_shadow.png", "Zeta.jpg", "Marcio Dentro.jpg", "notas.txt")
+        self.assertEqual(elegir_portada(self.carpeta), self.carpeta / "Marcio Dentro.jpg")
 
-    def test_cover_gana_aunque_otra_imagen_vaya_antes_por_nombre(self):
-        self.crear("Arte.jpg", "DGC.jpg", "cover.png")
+    def test_cover_gana_aunque_otra_imagen_con_cover_vaya_antes_por_nombre(self):
+        self.crear("Album - Cover.jpg", "DGC.jpg", "cover.png")
         self.assertEqual(elegir_portada(self.carpeta), self.carpeta / "cover.png")
 
     def test_la_contraportada_y_las_miniaturas_no_son_la_portada(self):
