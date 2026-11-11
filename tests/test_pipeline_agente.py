@@ -1673,6 +1673,16 @@ class TestProgramar(unittest.TestCase):
         luego = pa.armar_resumen_programado("T", cuando, False, [], publicado_ahora=False)
         self.assertEqual(luego, "✓ T\nSin reclamos: programado para 2026-11-02 18:00.")
 
+    def test_el_resumen_de_un_video_con_reclamo_no_promete_apelar(self):
+        # Nada apela un reclamo: apelar una impugnación rechazada arriesga un strike.
+        cuando = momento("2028-11-11 07:00")
+        texto = pa.armar_resumen_programado("T", cuando, True, ["The Orchard Music"])
+        self.assertEqual(
+            texto,
+            "⚠️ T\nTiene reclamo (The Orchard Music): programado para 2028-11-11 07:00, "
+            "hasta que se resuelva el reclamo.",
+        )
+
 
 class ServidorKeepAliveQueMuere:
     """Servidor HTTPS/1.1 local que cierra la conexión keep-alive tras el primer pedido.

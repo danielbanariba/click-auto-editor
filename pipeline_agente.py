@@ -1546,7 +1546,7 @@ def armar_resumen_programado(
     fecha = publica_en.strftime("%Y-%m-%d %H:%M")
     if con_reclamo:
         quienes = f" ({', '.join(reclamantes)})" if reclamantes else ""
-        return f"⚠️ {titulo}\nTiene reclamo{quienes}: programado para {fecha} para apelar."
+        return f"⚠️ {titulo}\nTiene reclamo{quienes}: programado para {fecha}, hasta que se resuelva el reclamo."
     cuando = "publicado ahora" if publicado_ahora else f"programado para {fecha}"
     marca = "🎉✅" if publicado_ahora else "✓"
     texto = f"{marca} {titulo}\nSin reclamos: {cuando}."
