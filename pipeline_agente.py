@@ -55,6 +55,7 @@ from config import (
     VIDEO_WIDTH,
 )
 import registro_publicados
+from portadas import elegir_portada
 
 DIR_AGENTE = PROJECT_ROOT / "data" / "agente"
 PENDIENTES_JSON = DIR_AGENTE / "pendientes.json"
@@ -907,18 +908,6 @@ def poner_miniatura(uploader, youtube, video_id, video, captura):
     return True, None
 
 
-def portada_del_album(carpeta):
-    """La imagen que el render usa de portada: cover.* primero; si no, otra que no sea una sombra."""
-    imagenes = sorted(
-        p for p in Path(carpeta).iterdir() if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg")
-    )
-    for imagen in imagenes:
-        if imagen.name.lower().startswith("cover."):
-            return imagen
-    sin_sombra = [i for i in imagenes if not i.name.endswith("_shadow.png")]
-    return next(iter(sin_sombra or imagenes), None)
-
-
 def buscar(uploader=None, aleatorio=False, excluir=()):
     """Elige el próximo álbum sin renderizarlo y captura su búsqueda en YouTube.
 
@@ -932,7 +921,7 @@ def buscar(uploader=None, aleatorio=False, excluir=()):
     if origen is None:
         return {"ok": False, "motivo": "sin_albumes", "ya_publicados": apartados}
     captura, busqueda = capturar_busqueda(origen, uploader)
-    portada = portada_del_album(origen)
+    portada = elegir_portada(origen)
     return {
         "ok": True,
         "album": origen.name,

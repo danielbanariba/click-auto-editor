@@ -42,7 +42,7 @@ Scripts are numbered but **not all are sequential**. The active pipeline is:
 (`systemd/publicar-albumes.service`) and publishes one album at a time. It asks
 before rendering: `buscar` picks the next album and screenshots its YouTube
 search, which goes as one message; then one question with the album cover
-(`cover.*` first, else another image that is not a shadow) and the buttons
+(`portadas.elegir_portada`, the same image the render uses) and the buttons
 "✅ Renderizar y subir" / "🗑 Eliminar (ya está publicado)". Eliminar deletes the
 album's source folder (`eliminar` records it in the published registry first) and
 the service asks about the next one; nothing is rendered. Renderizar y subir
@@ -526,6 +526,20 @@ Central config for all scripts. Key settings:
 
 ## Known Friction
 
+- DeathGrind archives often carry a DeathGrind Club promo image next to the real cover:
+  `DGC.jpg`, `DGC - PURE HATRED.jpg`, `DGC Pure Hatred.jpeg` and similar names.
+  - `portadas.elegir_portada` decides the cover for both the Telegram question and the render.
+    Images whose name starts with "DGC" never count. It takes `cover.*` first, then an image whose
+    name has a word like front, cover or portada, then any other image, by name.
+  - Images whose name says they are something else go last: back, booklet, logo, scan,
+    spectrogram, small, AlbumArtSmall (the Windows Media thumbnail)... A name with "cd" or "disc"
+    goes last only when it has no cover word, because FLAC release names carry "cd"
+    (`...-cd-flac-2016-front.jpg`). A shadow counts only when nothing else is there.
+  - On 2026-11-10, 145 albums in the queue had no `cover.*` and more than one image. Picking by
+    name alone took the back cover in 18 of them and the thumbnail in 29.
+  - With only promos, there is no cover, and the render takes the one embedded in the audio.
+  - The render used to take whichever image the filesystem listed first. On 2026-11-09 that put
+    the promo on Marcio Dentro's video, while the question had shown the real cover.
 - Render is 4K and heavy; `MAX_PARALLEL_RENDERS=1` is the safe default
 - Ramdisk requires `sudo` without password for mount (configured via sudoers)
 - CUDA fallback chain: C++/CUDA → FFmpeg NVENC → FFmpeg libx264
