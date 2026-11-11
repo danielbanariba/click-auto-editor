@@ -10,8 +10,7 @@ Corre siempre en segundo plano (systemd/publicar-albumes.service):
    En paralelo espera el procesado, revisa reclamos, activa la monetización y
    lo publica en el acto o lo programa (siempre a una hora de otro video).
 5. Si un reclamante está en la lista negra, pregunta si elimina el video de YouTube.
-   Si el video tiene reclamo y ninguno es de la lista negra, también pregunta si lo
-   elimina o lo conserva. Nunca impugna.
+   Si el video tiene reclamo y ninguno es de la lista negra, pregunta si lo impugna.
 6. Una vez por día apela en hebreo la restricción de edad y los anuncios limitados de los
    videos del canal, sin preguntar, y después avisa qué mandó.
 
@@ -81,10 +80,13 @@ BOTONES = {
     "reprogramar": [[("🔁 Reintentar", "reintentar")]],
     # Borrar el video no se deshace: va en su propia fila, debajo de Conservar.
     "lista_negra": [[("Conservar", "conservar")], [("🗑️ Eliminar video", "eliminar_video")]],
-    # Un video con reclamo fuera de la lista negra. El nombre «impugnar» se queda porque las
-    # preguntas guardadas en servicio.json lo usan; el servicio ya no impugna. Borrar no se
-    # deshace: va en su propia fila, debajo de Conservar.
-    "impugnar": [[("Conservar", "conservar")], [("🗑️ Eliminar video", "eliminar_video")]],
+    # Impugnar es una declaración legal a nombre del usuario y borrar no se deshace: cada
+    # botón en su fila. Conservar solo cierra la pregunta.
+    "impugnar": [
+        [("⚖️ Impugnar", "impugnar")],
+        [("Conservar", "conservar")],
+        [("🗑️ Eliminar video", "eliminar_video")],
+    ],
     # Una copia retirada nunca se va a poder publicar: no hay nada que conservar ni reintentar.
     "copia_retirada": [[("🗑️ Eliminar video", "eliminar_video")]],
     "impugnacion_rechazada": [[("Conservar", "conservar")], [("🗑️ Eliminar video", "eliminar_video")]],
@@ -94,6 +96,10 @@ BOTONES = {
         [("▶️ Programar", "programar"), ("Conservar", "conservar")],
         [("🗑️ Eliminar video", "eliminar_video")],
     ],
+    # El resumen de /mapear_canal: impugna de a uno los videos de la lista. {n} es cuántos son.
+    "impugnar_todos": [[("⚖️ Impugnar todos ({n})", "impugnar_todos")]],
+    # Studio pidió "Verifica que eres tú": abre Brave visible en la PC para pasarla ahí.
+    "impugnar_ventana": [[("🖥 Impugnar con ventana", "impugnar_ventana")]],
 }
 AVISO_BOTON = {
     "renderizar": "Lo renderizo y lo subo",
@@ -108,12 +114,17 @@ AVISO_BOTON = {
     "conservar": "Lo conservo",
     "eliminar_video": "Borrando el video…",
     "programar": "Programando…",
+    "impugnar": "Impugnando…",
+    "impugnar_todos": "Los impugno de a uno; aviso al final",
+    # Puede esperar el candado de Studio (`apelar` lo tiene hasta 90 min): la espera de 10 min
+    # por reclamo empieza recién con el formulario abierto.
+    "impugnar_ventana": "Abro Brave en la PC apenas Studio esté libre: pasá la verificación ahí",
 }
 # El menú de comandos del bot.
 COMANDOS = [
     {"command": "aleatorio", "description": "Prende o apaga la elección al azar del próximo álbum"},
     {"command": "crear_lista", "description": "Junta los álbumes que apruebes y los renderiza todos juntos"},
-    {"command": "mapear_canal", "description": "Revisa los aparcados por un reclamo y los privados sin fecha"},
+    {"command": "mapear_canal", "description": "Junta los videos con reclamo que falta impugnar y revisa los privados sin fecha"},
 ]
 # Mientras haya una de estas preguntas abiertas no se renderiza otro álbum.
 # "reprogramar" no frena: el video ya está subido y no depende del render.
@@ -131,11 +142,22 @@ LIMITES_PASO_S = {
     # También: corta a los 30 min de tener el candado, que puede esperar a `apelar` (90 min),
     # más un video que ya estaba leyendo.
     "mapear_canal": 150 * 60,
+    # Cada reclamo espera hasta 10 min a que pases la verificación. Manda declaraciones
+    # legales: no se corta, solo se avisa.
+    "impugnar_con_ventana": 4 * 3600,
 }
 # `apelar` anota cada video antes de pulsar el envío: cortarlo nunca hace que se repita uno.
 # `seguir_impugnaciones` y `mapear_canal` solo leen Studio. `buscar` aparta los publicados con
 # un rename, que no queda a medias.
 PASOS_CORTABLES = ("buscar", "verificar", "programar", "apelar", "seguir_impugnaciones", "mapear_canal")
+# Frenan el lote de «Impugnar todos»: con ellos, los demás videos fallarían igual.
+FRENAN_EL_LOTE = ("verificacion_de_identidad", "sin_sesion_en_studio", "canal_no_disponible")
+# Lo que acompaña al botón «🖥 Impugnar con ventana».
+INSTRUCCIONES_VENTANA = (
+    "Tocá «🖥 Impugnar con ventana» cuando estés en la PC: se abre Brave en el escritorio. Pasá "
+    "ahí «Verifica que eres tú» y no toques nada más; espero 10 minutos por reclamo e impugno "
+    "todo en esa ventana."
+)
 GRACIA_CORTE_S = 10  # entre SIGTERM y SIGKILL
 MOTIVOS_SUBIDA = {
     "limite_canal": "YouTube no deja subir más videos por hoy",
@@ -165,6 +187,8 @@ MOTIVOS_IMPUGNACION = {
     "canal_no_disponible": "YouTube pidió elegir canal y no pude entrar con «Daniel Banariba»",
     "error_navegador": "falló el navegador",
     "reclamantes_no_disponibles": "no pude leer quién reclama, y sin eso no sé si está en la lista negra",
+    "interrumpido": "el servicio se reinició a mitad de la impugnación; revisa en Studio qué salió "
+    "(/mapear_canal lo vuelve a encontrar si le falta algo)",
 }
 
 MOTIVOS_APELACION = {
@@ -190,6 +214,35 @@ def causa_legible(motivo):
         MOTIVOS_IMPUGNACION.get(motivo) or MOTIVOS_APELACION.get(motivo)
         or MOTIVOS_SUBIDA.get(motivo) or motivo
     )
+
+
+def lineas_de_impugnacion(hechos):
+    """Una línea por video del informe de un lote o de una ventana: lo impugnado y los fallos."""
+    lineas = []
+    for hecho in hechos:
+        titulo = hecho.get("titulo") or hecho["video_id"]
+        enlace = f"https://studio.youtube.com/video/{hecho['video_id']}/claims"
+        if hecho.get("motivo") == "sin_reclamos_impugnables":
+            lineas.append(f"• \"{titulo}\": no tenía reclamos que se pudieran impugnar")
+            continue
+        if hecho.get("motivo") == "interrumpido":
+            lineas.append(f"• \"{titulo}\": {causa_legible('interrumpido')}\n  {enlace}")
+            continue
+        if hecho.get("reclamos"):
+            linea = f"• \"{titulo}\": {hecho.get('impugnados', 0)} de {hecho['reclamos']} reclamos"
+        else:
+            linea = f"• \"{titulo}\": no pude impugnar"
+        for fallo in hecho.get("fallos") or []:
+            detalle = f" ({fallo['detalle']})" if fallo.get("detalle") else ""
+            linea += f"\n  {causa_legible(fallo.get('motivo'))}{detalle}"
+        if hecho.get("fallos"):
+            linea += f"\n  {enlace}"
+        lineas.append(linea)
+    return lineas
+
+
+def pidio_verificacion(hecho):
+    return any(fallo.get("motivo") == "verificacion_de_identidad" for fallo in hecho.get("fallos") or [])
 
 
 def partir_en_mensajes(lineas, limite=LIMITE_TEXTO):
@@ -402,12 +455,16 @@ class Servicio:
         # aleatorio: el /aleatorio de Telegram; el próximo álbum se elige al azar.
         # modo_lista y lista: el /crear_lista; lo aprobado con ➕ espera ahí hasta que se toca ▶️.
         # despues_de_lista: el álbum que estaba en pantalla al tocar ▶️; se pregunta al terminar.
+        # lote_impugnar: el «Impugnar todos» en curso: los videos que faltan (el primero se está
+        # impugnando) y lo que salió con los anteriores.
         # avisos_pendientes: avisos de resultados ya anotados en apelaciones.json o
         # impugnaciones.json que Telegram todavía no recibió: [{"texto", "intentos"}].
+        # ventanas_en_curso: los videos (video_id, titulo) de las ventanas de «Impugnar con
+        # ventana» lanzadas y sin terminar: si el servicio se reinicia, la ventana muere con él.
         self.estado = {
             "offset": 0, "preguntas": {}, "rechazados": [], "subidos": [], "aceptados": [],
             "aleatorio": False, "modo_lista": False, "lista": [], "despues_de_lista": None,
-            "avisos_pendientes": [],
+            "lote_impugnar": None, "avisos_pendientes": [], "ventanas_en_curso": [],
         }
         self.tareas = []
         self.inicios = {}  # proceso -> momento en que se lanzó
@@ -432,20 +489,31 @@ class Servicio:
         if self.ruta_estado.exists():
             with open(self.ruta_estado, "r", encoding="utf-8") as archivo:
                 self.estado.update(json.load(archivo))
-            # De cuando el servicio impugnaba: las preguntas de un tipo que ya no tiene botones
-            # («Impugnar todos», «Impugnar con ventana») y el lote y las ventanas, que murieron
-            # con el reinicio, se descartan. Un toque en esos mensajes contesta que ya no valen.
-            self.estado["preguntas"] = {
-                qid: p for qid, p in self.estado["preguntas"].items() if p["tipo"] in BOTONES
-            }
-            self.estado.pop("lote_impugnar", None)
-            self.estado.pop("ventanas_en_curso", None)
         con_pregunta = {p.get("video_id") for p in self.estado["preguntas"].values()}
         for pendiente in pa.leer_pendientes():
             if pendiente["video_id"] not in con_pregunta:
                 self.lanzar_paso("programar", "--video-id", pendiente["video_id"], "--esperar")
+        # El `impugnar` del lote murió con el reinicio. Pudo haber enviado un reclamo que Studio
+        # todavía no muestra impugnado: relanzarlo podría impugnarlo dos veces. Queda como
+        # interrumpido y el lote sigue con el próximo.
+        if self.estado["lote_impugnar"] and self.estado["lote_impugnar"]["videos"]:
+            self.anotar_en_el_lote({"ok": False, "motivo": "interrumpido"})
+        self.avisar_ventanas_interrumpidas()
         self.enviar_preguntas()
         self.enviar_avisos_pendientes()
+
+    def avisar_ventanas_interrumpidas(self):
+        """La ventana de «Impugnar con ventana» murió con el reinicio. Pudo haber enviado un
+        reclamo que Studio todavía no muestra impugnado: no se relanza, solo se avisa con los
+        enlaces para mirarlo."""
+        videos = self.estado["ventanas_en_curso"]
+        if not videos:
+            return
+        lineas = [f"🖥 El servicio se reinició con la ventana de «Impugnar con ventana» abierta. Videos: {len(videos)}"]
+        lineas += lineas_de_impugnacion([{**video, "motivo": "interrumpido"} for video in videos])
+        self.estado["ventanas_en_curso"] = []
+        for parte in partir_en_mensajes(lineas):
+            self.avisar_con_reintento(parte)
 
     def guardar(self):
         self.ruta_estado.parent.mkdir(parents=True, exist_ok=True)
@@ -762,7 +830,7 @@ class Servicio:
                     f"https://studio.youtube.com/video/{video_id}/monetization"
                 )
             self.preguntar_por_lista_negra(resultado, video_id)
-            self.preguntar_por_reclamo(resultado, video_id)
+            self.preguntar_por_impugnar(resultado, video_id)
         elif motivo == "reclamo_desconocido":
             titulo = resultado.get("titulo") or video_id
             # Un fallo pasajero del navegador se reintenta como los demás fallos; una página que
@@ -851,8 +919,8 @@ class Servicio:
             titulo=resultado.get("titulo"),
         )
 
-    def preguntar_por_reclamo(self, resultado, video_id):
-        """Un video con reclamo y ninguno de la lista negra: ofrece borrarlo. Nunca lo borra solo."""
+    def preguntar_por_impugnar(self, resultado, video_id):
+        """Un video con reclamo y ninguno de la lista negra: ofrece impugnarlo. Nunca impugna solo."""
         if not resultado.get("con_reclamo") or resultado.get("reclamantes_en_lista_negra"):
             return
         titulo = resultado.get("titulo") or video_id
@@ -860,12 +928,56 @@ class Servicio:
         quienes = ":\n" + "\n".join(f"• {reclamante}" for reclamante in reclamantes) if reclamantes else "."
         self.preguntar(
             "impugnar",
-            f"©️ \"{titulo}\" tiene reclamo de derechos de autor{quienes}\n\n"
+            f"⚖️ \"{titulo}\" tiene reclamo de derechos de autor{quienes}\n\n"
             f"https://studio.youtube.com/video/{video_id}/claims\n\n"
-            "Sigue programado a dos años y sin ingresos. ¿Lo elimino de YouTube? No se puede deshacer.",
+            "El video sigue programado. ¿Impugno los reclamos o elimino el video? Impugnar es una "
+            "declaración legal a tu nombre: se envía con el motivo \"Licencia\", el texto de licencia "
+            "y la firma ya configurados. Eliminar el video no se puede deshacer.",
             foto=resultado.get("captura_studio"),
             video_id=video_id,
         )
+
+    def tras_impugnar(self, resultado, argumentos):
+        video_id = valor(argumentos, "--video-id")
+        lote = self.estado["lote_impugnar"]
+        if lote and lote["videos"] and lote["videos"][0]["video_id"] == video_id:
+            self.anotar_en_el_lote(resultado)
+            return
+        titulo = resultado.get("titulo") or video_id
+        enlace = f"https://studio.youtube.com/video/{video_id}/claims"
+        foto = resultado.get("captura")
+        if resultado.get("motivo") == "sin_reclamos_impugnables":
+            self.avisar(
+                f"ℹ️ \"{titulo}\" no tiene reclamos que se puedan impugnar ahora "
+                f"(ya estaban impugnados o ya no hay reclamos).\n{enlace}",
+                foto=foto,
+            )
+            return
+        if resultado.get("reclamos"):
+            impugnados = resultado.get("impugnados", 0)
+            texto = f"⚖️ Impugné {impugnados} de {resultado['reclamos']} reclamos de \"{titulo}\"."
+        else:
+            texto = f"❌ No pude impugnar \"{titulo}\"."
+        if resultado.get("ok"):
+            self.avisar(f"{texto}\n{enlace}", foto=foto)
+            return
+        fallos = resultado.get("fallos") or []
+        if not fallos:  # un fallo antes de empezar trae el motivo en la raíz del resultado
+            fallos = [{"motivo": resultado.get("motivo"), "detalle": resultado.get("detalle")}]
+        for fallo in fallos:
+            causa = MOTIVOS_IMPUGNACION.get(fallo.get("motivo")) or fallo.get("motivo")
+            detalle = f" ({fallo['detalle']})" if fallo.get("detalle") else ""
+            texto += f"\n• {causa}{detalle}"
+        if pidio_verificacion({"fallos": fallos}):
+            lineas = [f"{texto}\n{enlace}"]
+            if resultado.get("log"):
+                lineas.append(f"Log: {resultado['log']}")
+            self.preguntar_por_ventana(lineas, [{"video_id": video_id, "titulo": titulo}], foto=foto)
+            return
+        texto += f"\nRevisa en Studio cuáles quedaron impugnados y termina a mano lo que falte:\n{enlace}"
+        if resultado.get("log"):
+            texto += f"\nLog: {resultado['log']}"
+        self.avisar(texto, foto=foto)
 
     def tras_apelar(self, resultado, argumentos):
         """Avisa qué se mandó y qué resolvió YouTube; si no hubo nada, no manda nada.
@@ -982,11 +1094,11 @@ class Servicio:
             self.preguntar_por_impugnacion_rechazada(rechazado)
 
     def tras_mapear_canal(self, resultado, argumentos):
-        """Un solo mensaje, sin botones, con lo que se liberó y lo que no se pudo leer. Los
-        liberados se programan como un video sin reclamo; los de la lista negra y los demás con
-        reclamo preguntan aparte, cada uno con su «Eliminar video». Los privados sin fecha de
-        publicación también preguntan aparte, con «Programar». Nada se programa ni se borra sin
-        el botón."""
+        """Un solo mensaje con lo que se liberó, lo que falta impugnar (con «Impugnar todos») y
+        lo que no se pudo leer. Los liberados se programan como un video sin reclamo; los de la
+        lista negra preguntan aparte, con su «Eliminar video». Los privados sin fecha de
+        publicación también preguntan aparte, con «Programar». Nada se impugna, programa ni
+        borra sin el botón."""
         listas = {
             clave: resultado.get(clave) or []
             for clave in ("liberados", "sin_impugnar", "lista_negra", "en_proceso", "fallos", "sin_revisar")
@@ -1005,8 +1117,6 @@ class Servicio:
             lineas += [f"• {video.get('titulo') or video['video_id']}" for video in listas["liberados"]]
         if listas["lista_negra"]:
             lineas.append(f"🚩 Con un reclamante de la lista negra (te pregunto aparte): {len(listas['lista_negra'])}")
-        if listas["sin_impugnar"]:
-            lineas.append(f"©️ Con reclamo (te pregunto aparte por cada uno si lo borro): {len(listas['sin_impugnar'])}")
         if listas["en_proceso"]:
             lineas.append(f"⏳ Con la impugnación en revisión: {len(listas['en_proceso'])}")
         privados = resultado.get("privados_sin_programar") or []
@@ -1025,8 +1135,29 @@ class Servicio:
             lineas.append(f"⏸ Sin revisar (/mapear_canal sigue con ellos): {len(listas['sin_revisar'])}")
         if resultado.get("motivo"):
             lineas.append(f"❌ No terminé de revisar: {causa_legible(resultado['motivo'])}.\nLog: {resultado.get('log')}")
-        for parte in partir_en_mensajes(lineas):
-            self.avisar(parte)
+        sin_impugnar = listas["sin_impugnar"]
+        if sin_impugnar:
+            lineas.append(f"⚖️ Con reclamos sin impugnar: {len(sin_impugnar)}")
+            for video in sin_impugnar:
+                lineas.append(
+                    f"• \"{video.get('titulo') or video['video_id']}\": {', '.join(video['reclamantes'])}\n"
+                    f"  https://studio.youtube.com/video/{video['video_id']}/claims"
+                )
+            lineas.append(
+                "¿Los impugno? Van de a uno, con el motivo \"Licencia\", el texto de licencia y la "
+                "firma ya configurados: es una declaración legal a tu nombre por cada video."
+            )
+            *previas, texto = partir_en_mensajes(lineas)
+            self.preguntar(
+                "impugnar_todos",
+                texto,
+                previas=[{"texto": previa, "foto": None, "enviada": False} for previa in previas],
+                videos=[{"video_id": v["video_id"], "titulo": v.get("titulo")} for v in sin_impugnar],
+                n=len(sin_impugnar),
+            )
+        else:
+            for parte in partir_en_mensajes(lineas):
+                self.avisar(parte)
         programando = {valor(a, "--video-id") for a, _ in self.tareas if a[0] == "programar"}
         for liberado in listas["liberados"]:
             # Studio ya lo leyó dos veces sin reclamos: sin la espera ni otra revisión.
@@ -1038,14 +1169,6 @@ class Servicio:
         for video in listas["lista_negra"]:
             if video["video_id"] not in ya_preguntados:
                 self.preguntar_por_lista_negra({**video, "captura_studio": video.get("captura")}, video["video_id"])
-        con_reclamo = {
-            p.get("video_id") for p in self.estado["preguntas"].values() if p["tipo"] == "impugnar"
-        }
-        for video in listas["sin_impugnar"]:
-            if video["video_id"] not in con_reclamo:
-                self.preguntar_por_reclamo(
-                    {**video, "con_reclamo": True, "captura_studio": video.get("captura")}, video["video_id"]
-                )
         sin_fecha = {
             p.get("video_id") for p in self.estado["preguntas"].values() if p["tipo"] == "privado_sin_programar"
         }
@@ -1069,6 +1192,99 @@ class Servicio:
             "elimino de YouTube? Eliminar no se puede deshacer.",
             video_id=video_id,
         )
+
+    def impugnar_siguiente_del_lote(self):
+        lote = self.estado["lote_impugnar"]
+        if lote and lote["videos"]:
+            self.lanzar_paso("impugnar", "--video-id", lote["videos"][0]["video_id"])
+
+    def anotar_en_el_lote(self, resultado):
+        """Lo que salió con el video en curso; sigue con el próximo o, al final, avisa una vez."""
+        lote = self.estado["lote_impugnar"]
+        video = lote["videos"].pop(0)
+        fallos = resultado.get("fallos") or []
+        if not resultado.get("ok") and not fallos and resultado.get("motivo") != "sin_reclamos_impugnables":
+            fallos = [{"motivo": resultado.get("motivo"), "detalle": resultado.get("detalle")}]
+        lote["hechos"].append({
+            **video, "reclamos": resultado.get("reclamos"), "impugnados": resultado.get("impugnados", 0),
+            "motivo": resultado.get("motivo"), "fallos": fallos,
+        })
+        frena = next((f["motivo"] for f in fallos if f.get("motivo") in FRENAN_EL_LOTE), None)
+        if lote["videos"] and not frena:
+            self.guardar()
+            self.impugnar_siguiente_del_lote()
+            return
+        self.estado["lote_impugnar"] = None
+        self.guardar()
+        lineas = [f"⚖️ Terminé el «Impugnar todos». Videos: {len(lote['hechos'])}"]
+        lineas += lineas_de_impugnacion(lote["hechos"])
+        if frena == "verificacion_de_identidad":
+            if lote["videos"]:
+                lineas.append(f"⛔ Frené el resto: {causa_legible(frena)}. Quedan {len(lote['videos'])} sin impugnar:")
+                lineas += [f"• {v.get('titulo') or v['video_id']}" for v in lote["videos"]]
+            ventana = [
+                {"video_id": h["video_id"], "titulo": h.get("titulo")} for h in lote["hechos"] if pidio_verificacion(h)
+            ]
+            self.preguntar_por_ventana(lineas, ventana + lote["videos"])
+            return
+        if lote["videos"]:
+            lineas.append(
+                f"⛔ Frené el resto: {causa_legible(frena)}. Quedan {len(lote['videos'])} sin impugnar; "
+                "resolvelo en Studio y corré /mapear_canal de nuevo:"
+            )
+            lineas += [f"• {v.get('titulo') or v['video_id']}" for v in lote["videos"]]
+        for parte in partir_en_mensajes(lineas):
+            self.avisar(parte)
+
+    def preguntar_por_ventana(self, lineas, videos, foto=None):
+        """Studio pidió "Verifica que eres tú": ofrece impugnar esos videos en una ventana visible,
+        con una sola verificación. Nada se impugna sin apretar el botón."""
+        *previas, texto = partir_en_mensajes(lineas + [INSTRUCCIONES_VENTANA])
+        self.preguntar(
+            "impugnar_ventana",
+            texto,
+            foto=foto,
+            previas=[{"texto": previa, "foto": None, "enviada": False} for previa in previas],
+            videos=[{"video_id": v["video_id"], "titulo": v.get("titulo")} for v in videos],
+        )
+
+    def tras_impugnar_con_ventana(self, resultado, argumentos):
+        """Un solo informe de lo que salió en la ventana. Si la verificación no se pasó a tiempo,
+        vuelve a ofrecer la ventana para lo que quedó."""
+        self.estado["ventanas_en_curso"] = [
+            v for v in self.estado["ventanas_en_curso"] if v["video_id"] not in argumentos[2::2]
+        ]
+        self.guardar()
+        videos = resultado.get("videos") or []
+        motivo = resultado.get("motivo")
+        sin_revisar = resultado.get("sin_revisar")
+        if sin_revisar is None:
+            # Terminó sin decir qué hizo: pudo haber impugnado algo, así que no se ofrece de nuevo.
+            lineas = ["❌ La ventana terminó sin decir qué impugnó (se cortó o falló). Revisa en Studio:"]
+            lineas += [f"• https://studio.youtube.com/video/{v}/claims" for v in argumentos[2::2]]
+            if resultado.get("log"):
+                lineas.append(f"Log: {resultado['log']}")
+            for parte in partir_en_mensajes(lineas):
+                self.avisar(parte)
+            return
+        if videos:
+            lineas = [f"🖥 Terminé de impugnar con ventana. Videos: {len(videos)}"]
+            lineas += lineas_de_impugnacion(videos)
+        else:
+            lineas = [f"❌ No pude impugnar con ventana: {causa_legible(motivo)}."]
+        if sin_revisar:
+            if videos:
+                lineas.append(f"⛔ Frené el resto: {causa_legible(motivo)}. Quedan {len(sin_revisar)} sin impugnar:")
+            lineas += [f"• {v.get('titulo') or v['video_id']}" for v in sin_revisar]
+        if motivo == "verificacion_de_identidad":
+            ventana = [{"video_id": v["video_id"], "titulo": v.get("titulo")} for v in videos if pidio_verificacion(v)]
+            ventana += sin_revisar
+            self.preguntar_por_ventana(lineas, ventana)
+            return
+        if not resultado.get("ok") and resultado.get("log"):
+            lineas.append(f"Log: {resultado['log']}")
+        for parte in partir_en_mensajes(lineas):
+            self.avisar(parte)
 
     def preguntar_por_impugnacion_rechazada(self, rechazado):
         """La impugnación terminó y el video sigue con reclamo: ofrece borrarlo. Nunca lo borra solo."""
@@ -1160,8 +1376,8 @@ class Servicio:
         for qid, pregunta in self.estado["preguntas"].items():
             if pregunta["message_id"] is not None:
                 continue
-            # {n}: los álbumes de la lista.
-            n = str(len(self.estado["lista"]))
+            # {n}: lo que cuenta la pregunta (los videos de «Impugnar todos») o los álbumes de la lista.
+            n = str(pregunta.get("n", len(self.estado["lista"])))
             botones = [
                 [(etiqueta.replace("{n}", n), f"{accion}:{qid}") for etiqueta, accion in fila]
                 for fila in BOTONES[pregunta["tipo"]]
@@ -1401,9 +1617,44 @@ class Servicio:
         # Conservar: la pregunta ya se cerró y el video queda como está.
 
     def respuesta_impugnar(self, accion, pregunta):
-        if accion == "eliminar_video":
+        if accion == "impugnar":
+            self.lanzar_paso("impugnar", "--video-id", pregunta["video_id"])
+        elif accion == "eliminar_video":
             self.lanzar_paso("eliminar_video", "--video-id", pregunta["video_id"])
-        # Conservar: la pregunta ya se cerró y el video queda como está.
+
+    def respuesta_impugnar_todos(self, accion, pregunta):
+        """Suma al lote los videos que no tiene (ni por hacer ni hechos); si no había uno en
+        curso, empieza por el primero."""
+        lote = self.estado["lote_impugnar"]
+        if lote is None:
+            lote = self.estado["lote_impugnar"] = {"videos": [], "hechos": []}
+        en_el_lote = {video["video_id"] for video in lote["videos"] + lote["hechos"]}
+        nuevos = [video for video in pregunta["videos"] if video["video_id"] not in en_el_lote]
+        en_curso = bool(lote["videos"])
+        lote["videos"] += nuevos
+        self.guardar()
+        if not en_curso:
+            self.impugnar_siguiente_del_lote()
+
+    def respuesta_impugnar_ventana(self, accion, pregunta):
+        # Un video que ya está en el lote de «Impugnar todos» o en otra ventana en curso no se
+        # vuelve a correr: Studio lo atendería de nuevo, uno detrás del otro, por el candado.
+        en_curso = {video["video_id"] for video in (self.estado["lote_impugnar"] or {}).get("videos", [])}
+        for argumentos, _ in self.tareas:
+            if argumentos[0] == "impugnar_con_ventana":
+                en_curso.update(argumentos[2::2])
+        videos = [video for video in pregunta["videos"] if video["video_id"] not in en_curso]
+        if not videos:
+            self.avisar("ℹ️ Esos videos ya se están impugnando (en «Impugnar todos» o en otra ventana): no abro otra.")
+            return
+        self.estado["ventanas_en_curso"] += [
+            {"video_id": video["video_id"], "titulo": video.get("titulo")} for video in videos
+        ]
+        self.guardar()
+        argumentos = ["impugnar_con_ventana"]
+        for video in videos:
+            argumentos += ["--video-id", video["video_id"]]
+        self.lanzar_paso(*argumentos)
 
     def respuesta_copia_retirada(self, accion, pregunta):
         if accion == "eliminar_video":

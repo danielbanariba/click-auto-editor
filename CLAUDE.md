@@ -120,8 +120,8 @@ env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload,
 env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the album folder without uploading (already published); a direct child of Renderizando/, upload_video/ or a source folder
 env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → monetization on → public now / first free moment, or +2 years if claimed
 env/bin/python pipeline_agente.py eliminar_video --video-id ID [--retirado]  # deletes the video from YouTube (irreversible; the service only runs it from a Telegram button); --retirado skips the existence check for a video YouTube removed as a copy
-env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # disputes every claim of the video in Studio (a legal statement in the user's name); manual use only, the service never launches it; --sin-enviar fills the first form and closes it without sending
-env/bin/python pipeline_agente.py impugnar_con_ventana --video-id ID [--video-id ID]... [--sin-enviar]  # the same for several videos, in one visible Brave window that waits for the user to pass "Verifica que eres tú"; manual use only, the service never launches it
+env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # disputes every claim of the video in Studio (a legal statement in the user's name); --sin-enviar fills the first form and closes it without sending
+env/bin/python pipeline_agente.py impugnar_con_ventana --video-id ID [--video-id ID]... [--sin-enviar]  # the same for several videos, in one visible Brave window that waits for the user to pass "Verifica que eres tú"
 env/bin/python pipeline_agente.py apelar [--sin-enviar] [--limite N]  # appeals age restrictions and limited ads in Hebrew (in the user's name); --sin-enviar fills one form of each kind and closes it
 env/bin/python pipeline_agente.py seguir_impugnaciones  # reads /claims of the disputed videos and reports what changed (read-only)
 env/bin/python pipeline_agente.py mapear_canal  # reads /claims of every video parked by a claim and sorts them; lists the private videos with no date (read-only)
@@ -207,19 +207,46 @@ notice gives the Studio link to delete it by hand. A 404 from `videos.delete` re
 deleted already) and gives the Studio link, instead of "Sigue en YouTube", which any other API
 error keeps.
 
-A claimed video with no blacklist match gets a question of its own: its title, the
-claimants, the `/claims` link, the Studio screenshot and a note that the video stays
-scheduled two years ahead, without income. The buttons are "Conservar" and
-"🗑️ Eliminar video", as in the blacklist question: "Conservar" only closes the question and
-"🗑️ Eliminar video" runs `pipeline_agente.py eliminar_video`. Nothing is deleted without that
-press, and a blacklisted video gets only the blacklist question. The service does not dispute claims any more: it never launches `impugnar` or
-`impugnar_con_ventana`, which stay as commands for manual use.
+A claimed video with no blacklist match gets a different Telegram question: its
+title, the claimants, the `/claims` link, the Studio screenshot and a note that
+the dispute goes out with the reason "Licencia" and the configured text and
+signature. "⚖️ Impugnar" runs `pipeline_agente.py impugnar --video-id <id>` and the
+service reports "Impugné N de M reclamos" with the failures and the `/claims`
+link; "Conservar" only closes the question; "🗑️ Eliminar video" runs
+`pipeline_agente.py eliminar_video`, as in the blacklist question. Nothing is disputed or
+deleted without that press, and a blacklisted video keeps only the delete question.
 
-The question type is still called `impugnar` in the code, because the questions saved in
-`data/agente/servicio.json` use that name. On an old message, "⚖️ Impugnar" launches nothing and
-answers "Esa pregunta ya no está vigente."; its "🗑️ Eliminar video" keeps working. When the service
-starts, it drops the saved "Impugnar todos" and "Impugnar con ventana" questions and the old
-`lote_impugnar` and `ventanas_en_curso` keys; a press on those messages gets the same answer.
+Nothing appeals a claim. The user's decision is: dispute yes, appeal never. Appealing a rejected
+dispute risks a copyright strike, and the user has had bad experiences with it.
+- After "Tomar medidas", `impugnar` goes on only when the menu offers an option named "Impugnar"
+  (`P_DISPUTE_MENU_OPTION` in `10. inpunar_video.py`). An "Apelar" option never matches, so that
+  claim fails without anything being sent.
+- The dispute form itself says "puedes apelar la decisión" (seen in `data/impugnar_evidencia/`).
+  So a text check for "apel" would also stop real disputes.
+- The service asks "Conservar" or "🗑️ Eliminar video" about a rejected dispute
+  (`impugnacion_rechazada`).
+- The scheduling notice of a claimed video says "programado para ..., hasta que se resuelva el
+  reclamo".
+- On 2026-11-10, PR #63 removed disputing after a misreading of "ya tuve malas experiencia con
+  apelar". It came back on 2026-11-11.
+
+The daily `apelar` step is a separate thing: it appeals age restrictions and limited ads, not
+claims.
+
+When a dispute fails with `verificacion_de_identidad`, the notice carries "🖥 Impugnar con
+ventana" and how to use it (be at the PC, pass the verification in the window, touch nothing
+else). The press runs `impugnar_con_ventana` for that video, and the service reports the
+result in one message. If the verification was not passed in time, the report offers the window
+again for what was left. A window run that ends with no result (`sin_respuesta`) may have
+sent something, so the notice lists the `/claims` links to check and offers nothing.
+`seguir_impugnaciones` also reads the `servicio_impugnar_con_ventana_*.out` logs. The notice of
+a single dispute that asks for the verification keeps the step's `Log:` line, like the other
+failure notices. The press drops the videos that are already in the running «Impugnar todos»
+batch or in another running window (if none is left, one line says they are already being
+disputed and no window opens). The window's videos stay in `ventanas_en_curso`
+(`data/agente/servicio.json`) until it ends. If the service restarts meanwhile, the window died
+with it: the service sends one notice with each video's `/claims` link and does not launch it
+again, since it may have sent a dispute.
 
 Disputing (`impugnar`) reuses the recipe of `10. inpunar_video.py`: for each claim
 whose "Tomar medidas" is visible and enabled it opens the form, picks "Licencia",
@@ -246,16 +273,12 @@ is not registered either, the list cannot be read (no proof that nothing went ou
 or the count is anything else, the claim is `no_confirmado` and the run stops. Any
 failure stops the run, and the
 JSON reports `reclamos`, `impugnados`, `fallos` and a `captura` of `/claims`. A
-video with no disputable claims returns `motivo = sin_reclamos_impugnables`. Only a person runs
-it: the service never launches it.
+video with no disputable claims returns `motivo = sin_reclamos_impugnables`.
 
 `seguir_impugnaciones` follows the disputes once a day; the service launches it right after
 `apelar`, unless `apelar` failed with `sin_sesion_en_studio` (the follow-up would fail the same
-way and repeat the notice). It takes the videos from the `servicio_impugnar_*.out` and
-`servicio_impugnar_con_ventana_*.out` logs with at least one claim disputed. Only the service
-writes those logs and it no longer launches `impugnar`: the logs already on disk still count, and
-a dispute sent by hand is not followed. It opens their `/claims` and only reads it (it never
-presses anything). Each claim is
+way and repeat the notice). It takes the videos from the `servicio_impugnar_*.out` logs with at least one claim
+disputed, opens their `/claims` and only reads it (it never presses anything). Each claim is
 a `ytcr-video-content-list-row`: its name is the song and the artist, and its status is the
 text of `#impact-container` without its buttons. The first read of a video is the baseline,
 kept in `data/agente/impugnaciones.json`. After that, a status that changed (the day count
@@ -268,8 +291,8 @@ with a claim missing, or with none, counts only when a re-read of the same page
 `PAUSA_RELECTURA_RECLAMOS_S` (10 s) later sees the same, and 30 s later when the list is empty
 (an empty list frees the video, and the service then publishes it by itself); two re-reads that
 keep changing are a failure. A video with no claim "en proceso" is no longer followed, unless
-one of its claims is disputed again later (a `servicio_impugnar_*.out` log written after its
-last read, which the service no longer produces): then it is followed again. The run holds the `programar` lock, looks
+the service disputes another of its claims later (a `servicio_impugnar_*.out` log written after
+its last read): then it is followed again. The run holds the `programar` lock, looks
 first at the videos checked longest ago and stops after 30 min (`TIEMPO_MAXIMO_SEGUIMIENTO_S`).
 A video whose read fails (a browser error, or a `/claims` that cannot be read) gets its check
 time updated, so it goes to the end of the next run and does not hold back the rest; if the
@@ -301,13 +324,21 @@ scheduled them). It reads each `/claims` under the `programar` lock and presses 
 
 The run stops after 30 min (`TIEMPO_MAXIMO_MAPEO_S`); the rest comes back in `sin_revisar`.
 `data/agente/mapeo_canal.json` keeps when each video was last read, so the next run starts
-with the others. The service then sends one message with no buttons: the counts and the videos
-that could not be read. A message longer than Telegram's 4096 characters is split. After it,
-each video in `sin_impugnar` gets its own question, one by one, like the blacklist ones: title,
-claimants, `/claims` link, "Conservar" and "🗑️ Eliminar video" (it has no screenshot: the step
-takes one only for the blacklist matches). A video that already has an open question of that
-kind is not asked again, so running `/mapear_canal` twice does not repeat them. Nothing is
-deleted without a press on "🗑️ Eliminar video", and nothing is disputed.
+with the others. The service then sends one message: the counts, the videos that could not
+be read, and every video left to dispute with its claimants and `/claims` link. If anything
+is left to dispute, the message carries one button, "⚖️ Impugnar todos (N)". A message longer
+than Telegram's 4096 characters is split, and the button goes on the last part.
+
+Nothing is disputed without that press. The press stores the batch in `lote_impugnar`
+(`data/agente/servicio.json`) and runs `impugnar` for one video at a time. A second press
+adds to the running batch the videos that are not in it yet. At the end the service sends one
+report: claims disputed per video, and failures with their `/claims` link. A
+`verificacion_de_identidad`, `sin_sesion_en_studio` or `canal_no_disponible` stops the batch,
+since the rest would fail the same way, and the report lists what was left. When it was
+the verification, the report carries "🖥 Impugnar con ventana" for the video that asked and
+the ones left: one window, one verification. After a restart,
+the video in progress is not run again: it may have sent a dispute that Studio does not show
+yet. The report marks it as interrupted, with its `/claims` link, and the batch goes on.
 
 `mapear_canal` also returns `privados_sin_programar`: the private videos with no
 `status.publishAt` among ALL the channel's uploads (not only the last `ESCANEO_PROGRAMADOS`)
@@ -339,8 +370,7 @@ the dialog shows, each claim waits up to `ESPERA_VERIFICACION_VENTANA_S` (10 min
 to pass it in that window; once passed, it holds for the next claims of the same window (seen
 on 2026-11-07). A verification not passed in time, a missing session or channel, or a browser
 error stops the run (`FRENAN_LA_VENTANA`); the videos left come back in `sin_revisar`. It prints
-one JSON line with `videos`, one dispute result each. Only a person runs it: the service never
-launches it.
+one JSON line with `videos`, one dispute result each.
 
 Monetization (`studio_monetizacion.py`) turns ads on at
 `/video/<id>/monetization`. After opening it, Studio navigates several times and ends
