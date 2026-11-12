@@ -111,3 +111,30 @@ def anotar(ruta, filas):
                 archivo.write(ENCABEZADO + "\n")
             archivo.write("\n".join(lineas) + "\n")
     return len(lineas)
+
+
+def quitar(ruta, nombre, origen):
+    """Saca las filas de ese nombre exacto y ese origen; las demás quedan como estaban.
+
+    Devuelve cuántas sacó. Quien llama serializa las escrituras.
+    """
+    nombre = re.sub(r"[\t\r\n]+", " ", nombre)
+    try:
+        # newline="": las líneas quedan como están, sin cambiar un "\r\n" por "\n".
+        with open(ruta, encoding="utf-8", newline="") as archivo:
+            texto = archivo.read()
+    except FileNotFoundError:
+        return 0
+    # split("\n") como `leer`: splitlines() también corta en U+2028 dentro de un título.
+    lineas = texto.split("\n")
+    quedan = [
+        linea for linea in lineas
+        if linea.startswith("#") or linea.rstrip("\r").split("\t")[1:3] != [nombre, origen]
+    ]
+    if len(quedan) == len(lineas):
+        return 0
+    temporal = ruta.with_name(f"{ruta.name}.tmp")
+    with open(temporal, "w", encoding="utf-8", newline="") as archivo:
+        archivo.write("\n".join(quedan))
+    temporal.replace(ruta)
+    return len(lineas) - len(quedan)

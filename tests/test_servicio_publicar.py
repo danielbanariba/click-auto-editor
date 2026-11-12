@@ -332,7 +332,7 @@ class TestAprobacion(BaseServicio):
         self.servicio.paso()
         self.assertEqual(self.lanzador.lanzados("buscar"), [])
         shutil.rmtree(carpeta)
-        self.lanzador.terminar("eliminar", {"ok": True, "album": "Banda - Disco"})
+        self.lanzador.terminar("eliminar", {"ok": True, "album": "Banda - Disco", "papelera": "/Papelera/x"})
         self.servicio.paso()
 
         self.assertEqual(self.lanzador.lanzados("eliminar"), [["eliminar", "--carpeta", carpeta]])
@@ -386,21 +386,54 @@ class TestAntesDeRenderizar(BaseServicio):
         self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
         self.assertEqual(self.lanzador.lanzados("renderizar"), [])
 
-    def test_eliminar_borra_el_album_de_la_cola_sin_renderizar_y_pregunta_por_el_siguiente(self):
-        carpeta, pregunta = self.preguntar_antes_de_renderizar()
-        self.album_en_cola("Banda - Siguiente")
+    PAPELERA = "/Papelera/20261111-180000-abc123"
 
+    def eliminar_desde_la_pregunta(self):
+        """Aprieta Eliminar en la pregunta de antes del render; devuelve la carpeta y el aviso."""
+        carpeta, pregunta = self.preguntar_antes_de_renderizar()
         self.telegram.apretar(pregunta, "🗑 Eliminar (ya está publicado)")
         self.servicio.paso()
-        self.assertEqual(self.lanzador.lanzados("eliminar"), [["eliminar", "--carpeta", carpeta]])
-        self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
         shutil.rmtree(carpeta)
-        self.lanzador.terminar("eliminar", {"ok": True, "album": "Banda - Disco"})
+        self.lanzador.terminar("eliminar", {"ok": True, "album": "Banda - Disco", "papelera": self.PAPELERA})
         self.servicio.paso()
+        return carpeta, self.ultima_pregunta()
 
+    def test_eliminar_aparta_el_album_de_la_cola_sin_renderizar_y_pregunta_por_el_siguiente(self):
+        # Defecto: la pregunta de Deshacer frenaba al próximo álbum hasta apretarla.
+        self.album_en_cola("Banda - Siguiente")
+
+        carpeta, aviso = self.eliminar_desde_la_pregunta()
+
+        self.assertEqual(self.lanzador.lanzados("eliminar"), [["eliminar", "--carpeta", carpeta]])
         self.assertEqual(self.lanzador.lanzados("renderizar"), [])
         self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"], ["buscar"]])
-        self.assertTrue(any("Borré Banda - Disco" in m["texto"] for m in self.telegram.mensajes))
+        self.assertIn("Borré Banda - Disco", aviso["texto"])
+        self.assertEqual([etiqueta for etiqueta, _ in aviso["botones"]], ["↩️ Deshacer"])
+
+    def test_deshacer_devuelve_el_album_y_avisa_donde_quedo(self):
+        # Defecto: un toque de más en Eliminar no tenía vuelta atrás.
+        carpeta, aviso = self.eliminar_desde_la_pregunta()
+
+        self.telegram.apretar(aviso, "↩️ Deshacer")
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("restaurar"), [["restaurar", "--papelera", self.PAPELERA]])
+        self.lanzador.terminar("restaurar", {"ok": True, "album": "Banda - Disco", "carpeta": carpeta})
+        self.servicio.paso()
+
+        self.assertIn("↩️ Volvió Banda - Disco a cola/", self.telegram.mensajes[-1]["texto"])
+
+    def test_deshacer_lo_que_ya_se_vacio_avisa_que_no_se_puede(self):
+        # Defecto: el aviso de un deshacer que no pudo no decía por qué.
+        _, aviso = self.eliminar_desde_la_pregunta()
+
+        self.telegram.apretar(aviso, "↩️ Deshacer")
+        self.servicio.paso()
+        self.lanzador.terminar("restaurar", {"ok": False, "motivo": "ya_no_esta", "album": "Banda - Disco"})
+        self.servicio.paso()
+
+        texto = self.telegram.mensajes[-1]["texto"]
+        self.assertIn("No pude devolver Banda - Disco", texto)
+        self.assertIn("ya no está en la papelera", texto)
 
     def test_si_no_se_puede_eliminar_avisa_que_quedo_en_la_cola(self):
         _, pregunta = self.preguntar_antes_de_renderizar()
@@ -1222,6 +1255,57 @@ class TestImpugnarDesdeTelegram(BaseServicio):
                 self.assertNotIn("Impugné", aviso["texto"])
                 self.lanzador.procesos.clear()
                 self.telegram.mensajes.clear()
+
+
+class TestPapelera(BaseServicio):
+    HORA = sp.INTERVALO_PAPELERA_S
+
+    def vaciar(self, resultado):
+        self.ahora += self.HORA
+        self.servicio.paso()
+        self.lanzador.terminar("vaciar_papelera", resultado)
+        self.servicio.paso()
+
+    def test_vacia_la_papelera_una_vez_por_hora(self):
+        # Defecto: lanzar `vaciar_papelera` en cada vuelta del ciclo, o nunca.
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("vaciar_papelera"), [])
+        self.ahora = self.HORA
+        self.servicio.paso()
+        self.servicio.paso()  # sigue corriendo: no se lanza otra
+        self.lanzador.terminar("vaciar_papelera", {"ok": True, "vaciadas": [], "fallos": []})
+        self.ahora += self.HORA - 1
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("vaciar_papelera"), [["vaciar_papelera"]])
+        self.ahora += 1
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("vaciar_papelera")), 2)
+
+    def test_lo_que_se_vacio_pierde_el_boton_de_deshacer(self):
+        # Defecto: el botón seguía ahí y, apretado, prometía devolver algo que ya no está.
+        self.servicio.preguntar("deshacer", "🗑 Borré A", papelera="/Papelera/a", album="A")
+        self.servicio.preguntar("deshacer", "🗑 Borré B", papelera="/Papelera/b", album="B")
+        aviso_a, aviso_b = self.telegram.mensajes[-2:]
+
+        self.vaciar({"ok": True, "vaciadas": ["/Papelera/a"], "fallos": []})
+        self.telegram.apretar(aviso_a, "↩️ Deshacer")
+        self.servicio.paso()
+
+        self.assertEqual(self.telegram.sin_botones, [self.telegram.mensajes.index(aviso_a) + 1])
+        self.assertEqual(self.telegram.respuestas, ["Esa pregunta ya no está vigente."])
+        self.assertEqual(self.lanzador.lanzados("restaurar"), [])
+        self.assertEqual([p["papelera"] for p in self.servicio.estado["preguntas"].values()], ["/Papelera/b"])
+
+    def test_si_no_puede_vaciar_la_papelera_avisa_una_sola_vez(self):
+        # Defecto: un fallo callado deja llenarse el disco; uno avisado cada hora llena el chat.
+        fallo = {"ok": False, "vaciadas": [], "fallos": [{"papelera": "/Papelera/a", "error": "Permission denied"}]}
+
+        self.vaciar(fallo)
+        self.vaciar(fallo)
+
+        avisos = [m["texto"] for m in self.telegram.mensajes if "No pude vaciar la papelera" in m["texto"]]
+        self.assertEqual(len(avisos), 1)
+        self.assertIn("/Papelera/a: Permission denied", avisos[0])
 
 
 class TestApelaciones(BaseServicio):
