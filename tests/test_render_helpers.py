@@ -5,11 +5,14 @@ Ejecutar: pytest tests/test_render_helpers.py
 """
 
 import importlib.util
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 PROJECT_ROOT = Path(__file__).parent.parent
 SCRIPT_PATH = PROJECT_ROOT / "2. ffmpeg_render.py"
@@ -221,6 +224,28 @@ def render_con_cpp_que_falla(render_mod, monkeypatch, tmp_path, wav_file):
         return render_mod.render_video(carpeta, carpeta.name, show_progress=True, prepared_job=job)
 
     return renderizar
+
+
+def test_el_render_usa_la_portada_que_muestra_el_servicio_y_no_la_propaganda_de_deathgrind(
+    render_mod, monkeypatch, tmp_path, wav_file
+):
+    carpeta = tmp_path / "Banda - Disco (2018) [EP]"
+    carpeta.mkdir()
+    shutil.copy(wav_file, carpeta / "01 Tema.wav")
+    for nombre, color in (("DGC - PURE HATRED.jpg", "black"), ("Cover_2018.jpg", "red")):
+        Image.new("RGB", (32, 32), color).save(carpeta / nombre)
+    # El render de Marcio Dentro (2026-11-09) recibió la propaganda primero del sistema de archivos.
+    listar = os.listdir
+    monkeypatch.setattr(render_mod.os, "listdir", lambda ruta: sorted(listar(ruta), reverse=True))
+    monkeypatch.setattr(render_mod, "USE_SSD_TEMP", False)
+    monkeypatch.setattr(render_mod, "USE_RAMDISK", False)
+    monkeypatch.setattr(render_mod, "USE_CPP_VHS", False)
+    monkeypatch.setattr(render_mod, "ensure_shadow_cover", lambda portada, *args: portada)
+
+    job = render_mod.prepare_render_job(carpeta, carpeta.name)
+
+    assert job.error is None
+    assert job.cover_main == carpeta / "Cover_2018.jpg"
 
 
 def test_sin_memoria_en_la_gpu_el_album_no_va_a_error404_y_el_lote_se_frena(

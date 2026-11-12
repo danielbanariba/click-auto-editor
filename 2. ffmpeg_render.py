@@ -29,6 +29,7 @@ from mutagen import File as MutagenFile
 from effects.sombra import add_shadow
 from limpieza.censura import censor_profanity
 from limpieza.extremismo import redact_extremism
+from portadas import elegir_portada
 
 # Importar configuración
 sys.path.append(str(Path(__file__).parent))
@@ -3227,23 +3228,14 @@ def prepare_render_job(folder_path, folder_name, show_progress=False):
         # ================================================================
         # PASO 2: Buscar archivos necesarios
         # ================================================================
-        audio_files = []
-        cover_file = None
-
-        for file in os.listdir(folder_path):
-            file_lower = file.lower()
-            if file_lower.endswith((".mp3", ".flac", ".wav", ".m4a")):
-                audio_files.append(folder_path / file)
-            elif file_lower.endswith((".png", ".jpg", ".jpeg")):
-                # Priorizar: cover.* > *_shadow.png > cualquier imagen
-                if file_lower.startswith("cover."):
-                    cover_file = folder_path / file
-                elif cover_file is None or (
-                    file.endswith("_shadow.png")
-                    and not str(cover_file).endswith("_shadow.png")
-                ):
-                    if cover_file is None or file.endswith("_shadow.png"):
-                        cover_file = folder_path / file
+        audio_files = [
+            folder_path / file
+            for file in os.listdir(folder_path)
+            if file.lower().endswith((".mp3", ".flac", ".wav", ".m4a"))
+        ]
+        # La misma portada que el servicio muestra en Telegram, sin las propagandas de DeathGrind
+        # Club; su sombra, si ya existe, la reusa ensure_shadow_cover.
+        cover_file = elegir_portada(folder_path)
 
         # Ordenar audios por nombre (01. xxx, 02. xxx, etc.)
         audio_files.sort(key=lambda x: x.name.lower())

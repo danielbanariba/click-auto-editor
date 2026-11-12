@@ -614,15 +614,6 @@ class TestPreguntarAntesDeRenderizar(unittest.TestCase):
         with mock.patch.object(pa, "capturar_busqueda", side_effect=AssertionError("capturó")):
             self.assertEqual(pa.buscar()["motivo"], "sin_albumes")
 
-    def test_sin_cover_la_portada_es_otra_imagen_que_no_sea_la_sombra(self):
-        carpeta = self.album / "Banda - Disco (2020)"
-        carpeta.mkdir()
-        self.assertIsNone(pa.portada_del_album(carpeta))
-        (carpeta / "aaa_shadow.png").write_bytes(b"x")
-        self.assertEqual(pa.portada_del_album(carpeta), carpeta / "aaa_shadow.png")
-        (carpeta / "Arte.JPG").write_bytes(b"x")
-        self.assertEqual(pa.portada_del_album(carpeta), carpeta / "Arte.JPG")
-
     def test_eliminar_borra_un_album_de_su_carpeta_de_origen_y_lo_anota(self):
         carpeta = self.ep / "Banda - Corto (2025) [EP]"
         carpeta.mkdir()
