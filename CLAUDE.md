@@ -43,9 +43,10 @@ Scripts are numbered but **not all are sequential**. The active pipeline is:
 before rendering: `buscar` picks the next album and screenshots its YouTube
 search, which goes as one message; then one question with the album cover
 (`portadas.elegir_portada`, the same image the render uses) and the buttons
-"✅ Renderizar y subir" / "🗑 Eliminar (ya está publicado)". Eliminar deletes the
-album's source folder (`eliminar` records it in the published registry first) and
-the service asks about the next one; nothing is rendered. Renderizar y subir
+"✅ Renderizar y subir" / "🗑 Eliminar (ya está publicado)". Eliminar moves the
+album's folder to the trash (`eliminar` records it in the published registry first) and
+the service asks about the next one; nothing is rendered. The notice "🗑 Borré ..." carries
+"↩️ Deshacer" for 24 h (see the trash below); it does not hold back the next question. Renderizar y subir
 records the album in `aceptados` (`data/agente/servicio.json`), renders it, runs
 the checks, uploads it privately with no other question and deletes the folder →
 claim check → monetization → publish or schedule. If a check fails, nothing is
@@ -89,9 +90,10 @@ name makes the title "Full EP".
 `data/agente/ya_publicados.tsv` is the registry of albums that are already
 published (`registro_publicados.py`). Each line holds a key, the name, the
 origin (`canal`, `eliminar` or `subir`), the video id and the date. `eliminar`
-records the album before deleting the folder; `subir` records it after the
+records the album before moving the folder to the trash; `subir` records it after the
 upload got a video id. `sembrar_publicados` loads the channel titles and the
-albums the service already deleted or uploaded, and it can run again without
+albums the service already deleted or uploaded (not one that "↩️ Deshacer" put back after
+its last deletion: it reads the `servicio_restaurar_*.out` logs too), and it can run again without
 duplicating rows. The key is "band|album": no case, accents, signs, year, type
 tag or `__N` suffix. A censored title ("C**") matches any letter of the same
 length. `buscar` (and `renderizar` without `--carpeta`) moves every registered
@@ -101,6 +103,20 @@ that album in place, unrendered. With `--carpeta` the registry is not checked. T
 Telegram what was moved (up to 10 names and how many more) and, once per album,
 what could not be moved. It is a name match, not proof: a reissue with the same
 name is moved too, which is why nothing is deleted.
+
+`eliminar` never deletes: added on 2026-11-11, after two albums that were not on YouTube were
+deleted by a mistaken press (the drive is NTFS and had no trash). It renames the album into
+`Papelera/<date>-<id>/` next to its root, on the same disk (`BASE_DIR/Papelera` for the source
+folders and `upload_video/`, `/mnt/Render/Papelera` for `Renderizando/`), with an `origen.json`
+that says where it came from and when. "↩️ Deshacer" runs `restaurar --papelera <entry>`: it
+first removes from the registry only the row `eliminar` added (same name, origin `eliminar`; a
+`canal` or `subir` row stays), then renames the album back. It never overwrites a folder that is
+already in its place (`ya_existe`), and an entry already emptied answers `ya_no_esta`.
+`restaurar` and `buscar` share the `origenes` lock, so a `buscar` running at that moment never
+sees the album back with the old row (it would move it to `Ya publicados/`). The service runs
+`vaciar_papelera` once an hour (the first, one hour after it starts): entries older than 24 h
+(`PLAZO_PAPELERA_S`) are deleted, and their notices lose the Deshacer button. A trash that
+cannot be emptied is reported once.
 
 ```bash
 journalctl --user -u publicar-albumes -f         # what the service is doing
@@ -117,7 +133,9 @@ env/bin/python pipeline_agente.py buscar [--aleatorio] [--excluir NAME]...  # ne
 env/bin/python pipeline_agente.py renderizar             # next album (cola, Album/, EP/) → Renderizando/; already published ones → Ya publicados/
 env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/4K checks, screenshot + YouTube search screenshot
 env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, mid-video frame as thumbnail, then deletes the album folder
-env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # deletes the album folder without uploading (already published); a direct child of Renderizando/, upload_video/ or a source folder
+env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # moves the album folder to the trash of its disk without uploading (already published); a direct child of Renderizando/, upload_video/ or a source folder
+env/bin/python pipeline_agente.py restaurar --papelera "<entry>"  # puts back an album that eliminar moved to the trash and removes its eliminar row from the registry
+env/bin/python pipeline_agente.py vaciar_papelera  # deletes the trash entries older than 24 h (the service runs it every hour)
 env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → monetization on → public now / first free moment, or +2 years if claimed
 env/bin/python pipeline_agente.py eliminar_video --video-id ID [--retirado]  # deletes the video from YouTube (irreversible; the service only runs it from a Telegram button); --retirado skips the existence check for a video YouTube removed as a copy
 env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # disputes every claim of the video in Studio (a legal statement in the user's name); --sin-enviar fills the first form and closes it without sending

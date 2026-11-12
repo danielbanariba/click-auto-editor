@@ -49,6 +49,14 @@ INTENTOS_PROGRAMAR = 3  # fallos seguidos de `programar` antes de preguntar
 # descartarlo: un texto que nunca acepta no puede frenar los avisos que vienen detrás.
 INTENTOS_AVISO = 5
 INTERVALO_APELACIONES_S = 24 * 3600
+# Cada cuánto se lanza `vaciar_papelera`, que borra lo que `eliminar` apartó hace más de 24 h.
+INTERVALO_PAPELERA_S = 3600
+# Por qué no se pudo devolver un álbum de la papelera (`restaurar`).
+MOTIVOS_RESTAURAR = {
+    "ya_no_esta": "ya no está en la papelera (se vacía a las 24 h)",
+    "ya_existe": "ya hay una carpeta con ese nombre en su lugar y no la piso; sigue en la papelera",
+    "no_se_pudo_mover": "no se pudo mover; sigue en la papelera",
+}
 # Cuántos álbumes apartados por ya publicados lista el aviso; del resto solo dice cuántos son.
 MAX_APARTADOS_EN_AVISO = 10
 ORIGEN_PUBLICADO = {"canal": "en el canal", "eliminar": "lo eliminaste", "subir": "lo subiste"}
@@ -100,8 +108,11 @@ BOTONES = {
     "impugnar_todos": [[("⚖️ Impugnar todos ({n})", "impugnar_todos")]],
     # Studio pidió "Verifica que eres tú": abre Brave visible en la PC para pasarla ahí.
     "impugnar_ventana": [[("🖥 Impugnar con ventana", "impugnar_ventana")]],
+    # El aviso de un álbum eliminado: hasta que se vacía la papelera, lo devuelve a su carpeta.
+    "deshacer": [[("↩️ Deshacer", "deshacer")]],
 }
 AVISO_BOTON = {
+    "deshacer": "Lo devuelvo a su carpeta…",
     "renderizar": "Lo renderizo y lo subo",
     "a_la_lista": "Va a la lista",
     "renderizar_lista": "Renderizo la lista",
@@ -450,6 +461,8 @@ class Servicio:
         self.ruta_estado = Path(estado_json)
         self.reloj = reloj
         self.ahora = ahora  # hora del reloj de pared: la de la última apelación sobrevive reinicios
+        # La papelera se vacía por primera vez una hora después de arrancar.
+        self.papelera_revisada = ahora()
         # rechazados y subidos: álbumes que siguen en Renderizando/ pero no se vuelven a ofrecer.
         # aceptados: álbumes que el usuario mandó renderizar; se suben sin volver a preguntar.
         # aleatorio: el /aleatorio de Telegram; el próximo álbum se elige al azar.
@@ -528,6 +541,7 @@ class Servicio:
         self.revisar_tareas()
         self.revisar_reintentos()
         self.revisar_apelaciones()
+        self.revisar_papelera()
         self.enviar_preguntas()
         self.enviar_avisos_pendientes()
         self.avanzar_album()
@@ -588,6 +602,34 @@ class Servicio:
         self.estado["ultima_apelacion"] = self.ahora()
         self.guardar()
         self.lanzar_paso("apelar")
+
+    def revisar_papelera(self):
+        """Lanza `vaciar_papelera` una vez por hora."""
+        if any(argumentos[0] == "vaciar_papelera" for argumentos, _ in self.tareas):
+            return
+        if self.ahora() - self.papelera_revisada < INTERVALO_PAPELERA_S:
+            return
+        self.papelera_revisada = self.ahora()
+        self.lanzar_paso("vaciar_papelera")
+
+    def tras_vaciar_papelera(self, resultado, argumentos):
+        """Lo que se vació ya no se puede deshacer: su aviso pierde el botón."""
+        vaciadas = set(resultado.get("vaciadas") or [])
+        for qid, pregunta in list(self.estado["preguntas"].items()):
+            if pregunta["tipo"] != "deshacer" or pregunta.get("papelera") not in vaciadas:
+                continue
+            del self.estado["preguntas"][qid]
+            self.guardar()
+            if pregunta["message_id"] is not None:
+                try:
+                    self.telegram.quitar_botones(pregunta["message_id"])
+                except ERRORES_TELEGRAM as exc:
+                    log.warning("No se pudieron quitar los botones: %s", exc)
+        fallos = resultado.get("fallos") or []
+        if resultado.get("ok") and not fallos:
+            return
+        detalle = [f"• {f['papelera']}: {f['error']}" for f in fallos] or [f"({resultado.get('motivo')})"]
+        self.avisar_una_vez("vaciar_papelera", "\n".join(["⚠️ No pude vaciar la papelera:", *detalle]))
 
     def avanzar_album(self):
         if any(argumentos[0] in PASOS_DEL_ALBUM for argumentos, _ in self.tareas):
@@ -804,7 +846,14 @@ class Servicio:
     def tras_eliminar(self, resultado, argumentos):
         album = Path(valor(argumentos, "--carpeta")).name
         if resultado.get("ok"):
-            self.avisar(f"🗑 Borré {album}: ya estaba publicado. Sigo con el próximo.")
+            # No frena al próximo álbum: queda abierta hasta que se aprieta o se vacía la papelera.
+            self.preguntar(
+                "deshacer",
+                f"🗑 Borré {album}: ya estaba publicado. Sigo con el próximo.\n\n"
+                "Queda 24 h en la papelera: ↩️ Deshacer lo devuelve a su carpeta.",
+                papelera=resultado["papelera"],
+                album=album,
+            )
             return
         # Que no se vuelva a ofrecer: la carpeta sigue ahí y el usuario ya decidió.
         self.estado["rechazados"].append(album)
@@ -813,6 +862,17 @@ class Servicio:
             f"❌ No pude borrar {album} ({resultado.get('motivo')}). "
             f"Quedó en {Path(valor(argumentos, '--carpeta')).parent.name}/."
         )
+
+    def tras_restaurar(self, resultado, argumentos):
+        album = resultado.get("album") or Path(valor(argumentos, "--papelera")).name
+        if resultado.get("ok"):
+            self.avisar(
+                f"↩️ Volvió {album} a {Path(resultado['carpeta']).parent.name}/. "
+                "Te lo vuelvo a preguntar cuando le toque."
+            )
+            return
+        motivo = resultado.get("motivo")
+        self.avisar(f"❌ No pude devolver {album}: {MOTIVOS_RESTAURAR.get(motivo, motivo)}.")
 
     def tras_programar(self, resultado, argumentos):
         video_id = valor(argumentos, "--video-id")
@@ -1682,6 +1742,9 @@ class Servicio:
 
     def respuesta_reintentar(self, accion, pregunta):
         """Sacar la pregunta alcanza: el próximo ciclo vuelve a renderizar."""
+
+    def respuesta_deshacer(self, accion, pregunta):
+        self.lanzar_paso("restaurar", "--papelera", pregunta["papelera"])
 
 
 def main():

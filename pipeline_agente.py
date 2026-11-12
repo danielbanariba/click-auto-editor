@@ -68,6 +68,8 @@ LISTA_NEGRA_RECLAMANTES = PROJECT_ROOT / "lista_negra_reclamantes.txt"
 APELACIONES_JSON = DIR_AGENTE / "apelaciones.json"
 DIR_LOGS = DIR_AGENTE / "logs"
 RAICES_BORRABLES = (DIR_RENDERIZANDO, DIR_UPLOAD)
+# Lo que aparta `eliminar` se puede devolver con `restaurar` hasta que `vaciar_papelera` lo borra.
+PLAZO_PAPELERA_S = 24 * 3600
 
 TOLERANCIA_DURACION_S = 3.0
 VOLUMEN_MEDIO_MINIMO_DB = -45.0
@@ -227,6 +229,13 @@ def siguiente_sin_publicar(aleatorio=False, excluir=()):
     queda en su carpeta sin renderizar. Con `aleatorio`, el orden es al azar entre todas las
     carpetas de origen. Los nombres de `excluir` (la lista del /crear_lista) se saltan.
     """
+    # `restaurar` devuelve álbumes a los orígenes con este candado: sin él, un álbum devuelto
+    # mientras se recorre podría verse con el registro leído antes y apartarse.
+    with bloqueo("origenes"):
+        return _siguiente_sin_publicar(aleatorio, excluir)
+
+
+def _siguiente_sin_publicar(aleatorio, excluir):
     registro = registro_publicados.leer(REGISTRO_PUBLICADOS)
     apartados = []
     # En orden se listan de a una: un origen se recorre solo si los anteriores no tienen nada.
@@ -875,12 +884,16 @@ def subir_con_rotacion(uploader, youtube, video, metadata):
 def borrar_album(uploader, carpeta, raiz):
     """Borra la carpeta del álbum (audio, portada y video) y sus capturas."""
     borrada = uploader.safe_delete_folder(carpeta, raiz)
+    borrar_capturas(carpeta.name)
+    return bool(borrada)
+
+
+def borrar_capturas(album):
     for captura in (
-        DIR_CAPTURAS / f"{slug(carpeta.name)}.jpg",
-        DIR_CAPTURAS / f"busqueda_{slug(carpeta.name)}.png",
+        DIR_CAPTURAS / f"{slug(album)}.jpg",
+        DIR_CAPTURAS / f"busqueda_{slug(album)}.png",
     ):
         captura.unlink(missing_ok=True)
-    return bool(borrada)
 
 
 def poner_miniatura(uploader, youtube, video_id, video, captura):
@@ -933,31 +946,123 @@ def buscar(uploader=None, aleatorio=False, excluir=()):
     }
 
 
-def eliminar(carpeta, uploader=None, raices=None):
-    """Borra un álbum que ya estaba publicado, sin subirlo.
+def papelera_de(raiz):
+    """La papelera del disco de `raiz`, al lado de ella: mover ahí es un rename y no una copia."""
+    return Path(raiz).resolve().parent / "Papelera"
+
+
+def raices_de_eliminar():
+    return (*RAICES_BORRABLES, *DIRS_ORIGEN_RENDER)
+
+
+def eliminar(carpeta, raices=None):
+    """Aparta en la papelera un álbum que ya estaba publicado, sin subirlo.
 
     El servicio pregunta antes de renderizar, así que el álbum puede estar todavía en su carpeta
-    de origen; uno renderizado antes de ese cambio está en Renderizando/.
+    de origen; uno renderizado antes de ese cambio está en Renderizando/. Cada álbum va a una
+    entrada propia de la papelera de su disco, con `origen.json` (de dónde salió y cuándo):
+    `restaurar` lo devuelve y `vaciar_papelera` lo borra pasado PLAZO_PAPELERA_S.
     """
     carpeta = Path(carpeta)
     if raices is None:
-        raices = (*RAICES_BORRABLES, *DIRS_ORIGEN_RENDER)
+        raices = raices_de_eliminar()
     if not carpeta.is_dir():
         return {"ok": False, "motivo": "carpeta_no_existe", "carpeta": str(carpeta)}
     raiz = raiz_borrable(carpeta, raices)
     # Solo un álbum entero: en su carpeta de origen es la única copia, y una subcarpeta mal
-    # pasada borraría parte de él.
+    # pasada apartaría parte de él.
     if raiz is None or carpeta.resolve().parent != raiz:
         return {"ok": False, "motivo": "carpeta_fuera_de_raiz", "carpeta": str(carpeta)}
-    # Antes de borrar: si el proceso muere a mitad, el álbum ya quedó anotado.
+    # Antes de apartarlo: si el proceso muere a mitad, el álbum ya quedó anotado.
     anotar_publicados([(carpeta.name, "eliminar", "")])
-    uploader = uploader or uploader_real()
-    log = ruta_log("eliminar")
-    with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
-        borrada = borrar_album(uploader, carpeta, raiz)
-    if not borrada:
-        return {"ok": False, "motivo": "no_se_pudo_borrar", "album": carpeta.name, "log": str(log)}
-    return {"ok": True, "album": carpeta.name, "log": str(log)}
+    carpeta = carpeta.resolve()
+    entrada = papelera_de(raiz) / f"{datetime.now():%Y%m%d-%H%M%S}-{os.urandom(3).hex()}"
+    try:
+        # Sin exist_ok: una entrada con el mismo nombre es de otro álbum y no se toca.
+        entrada.mkdir(parents=True)
+    except OSError as exc:
+        return {"ok": False, "motivo": "no_se_pudo_borrar", "album": carpeta.name, "detalle": str(exc)}
+    try:
+        origen = {"carpeta": str(carpeta), "album": carpeta.name, "eliminado": time.time()}
+        (entrada / "origen.json").write_text(json.dumps(origen, ensure_ascii=False), encoding="utf-8")
+        # rename y no shutil.move: si falla, shutil.move copiaría el álbum entero.
+        carpeta.rename(entrada / carpeta.name)
+    except OSError as exc:
+        shutil.rmtree(entrada, ignore_errors=True)
+        return {"ok": False, "motivo": "no_se_pudo_borrar", "album": carpeta.name, "detalle": str(exc)}
+    borrar_capturas(carpeta.name)
+    return {"ok": True, "album": carpeta.name, "papelera": str(entrada)}
+
+
+def restaurar(entrada, raices=None):
+    """Devuelve a su carpeta un álbum que `eliminar` apartó y saca del registro su fila.
+
+    Solo la fila que puso `eliminar`: una del canal o de una subida se queda. El registro va
+    primero y con el candado de los orígenes, así `buscar` nunca ve el álbum de vuelta con la
+    fila vieja. Nunca pisa una carpeta que ya está en el lugar del álbum.
+    """
+    entrada = Path(entrada)
+    if raices is None:
+        raices = raices_de_eliminar()
+    raices = {Path(raiz).resolve() for raiz in raices}
+    if entrada.resolve().parent not in {papelera_de(raiz) for raiz in raices}:
+        return {"ok": False, "motivo": "fuera_de_papelera", "papelera": str(entrada)}
+    with bloqueo("papelera"), bloqueo("origenes"):
+        try:
+            destino = Path(json.loads((entrada / "origen.json").read_text(encoding="utf-8"))["carpeta"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return {"ok": False, "motivo": "ya_no_esta", "papelera": str(entrada)}
+        album = destino.name
+        apartado = entrada / album
+        if not apartado.is_dir():
+            return {"ok": False, "motivo": "ya_no_esta", "album": album, "papelera": str(entrada)}
+        if destino.parent.resolve() not in raices:
+            return {"ok": False, "motivo": "carpeta_fuera_de_raiz", "album": album, "carpeta": str(destino)}
+        if destino.exists():
+            return {"ok": False, "motivo": "ya_existe", "album": album, "carpeta": str(destino)}
+        with bloqueo("publicados"):
+            registro_publicados.quitar(REGISTRO_PUBLICADOS, album, "eliminar")
+        try:
+            apartado.rename(destino)
+        except OSError as exc:
+            return {"ok": False, "motivo": "no_se_pudo_mover", "album": album, "detalle": str(exc)}
+        try:
+            (entrada / "origen.json").unlink()
+            entrada.rmdir()
+        except OSError:
+            pass  # el álbum ya volvió; lo que quede de la entrada lo borra vaciar_papelera
+    return {"ok": True, "album": album, "carpeta": str(destino)}
+
+
+def eliminado_en(entrada):
+    """Cuándo se apartó la entrada; sin `origen.json` legible, la hora de la carpeta."""
+    try:
+        return float(json.loads((entrada / "origen.json").read_text(encoding="utf-8"))["eliminado"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return entrada.stat().st_mtime
+
+
+def vaciar_papelera(raices=None):
+    """Borra de cada papelera las entradas apartadas hace más de PLAZO_PAPELERA_S."""
+    if raices is None:
+        raices = raices_de_eliminar()
+    vaciadas, fallos = [], []
+    for papelera in sorted({papelera_de(raiz) for raiz in raices}):
+        for nombre in listar_carpetas(papelera):
+            entrada = papelera / nombre
+            # De a una entrada: `restaurar` no espera a que se vacíe toda la papelera.
+            with bloqueo("papelera"):
+                try:
+                    if time.time() - eliminado_en(entrada) < PLAZO_PAPELERA_S:
+                        continue
+                    shutil.rmtree(entrada)
+                except FileNotFoundError:
+                    continue  # la devolvió `restaurar` mientras tanto
+                except OSError as exc:
+                    fallos.append({"papelera": str(entrada), "error": str(exc)})
+                    continue
+            vaciadas.append(str(entrada))
+    return {"ok": not fallos, "vaciadas": vaciadas, "fallos": fallos}
 
 
 def subir(carpeta, uploader=None, sin_deathgrind=False, raices=RAICES_BORRABLES):
@@ -2663,23 +2768,36 @@ def subidas_del_canal(uploader, yt):
             return subidas
 
 
+def resultado_final(salida):
+    """El JSON final de un `servicio_*.out`, o None."""
+    lineas = salida.read_text(encoding="utf-8", errors="replace").splitlines()
+    for linea in reversed(lineas):
+        if not linea.startswith("{"):
+            continue
+        try:
+            return json.loads(linea)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
 def eliminados_por_el_servicio():
-    """Los álbumes que el servicio eliminó, según el JSON final de cada `servicio_eliminar_*.out`."""
-    albumes = []
-    # El dígito deja afuera los servicio_eliminar_video_*.out, que borran videos de YouTube.
-    for salida in sorted(DIR_LOGS.glob("servicio_eliminar_[0-9]*.out")):
-        lineas = salida.read_text(encoding="utf-8", errors="replace").splitlines()
-        for linea in reversed(lineas):
-            if not linea.startswith("{"):
-                continue
-            try:
-                resultado = json.loads(linea)
-            except json.JSONDecodeError:
-                continue
+    """Los álbumes que el servicio eliminó y que ↩️ Deshacer no devolvió.
+
+    Según el JSON final de cada `servicio_eliminar_*.out` y `servicio_restaurar_*.out`: cuenta lo
+    último que le pasó a cada álbum. El nombre del log lleva la fecha, así que ordena por tiempo.
+    """
+    eventos = []
+    for paso in ("eliminar", "restaurar"):
+        # El dígito deja afuera los servicio_eliminar_video_*.out, que borran videos de YouTube.
+        for salida in DIR_LOGS.glob(f"servicio_{paso}_[0-9]*.out"):
+            resultado = resultado_final(salida) or {}
             if resultado.get("ok") and resultado.get("album"):
-                albumes.append(resultado["album"])
-            break
-    return albumes
+                eventos.append((salida.name.removeprefix(f"servicio_{paso}_"), paso, resultado["album"]))
+    ultimo = {}
+    for _, paso, album in sorted(eventos):
+        ultimo[album] = paso
+    return [album for album, paso in ultimo.items() if paso == "eliminar"]
 
 
 def subidos_por_el_servicio():
@@ -2774,8 +2892,13 @@ def parse_args(argv=None):
     p.add_argument("--carpeta", required=True, help="Carpeta devuelta por renderizar.")
     p.add_argument("--sin-deathgrind", action="store_true", help="No usar la API de DeathGrind.")
 
-    p = sub.add_parser("eliminar", help="Borra la carpeta del álbum sin subirlo (ya publicado).")
+    p = sub.add_parser("eliminar", help="Aparta el álbum en la papelera sin subirlo (ya publicado).")
     p.add_argument("--carpeta", required=True, help="Carpeta devuelta por buscar o por renderizar.")
+
+    p = sub.add_parser("restaurar", help="Devuelve a su carpeta un álbum que eliminar apartó.")
+    p.add_argument("--papelera", required=True, help="Entrada de la papelera devuelta por eliminar.")
+
+    sub.add_parser("vaciar_papelera", help="Borra lo que lleva más de 24 h en la papelera.")
 
     p = sub.add_parser("programar", help="Revisa reclamos y programa la fecha de publicación.")
     p.add_argument("--video-id", required=True)
@@ -2877,6 +3000,10 @@ def main(argv=None):
         return responder(subir(args.carpeta, sin_deathgrind=args.sin_deathgrind))
     if args.comando == "eliminar":
         return responder(eliminar(args.carpeta))
+    if args.comando == "restaurar":
+        return responder(restaurar(args.papelera))
+    if args.comando == "vaciar_papelera":
+        return responder(vaciar_papelera())
     if args.comando == "programar":
         reclamo = None if args.reclamo is None else args.reclamo == "si"
         return responder(programar(args.video_id, esperar=args.esperar, reclamo=reclamo))

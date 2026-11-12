@@ -531,14 +531,6 @@ class TestPreguntarAntesDeRenderizar(unittest.TestCase):
             parche.start()
             self.addCleanup(parche.stop)
 
-    def uploader_que_borra(self, raiz):
-        def borrar(carpeta, raiz_recibida):
-            self.assertEqual(Path(raiz_recibida), raiz.resolve())
-            shutil.rmtree(carpeta)
-            return True
-
-        return SimpleNamespace(safe_delete_folder=borrar)
-
     def test_buscar_aparta_lo_publicado_y_devuelve_la_busqueda_y_la_portada_sin_renderizar(self):
         rp.anotar(pa.REGISTRO_PUBLICADOS, [("Banda A - Nuevo (2021)", "eliminar", "")])
         (self.album / "Banda A - Nuevo (2021)").mkdir()
@@ -614,31 +606,129 @@ class TestPreguntarAntesDeRenderizar(unittest.TestCase):
         with mock.patch.object(pa, "capturar_busqueda", side_effect=AssertionError("capturó")):
             self.assertEqual(pa.buscar()["motivo"], "sin_albumes")
 
-    def test_eliminar_borra_un_album_de_su_carpeta_de_origen_y_lo_anota(self):
-        carpeta = self.ep / "Banda - Corto (2025) [EP]"
+    def album_con_pista(self, nombre, origen=None):
+        carpeta = (origen or self.ep) / nombre
         carpeta.mkdir()
         (carpeta / "01. pista.flac").write_bytes(b"audio")
+        return carpeta
 
-        resultado = pa.eliminar(carpeta, uploader=self.uploader_que_borra(self.ep))
+    def test_eliminar_aparta_el_album_en_la_papelera_de_su_disco_y_lo_anota(self):
+        # Defecto: un toque de más en Eliminar borraba la única copia del álbum, sin vuelta atrás.
+        carpeta = self.album_con_pista("Banda - Corto (2025) [EP]")
+
+        resultado = pa.eliminar(carpeta)
 
         self.assertTrue(resultado["ok"], resultado)
         self.assertFalse(carpeta.exists())
+        entrada = Path(resultado["papelera"])
+        # Al lado de la raíz: en el mismo disco, mover es un rename y no una copia.
+        self.assertEqual(entrada.parent, self.tmp / "Papelera")
+        self.assertEqual((entrada / carpeta.name / "01. pista.flac").read_bytes(), b"audio")
         fila = rp.leer(pa.REGISTRO_PUBLICADOS).buscar("Banda - Corto (2025) [EP]")
         self.assertEqual(fila["origen"], "eliminar")
 
-    def test_eliminar_no_borra_la_carpeta_de_origen_ni_una_parte_de_un_album(self):
-        # Defecto: con las carpetas de origen como raíces, una ruta mal pasada borra parte de la
+    def test_eliminar_no_aparta_la_carpeta_de_origen_ni_una_parte_de_un_album(self):
+        # Defecto: con las carpetas de origen como raíces, una ruta mal pasada aparta parte de la
         # única copia de un álbum.
         album = self.album / "Banda - Doble (2020)"
         (album / "CD1").mkdir(parents=True)
-        uploader = SimpleNamespace(safe_delete_folder=lambda c, r: self.fail(f"borró {c}"))
 
         for carpeta in (self.album, album / "CD1"):
-            resultado = pa.eliminar(carpeta, uploader=uploader)
+            resultado = pa.eliminar(carpeta)
             self.assertEqual(resultado["motivo"], "carpeta_fuera_de_raiz", carpeta)
 
         self.assertTrue((album / "CD1").is_dir())
+        self.assertFalse((self.tmp / "Papelera").exists())
         self.assertFalse(pa.REGISTRO_PUBLICADOS.exists())
+
+    def test_restaurar_devuelve_el_album_y_buscar_lo_vuelve_a_ofrecer(self):
+        # Defecto: con la fila de `eliminar` en el registro, `buscar` apartaba a Ya publicados/
+        # el álbum recién devuelto en vez de preguntar por él.
+        carpeta = self.album_con_pista("Banda - Corto (2025) [EP]")
+        entrada = pa.eliminar(carpeta)["papelera"]
+
+        resultado = pa.restaurar(entrada)
+        with mock.patch.object(pa, "capturar_busqueda", return_value=(None, "busqueda")):
+            siguiente = pa.buscar()
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(resultado["carpeta"], str(carpeta))
+        self.assertEqual((carpeta / "01. pista.flac").read_bytes(), b"audio")
+        self.assertFalse(Path(entrada).exists())
+        self.assertEqual(siguiente["album"], "Banda - Corto (2025) [EP]")
+        self.assertEqual(siguiente["ya_publicados"], [])
+
+    def test_restaurar_deja_las_filas_que_no_puso_eliminar(self):
+        # Defecto: sacar todas las filas del álbum borra también la de su video en el canal.
+        carpeta = self.album_con_pista("Banda - Corto (2025) [EP]")
+        rp.anotar(pa.REGISTRO_PUBLICADOS, [("Banda - Corto (2025) [EP]", "canal", "VID1")])
+        entrada = pa.eliminar(carpeta)["papelera"]
+
+        pa.restaurar(entrada)
+
+        filas = rp.leer(pa.REGISTRO_PUBLICADOS).filas
+        self.assertEqual([(f["origen"], f["video_id"]) for f in filas], [("canal", "VID1")])
+
+    def test_restaurar_no_pisa_una_carpeta_que_ya_volvio(self):
+        # Defecto: devolverlo encima de otra copia (bajada de nuevo) la pisa o la mezcla.
+        carpeta = self.album_con_pista("Banda - Corto (2025) [EP]")
+        entrada = Path(pa.eliminar(carpeta)["papelera"])
+        carpeta.mkdir()
+        (carpeta / "nueva.flac").write_bytes(b"otra")
+
+        resultado = pa.restaurar(entrada)
+
+        self.assertEqual(resultado["motivo"], "ya_existe")
+        self.assertEqual(sorted(p.name for p in carpeta.iterdir()), ["nueva.flac"])
+        self.assertTrue((entrada / carpeta.name / "01. pista.flac").is_file())
+        # El registro no se toca: el álbum sigue en la papelera.
+        fila = rp.leer(pa.REGISTRO_PUBLICADOS).buscar(carpeta.name)
+        self.assertEqual(fila["origen"], "eliminar")
+
+    def test_restaurar_no_mueve_nada_fuera_de_la_papelera(self):
+        # Defecto: una ruta cualquiera en el estado del servicio movería una carpeta ajena.
+        afuera = self.tmp / "otra" / "abc"
+        (afuera / "Banda - Ajena (2020)").mkdir(parents=True)
+        destino = self.ep / "Banda - Ajena (2020)"
+        (afuera / "origen.json").write_text(json.dumps({"carpeta": str(destino)}), encoding="utf-8")
+
+        resultado = pa.restaurar(afuera)
+
+        self.assertEqual(resultado["motivo"], "fuera_de_papelera")
+        self.assertFalse(destino.exists())
+        self.assertTrue((afuera / "Banda - Ajena (2020)").is_dir())
+
+    def test_restaurar_lo_que_ya_se_vacio_dice_que_ya_no_esta(self):
+        # Defecto: la entrada ya borrada hacía fallar el paso sin decir por qué.
+        entrada = pa.eliminar(self.album_con_pista("Banda - Corto (2025) [EP]"))["papelera"]
+        shutil.rmtree(entrada)
+
+        self.assertEqual(pa.restaurar(entrada)["motivo"], "ya_no_esta")
+
+    def test_vaciar_papelera_borra_lo_que_tiene_mas_de_un_dia_y_deja_lo_nuevo(self):
+        # Defecto: una papelera que no se vacía llena el disco; una que borra todo no deja deshacer.
+        vieja = Path(pa.eliminar(self.album_con_pista("Banda - Viejo (2020)"))["papelera"])
+        nueva = Path(pa.eliminar(self.album_con_pista("Banda - Nuevo (2021)"))["papelera"])
+        origen = json.loads((vieja / "origen.json").read_text(encoding="utf-8"))
+        origen["eliminado"] = time.time() - pa.PLAZO_PAPELERA_S - 1
+        (vieja / "origen.json").write_text(json.dumps(origen), encoding="utf-8")
+
+        resultado = pa.vaciar_papelera(raices=(self.ep,))
+
+        self.assertEqual(resultado, {"ok": True, "vaciadas": [str(vieja)], "fallos": []})
+        self.assertFalse(vieja.exists())
+        self.assertTrue((nueva / "Banda - Nuevo (2021)" / "01. pista.flac").is_file())
+
+    def test_los_subcomandos_de_la_papelera_llaman_a_sus_pasos(self):
+        # Defecto: el servicio lanza `restaurar` y `vaciar_papelera`; sin el subcomando, fallan.
+        salida = io.StringIO()
+        with mock.patch.object(pa, "restaurar", return_value={"ok": True}) as restaurar, \
+                mock.patch.object(pa, "vaciar_papelera", return_value={"ok": True}) as vaciar, \
+                contextlib.redirect_stdout(salida):
+            self.assertEqual(pa.main(["restaurar", "--papelera=/Papelera/x"]), 0)
+            self.assertEqual(pa.main(["vaciar_papelera"]), 0)
+        restaurar.assert_called_once_with("/Papelera/x")
+        vaciar.assert_called_once_with()
 
 
 class TestRetomar(unittest.TestCase):
@@ -894,15 +984,16 @@ class TestSubir(unittest.TestCase):
         # Defecto: anotarlo antes de que la subida funcione aparta un álbum que nunca se publicó.
         self.assertFalse(pa.REGISTRO_PUBLICADOS.exists())
 
-    def test_eliminar_borra_la_carpeta_y_su_captura(self):
+    def test_eliminar_aparta_un_album_renderizado_y_borra_su_captura(self):
         captura = pa.DIR_CAPTURAS / f"{pa.slug(self.carpeta.name)}.jpg"
         captura.parent.mkdir(parents=True)
         captura.write_bytes(b"jpg")
 
-        resultado = pa.eliminar(self.carpeta, uploader=self.uploader(None), raices=(self.raiz,))
+        resultado = pa.eliminar(self.carpeta, raices=(self.raiz,))
 
         self.assertTrue(resultado["ok"], resultado)
         self.assertFalse(self.carpeta.exists())
+        self.assertTrue((Path(resultado["papelera"]) / "Banda - Album" / "Banda - Album.mp4").is_file())
         self.assertFalse(captura.exists())
         # Defecto: el álbum eliminado por ya publicado no queda anotado y se vuelve a renderizar.
         fila = rp.leer(pa.REGISTRO_PUBLICADOS).buscar("Banda - Album")
@@ -912,7 +1003,7 @@ class TestSubir(unittest.TestCase):
         afuera = self.tmp / "otra" / "Banda - Album"
         shutil.copytree(self.carpeta, afuera)
 
-        resultado = pa.eliminar(afuera, uploader=self.uploader(None), raices=(self.raiz,))
+        resultado = pa.eliminar(afuera, raices=(self.raiz,))
 
         self.assertEqual(resultado["motivo"], "carpeta_fuera_de_raiz")
         self.assertTrue(afuera.exists())
@@ -1306,6 +1397,25 @@ class TestSembrarPublicados(unittest.TestCase):
 
         self.assertEqual((primera["agregados"], segunda["agregados"]), (3, 0))
         self.assertEqual(len(rp.leer(pa.REGISTRO_PUBLICADOS).filas), 4)
+
+    def test_no_vuelve_a_anotar_un_album_devuelto_con_deshacer(self):
+        # Defecto: el log de `eliminar` seguía ahí y sembrar volvía a anotar el álbum que el
+        # usuario devolvió; el próximo `buscar` lo apartaba a Ya publicados/.
+        resultados = {
+            "servicio_restaurar_20261102-102020_dddddd.out": {"ok": True, "album": "Banda C - Tres (2019)"},
+            "servicio_eliminar_20261102-103030_eeeeee.out": {"ok": True, "album": "Banda G - Siete (2015)"},
+            "servicio_restaurar_20261102-104040_ffffff.out": {"ok": True, "album": "Banda G - Siete (2015)"},
+            # Devuelto y eliminado otra vez: lo último que pasó es el eliminar.
+            "servicio_eliminar_20261102-105050_abcdef.out": {"ok": True, "album": "Banda G - Siete (2015)"},
+        }
+        for nombre, resultado in resultados.items():
+            (pa.DIR_LOGS / nombre).write_text(json.dumps(resultado) + "\n", encoding="utf-8")
+
+        self.sembrar(self.canal())
+
+        registro = rp.leer(pa.REGISTRO_PUBLICADOS)
+        self.assertIsNone(registro.buscar("Banda C - Tres (2019)"))
+        self.assertEqual(registro.buscar("Banda G - Siete (2015)")["origen"], "eliminar")
 
     def test_un_error_de_la_api_se_informa_y_no_anota_nada(self):
         # Defecto: la corrida termina con un traceback sin JSON, o informa ok con medio canal.
