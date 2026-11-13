@@ -21,6 +21,7 @@ import contextlib
 import errno
 import fcntl
 import functools
+import hashlib
 import importlib.util
 import json
 import os
@@ -1156,6 +1157,10 @@ def aceptar_censura(carpeta):
     miniatura); la original se guarda en `originales/` y no se borra. Sin nada que tapar, el álbum
     vuelve con su portada tal cual. Si en el origen ya hay otra carpeta con ese nombre, no cambia
     nada. Repetirlo con el álbum ya devuelto (el servicio se reinició a mitad) dice que está.
+
+    `aplicada.json` anota la huella de la candidata que puso: si mover el álbum falló, otro Aceptar
+    no vuelve a poner esa misma, pero sí una nueva (de un análisis posterior). La lista de
+    originales guardadas se va sumando.
     """
     carpeta = Path(carpeta)
     album = carpeta.name
@@ -1179,19 +1184,28 @@ def aceptar_censura(carpeta):
     destino = origen_de_censura(album) or Path(DIRS_ORIGEN_RENDER[0]) / album
     if destino.exists():
         return {"ok": False, "motivo": "ya_existe", "album": album, "carpeta": str(destino)}
-    originales = []
     try:
-        if candidata.is_file() and not marca.exists():
-            originales = reemplazar_portada(carpeta, candidata, datos / CARPETA_ORIGINALES)
-            escribir_json(marca, {"destino": str(destino), "originales": [str(o) for o in originales]})
+        previa = json.loads(marca.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        previa = {}
+    if not isinstance(previa, dict):
+        previa = {}
+    originales = [str(o) for o in previa.get("originales") or []]
+    aplicada = previa.get("candidata")
+    try:
+        huella = hashlib.sha256(candidata.read_bytes()).hexdigest() if candidata.is_file() else None
+        if huella and huella != aplicada:
+            originales += [str(o) for o in reemplazar_portada(carpeta, candidata, datos / CARPETA_ORIGINALES)]
+            aplicada = huella
+            escribir_json(marca, {"destino": str(destino), "candidata": aplicada, "originales": originales})
         with bloqueo("origenes"):
             carpeta.rename(destino)
     except OSError as exc:
         return {"ok": False, "motivo": "no_se_pudo_aplicar", "album": album, "detalle": str(exc)}
-    escribir_json(marca, {"destino": str(destino), "originales": [str(o) for o in originales]})
+    escribir_json(marca, {"destino": str(destino), "candidata": aplicada, "originales": originales})
     for archivo in (candidata, datos / "vista_original.jpg", datos / "vista_censurada.jpg"):
         archivo.unlink(missing_ok=True)
-    return {"ok": True, "album": album, "carpeta": str(destino), "originales": [str(o) for o in originales]}
+    return {"ok": True, "album": album, "carpeta": str(destino), "originales": originales}
 
 
 def papelera_de(raiz):
