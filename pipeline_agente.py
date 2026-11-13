@@ -8,6 +8,9 @@ decida el paso siguiente; el resto de la salida va a data/agente/logs/.
     verificar    corre los tests del video y genera la captura
     subir        sube el video como privado y borra la carpeta del álbum
     eliminar     borra la carpeta del álbum sin subirlo (ya estaba publicado)
+    a_censura    aparta el álbum en Censura/ para censurar su portada (botón «🔞 Censurar»)
+    censurar     busca con un modelo local qué tapar de la portada y deja una candidata censurada
+    aceptar_censura  pone la portada censurada en el álbum y lo devuelve a su carpeta de origen
     programar    espera el procesado, revisa reclamos, activa la monetización y programa
     eliminar_video  borra un video de YouTube (no se puede deshacer; lo pide un botón)
     impugnar        impugna en Studio los reclamos de un video (declaración legal; lo pide un botón)
@@ -41,6 +44,7 @@ from googleapiclient.http import MediaFileUpload
 from config import (
     AUDIO_FORMATS,
     CARPETA_RESCATE_RENDER,
+    DIR_CENSURA,
     DIR_ERROR404,
     DIR_RENDERIZANDO,
     DIR_UPLOAD,
@@ -54,8 +58,9 @@ from config import (
     VIDEO_HEIGHT,
     VIDEO_WIDTH,
 )
+import censura_portadas
 import registro_publicados
-from portadas import elegir_portada
+from portadas import elegir_portada, reemplazar_portada
 
 DIR_AGENTE = PROJECT_ROOT / "data" / "agente"
 PENDIENTES_JSON = DIR_AGENTE / "pendientes.json"
@@ -68,6 +73,11 @@ LISTA_NEGRA_RECLAMANTES = PROJECT_ROOT / "lista_negra_reclamantes.txt"
 APELACIONES_JSON = DIR_AGENTE / "apelaciones.json"
 DIR_LOGS = DIR_AGENTE / "logs"
 RAICES_BORRABLES = (DIR_RENDERIZANDO, DIR_UPLOAD)
+# Lo que `a_censura` y `censurar` anotan de cada álbum en Censura/ (de dónde vino, las cajas de cada
+# intento, la candidata y sus vistas) y, en `originales/`, las portadas que Aceptar reemplazó.
+# Va fuera de la carpeta del álbum: hasta Aceptar, nada cambia dentro de ella.
+DIR_CENSURA_DATOS = DIR_AGENTE / "censura"
+CARPETA_ORIGINALES = "originales"
 # Lo que aparta `eliminar` se puede devolver con `restaurar` hasta que `vaciar_papelera` lo borra.
 PLAZO_PAPELERA_S = 24 * 3600
 
@@ -98,6 +108,10 @@ ERRNOS_DE_RED = frozenset({errno.ENETUNREACH, errno.EHOSTUNREACH, errno.ENETDOWN
 # entiende de clases, y el errno no es una.
 POSIBLES_ERRORES_DE_CONEXION = (*ERRORES_DE_CONEXION, OSError)
 PROCESO_RENDER = "ffmpeg_render.py"
+# Un análisis de portada es este script con el subcomando `censurar`: ocupa ~17 GB de VRAM, y el
+# render y el análisis no pueden correr a la vez.
+SCRIPT_PIPELINE = "pipeline_agente.py"
+SUBCOMANDO_CENSURA = "censurar"
 ESPERA_RENDER_MAX_S = 6 * 3600
 ESCANEO_PROGRAMADOS = int(os.environ.get("AGENTE_ESCANEO_PROGRAMADOS", "500"))
 CAMPOS_STATUS_CONSERVADOS = ("embeddable", "license", "publicStatsViewable")
@@ -483,19 +497,32 @@ def cola_de_log(log, lineas=20):
     return "\n".join([linea for linea in limpias if linea][-lineas:])
 
 
-def render_en_curso():
-    """True si corre un render, lo haya lanzado esta sesión, otra o el usuario a mano."""
+def _python_corre(coincide):
+    """True si algún proceso de Python tiene argumentos que cumplen `coincide(argumentos)`."""
     for cmdline in Path("/proc").glob("[0-9]*/cmdline"):
         try:
             argumentos = cmdline.read_bytes().decode("utf-8", "replace").split("\0")
         except OSError:
             continue
         # Solo Python cuenta: un editor con el script abierto también lo tiene en sus argumentos.
-        if Path(argumentos[0]).name.startswith("python") and any(
-            a.endswith(PROCESO_RENDER) for a in argumentos[1:]
-        ):
+        if Path(argumentos[0]).name.startswith("python") and coincide(argumentos[1:]):
             return True
     return False
+
+
+def render_en_curso():
+    """True si corre un render, lo haya lanzado esta sesión, otra o el usuario a mano."""
+    return _python_corre(lambda argumentos: any(a.endswith(PROCESO_RENDER) for a in argumentos))
+
+
+def analisis_en_curso():
+    """True si corre un `censurar` (el modelo ocupa la GPU), lo haya lanzado el servicio u otra sesión."""
+    return _python_corre(
+        lambda argumentos: any(
+            a.endswith(SCRIPT_PIPELINE) and argumentos[i + 1 : i + 2] == [SUBCOMANDO_CENSURA]
+            for i, a in enumerate(argumentos)
+        )
+    )
 
 
 def limpiar_temporales_render():
@@ -524,6 +551,9 @@ def renderizar(carpeta=None):
     # Dos renders 4K a la vez llenan el disco y la GPU.
     if render_en_curso():
         return {"ok": False, "motivo": "render_en_curso"}
+    # El modelo que analiza las portadas ocupa la GPU: el render espera a que termine.
+    if analisis_en_curso():
+        return {"ok": False, "motivo": "analisis_en_curso"}
     # El álbum renderizado queda en el SSD: sin él montado no se renderiza.
     if not os.path.ismount(RENDER_SSD_DIR):
         return {
@@ -946,13 +976,228 @@ def buscar(uploader=None, aleatorio=False, excluir=()):
     }
 
 
+# ---------------------------------------------------------------------------
+# Censura de portadas
+# ---------------------------------------------------------------------------
+
+
+def datos_de_censura(album):
+    return DIR_CENSURA_DATOS / slug(album)
+
+
+def escribir_json(ruta, datos):
+    ruta.write_text(json.dumps(datos, ensure_ascii=False), encoding="utf-8")
+
+
+def origen_de_censura(album):
+    """La carpeta donde estaba el álbum antes de mandarlo a Censura/; None si no quedó anotada."""
+    try:
+        origen = json.loads((datos_de_censura(album) / "origen.json").read_text(encoding="utf-8"))
+        return Path(origen["carpeta"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def limpiar_datos_de_censura(album):
+    """Borra lo anotado del análisis de un álbum; las portadas originales guardadas se quedan."""
+    datos = datos_de_censura(album)
+    if not datos.is_dir():
+        return
+    for entrada in datos.iterdir():
+        if entrada.is_file():
+            entrada.unlink(missing_ok=True)
+    try:
+        datos.rmdir()
+    except OSError:
+        pass  # todavía tiene `originales/`
+
+
+def cajas_de_censura(album, hasta):
+    """Las cajas ya encontradas en los intentos 1..`hasta`: [(etiqueta, x1, y1, x2, y2)]."""
+    cajas = []
+    for intento in range(1, hasta + 1):
+        try:
+            leidas = json.loads((datos_de_censura(album) / f"cajas_{intento}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        cajas += [tuple(caja) for caja in leidas]
+    return cajas
+
+
+def a_censura(carpeta):
+    """Aparta el álbum de su carpeta de origen en Censura/ y anota de dónde salió.
+
+    Es lo primero que pasa al tocar «🔞 Censurar»: el próximo álbum se pregunta sin esperar al
+    análisis. Un Censurar nuevo empieza de cero (las cajas de uno anterior no cuentan), pero
+    nunca borra las portadas originales que Aceptar guardó antes. Repetirlo con el álbum ya
+    apartado (el servicio se reinició a mitad) dice que está.
+    """
+    carpeta = Path(carpeta)
+    album = carpeta.name
+    destino = Path(DIR_CENSURA) / album
+    if not carpeta.is_dir():
+        if destino.is_dir() and origen_de_censura(album) is not None:
+            return {"ok": True, "album": album, "carpeta": str(destino), "reanudado": True}
+        return {"ok": False, "motivo": "carpeta_no_existe", "carpeta": str(carpeta)}
+    raiz = raiz_borrable(carpeta, DIRS_ORIGEN_RENDER)
+    # Solo un álbum entero de una carpeta de origen, como en `eliminar`.
+    if raiz is None or carpeta.resolve().parent != raiz:
+        return {"ok": False, "motivo": "carpeta_fuera_de_raiz", "carpeta": str(carpeta)}
+    if destino.exists():
+        return {"ok": False, "motivo": "ya_existe", "carpeta": str(destino)}
+    carpeta = carpeta.resolve()
+    with bloqueo("origenes"):
+        try:
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            limpiar_datos_de_censura(album)
+            datos_de_censura(album).mkdir(parents=True, exist_ok=True)
+            escribir_json(datos_de_censura(album) / "origen.json", {"carpeta": str(carpeta)})
+            # rename y no shutil.move: si falla, shutil.move copiaría el álbum entero.
+            carpeta.rename(destino)
+        except OSError as exc:
+            return {"ok": False, "motivo": "no_se_pudo_mover", "album": album, "detalle": str(exc)}
+    return {"ok": True, "album": album, "carpeta": str(destino), "origen": str(carpeta.parent)}
+
+
+def carpeta_de_censura(carpeta):
+    """`carpeta` como Path si es un álbum de Censura/; si no, el resultado de error que corresponde."""
+    carpeta = Path(carpeta)
+    if not carpeta.is_dir():
+        return None, {"ok": False, "motivo": "carpeta_no_existe", "carpeta": str(carpeta)}
+    if carpeta.resolve().parent != Path(DIR_CENSURA).resolve():
+        return None, {"ok": False, "motivo": "carpeta_fuera_de_censura", "carpeta": str(carpeta)}
+    return carpeta, None
+
+
+def vista_para_el_celular(imagen, destino):
+    """La imagen achicada para juzgarla en el celular (Telegram igual la achica a 1280 px)."""
+    destino.write_bytes(censura_portadas.a_jpeg(imagen, censura_portadas.LADO_DE_LA_VISTA))
+    return destino
+
+
+def censurar(carpeta, intento, cliente=None):
+    """Busca con el modelo local qué tapar de la portada y deja la candidata censurada.
+
+    Intento 1 mira la imagen entera, el 2 cuatro pedazos y del 3 en adelante nueve más la entera.
+    Suma las cajas de los intentos anteriores: la censura solo crece. Solo lee la portada y escribe
+    en `DIR_CENSURA_DATOS`: nada cambia dentro de la carpeta del álbum hasta `aceptar_censura`, y
+    repetir un intento (el servicio se reinició a mitad) reemplaza sus cajas. Nunca corre con un
+    render en marcha, y al terminar descarga el modelo de la GPU, haya salido bien o mal.
+    """
+    carpeta, error = carpeta_de_censura(carpeta)
+    if error:
+        return error
+    album = carpeta.name
+    if render_en_curso():
+        return {"ok": False, "motivo": "render_en_curso"}
+    portada = elegir_portada(carpeta)
+    if portada is None:
+        return {"ok": False, "motivo": "sin_portada", "album": album, "intento": intento}
+    try:
+        imagen = censura_portadas.abrir_portada(portada)
+    except censura_portadas.ErrorDeCensura as exc:
+        return {"ok": False, "motivo": exc.motivo, "detalle": exc.detalle, "album": album, "intento": intento}
+    cliente = cliente or censura_portadas.ClienteOllama()
+    fallo = None
+    try:
+        nuevas = censura_portadas.buscar_cajas(imagen, intento, cliente)
+    except censura_portadas.ErrorDeCensura as exc:
+        nuevas, fallo = [], exc
+    finally:
+        descargado = cliente.descargar()
+    if fallo is not None:
+        return {
+            "ok": False, "motivo": fallo.motivo, "detalle": fallo.detalle, "album": album,
+            "intento": intento, "descargado": descargado,
+        }
+
+    datos = datos_de_censura(album)
+    datos.mkdir(parents=True, exist_ok=True)
+    anteriores = cajas_de_censura(album, intento - 1)
+    zonas = censura_portadas.ampliar_cajas(
+        [caja[1:] for caja in [*anteriores, *nuevas]], *imagen.size
+    )
+    candidata = datos / "candidata.png"
+    if zonas:
+        censura_portadas.pintar_cajas(imagen, zonas).save(candidata)
+    else:
+        candidata.unlink(missing_ok=True)
+    original = vista_para_el_celular(imagen, datos / "vista_original.jpg")
+    censurada = None
+    if zonas:
+        censurada = vista_para_el_celular(censura_portadas.pintar_cajas(imagen, zonas), datos / "vista_censurada.jpg")
+    # Lo último: con las cajas anotadas, el intento cuenta como hecho.
+    escribir_json(datos / f"cajas_{intento}.json", [list(caja) for caja in nuevas])
+    etiquetas = []
+    for caja in nuevas:
+        legible = censura_portadas.etiqueta_legible(caja[0])
+        if legible not in etiquetas:
+            etiquetas.append(legible)
+    return {
+        "ok": True,
+        "album": album,
+        "intento": intento,
+        "encontradas": etiquetas,
+        "nuevas": len(nuevas),
+        "zonas": len(zonas),
+        "original": str(original),
+        "censurada": str(censurada) if censurada else None,
+        "descargado": descargado,
+    }
+
+
+def aceptar_censura(carpeta):
+    """Pone la portada censurada en el álbum y lo devuelve a la carpeta donde estaba.
+
+    La censurada pasa a ser la que elige `elegir_portada` (así la usan el render, el fondo y la
+    miniatura); la original se guarda en `originales/` y no se borra. Sin nada que tapar, el álbum
+    vuelve con su portada tal cual. Si en el origen ya hay otra carpeta con ese nombre, no cambia
+    nada. Repetirlo con el álbum ya devuelto (el servicio se reinició a mitad) dice que está.
+    """
+    carpeta = Path(carpeta)
+    album = carpeta.name
+    datos = datos_de_censura(album)
+    marca = datos / "aplicada.json"
+    if not carpeta.is_dir():
+        try:
+            devuelto = Path(json.loads(marca.read_text(encoding="utf-8"))["destino"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return {"ok": False, "motivo": "carpeta_no_existe", "carpeta": str(carpeta)}
+        if devuelto.is_dir():
+            return {"ok": True, "album": album, "carpeta": str(devuelto), "reanudado": True}
+        return {"ok": False, "motivo": "carpeta_no_existe", "carpeta": str(carpeta)}
+    carpeta, error = carpeta_de_censura(carpeta)
+    if error:
+        return error
+    analizado = any(datos.glob("cajas_*.json"))
+    candidata = datos / "candidata.png"
+    if not analizado:
+        return {"ok": False, "motivo": "sin_analisis", "album": album}
+    destino = origen_de_censura(album) or Path(DIRS_ORIGEN_RENDER[0]) / album
+    if destino.exists():
+        return {"ok": False, "motivo": "ya_existe", "album": album, "carpeta": str(destino)}
+    originales = []
+    try:
+        if candidata.is_file() and not marca.exists():
+            originales = reemplazar_portada(carpeta, candidata, datos / CARPETA_ORIGINALES)
+            escribir_json(marca, {"destino": str(destino), "originales": [str(o) for o in originales]})
+        with bloqueo("origenes"):
+            carpeta.rename(destino)
+    except OSError as exc:
+        return {"ok": False, "motivo": "no_se_pudo_aplicar", "album": album, "detalle": str(exc)}
+    escribir_json(marca, {"destino": str(destino), "originales": [str(o) for o in originales]})
+    for archivo in (candidata, datos / "vista_original.jpg", datos / "vista_censurada.jpg"):
+        archivo.unlink(missing_ok=True)
+    return {"ok": True, "album": album, "carpeta": str(destino), "originales": [str(o) for o in originales]}
+
+
 def papelera_de(raiz):
     """La papelera del disco de `raiz`, al lado de ella: mover ahí es un rename y no una copia."""
     return Path(raiz).resolve().parent / "Papelera"
 
 
 def raices_de_eliminar():
-    return (*RAICES_BORRABLES, *DIRS_ORIGEN_RENDER)
+    return (*RAICES_BORRABLES, *DIRS_ORIGEN_RENDER, DIR_CENSURA)
 
 
 def eliminar(carpeta, raices=None):
@@ -962,6 +1207,10 @@ def eliminar(carpeta, raices=None):
     de origen; uno renderizado antes de ese cambio está en Renderizando/. Cada álbum va a una
     entrada propia de la papelera de su disco, con `origen.json` (de dónde salió y cuándo):
     `restaurar` lo devuelve y `vaciar_papelera` lo borra pasado PLAZO_PAPELERA_S.
+
+    Uno que está en Censura/ vuelve, al deshacer, a la carpeta donde estaba antes de Censurar (no
+    a Censura/, donde nada lo vuelve a preguntar), y sus datos de censura se borran; las portadas
+    originales guardadas se quedan.
     """
     carpeta = Path(carpeta)
     if raices is None:
@@ -976,6 +1225,7 @@ def eliminar(carpeta, raices=None):
     # Antes de apartarlo: si el proceso muere a mitad, el álbum ya quedó anotado.
     anotar_publicados([(carpeta.name, "eliminar", "")])
     carpeta = carpeta.resolve()
+    desde_censura = raiz == Path(DIR_CENSURA).resolve()
     entrada = papelera_de(raiz) / f"{datetime.now():%Y%m%d-%H%M%S}-{os.urandom(3).hex()}"
     try:
         # Sin exist_ok: una entrada con el mismo nombre es de otro álbum y no se toca.
@@ -983,7 +1233,10 @@ def eliminar(carpeta, raices=None):
     except OSError as exc:
         return {"ok": False, "motivo": "no_se_pudo_borrar", "album": carpeta.name, "detalle": str(exc)}
     try:
-        origen = {"carpeta": str(carpeta), "album": carpeta.name, "eliminado": time.time()}
+        volver_a = carpeta
+        if desde_censura:
+            volver_a = origen_de_censura(carpeta.name) or Path(DIRS_ORIGEN_RENDER[0]) / carpeta.name
+        origen = {"carpeta": str(volver_a), "album": carpeta.name, "eliminado": time.time()}
         (entrada / "origen.json").write_text(json.dumps(origen, ensure_ascii=False), encoding="utf-8")
         # rename y no shutil.move: si falla, shutil.move copiaría el álbum entero.
         carpeta.rename(entrada / carpeta.name)
@@ -991,6 +1244,8 @@ def eliminar(carpeta, raices=None):
         shutil.rmtree(entrada, ignore_errors=True)
         return {"ok": False, "motivo": "no_se_pudo_borrar", "album": carpeta.name, "detalle": str(exc)}
     borrar_capturas(carpeta.name)
+    if desde_censura:
+        limpiar_datos_de_censura(carpeta.name)
     return {"ok": True, "album": carpeta.name, "papelera": str(entrada)}
 
 
@@ -2895,6 +3150,22 @@ def parse_args(argv=None):
     p = sub.add_parser("eliminar", help="Aparta el álbum en la papelera sin subirlo (ya publicado).")
     p.add_argument("--carpeta", required=True, help="Carpeta devuelta por buscar o por renderizar.")
 
+    p = sub.add_parser(
+        "a_censura", help="Aparta el álbum en Censura/ para censurar su portada (botón «🔞 Censurar»)."
+    )
+    p.add_argument("--carpeta", required=True, help="Carpeta devuelta por buscar.")
+
+    p = sub.add_parser(
+        "censurar", help="Busca con el modelo local qué tapar de la portada y deja una candidata."
+    )
+    p.add_argument("--carpeta", required=True, help="Carpeta del álbum en Censura/.")
+    p.add_argument("--intento", type=int, default=1, help="1: imagen entera; 2: 2x2 pedazos; 3 o más: 3x3 y la entera.")
+
+    p = sub.add_parser(
+        "aceptar_censura", help="Pone la portada censurada en el álbum y lo devuelve a su origen."
+    )
+    p.add_argument("--carpeta", required=True, help="Carpeta del álbum en Censura/.")
+
     p = sub.add_parser("restaurar", help="Devuelve a su carpeta un álbum que eliminar apartó.")
     p.add_argument("--papelera", required=True, help="Entrada de la papelera devuelta por eliminar.")
 
@@ -3000,6 +3271,12 @@ def main(argv=None):
         return responder(subir(args.carpeta, sin_deathgrind=args.sin_deathgrind))
     if args.comando == "eliminar":
         return responder(eliminar(args.carpeta))
+    if args.comando == "a_censura":
+        return responder(a_censura(args.carpeta))
+    if args.comando == "censurar":
+        return responder(censurar(args.carpeta, args.intento))
+    if args.comando == "aceptar_censura":
+        return responder(aceptar_censura(args.carpeta))
     if args.comando == "restaurar":
         return responder(restaurar(args.papelera))
     if args.comando == "vaciar_papelera":

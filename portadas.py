@@ -1,6 +1,8 @@
 """La portada de un álbum: la que el servicio muestra en Telegram y la que usa el render."""
 
 import re
+import shutil
+import time
 from pathlib import Path
 
 EXTENSIONES_IMAGEN = (".png", ".jpg", ".jpeg")
@@ -57,3 +59,49 @@ def elegir_portada(carpeta):
     )
     sin_sombra = [i for i in imagenes if not i.name.endswith("_shadow.png")]
     return next(iter(sin_sombra or imagenes), None)
+
+
+# La portada censurada se llama cover.*: gana a cualquier otra imagen del álbum.
+NOMBRE_PORTADA_CENSURADA = "cover.png"
+
+
+def _destino_libre(directorio, nombre):
+    destino, n = directorio / nombre, 2
+    while destino.exists():
+        destino, n = directorio / f"{n}-{nombre}", n + 1
+    return destino
+
+
+def reemplazar_portada(carpeta, censurada, guardar_en):
+    """Pone `censurada` de portada del álbum; la original se guarda en `guardar_en`, nunca se borra.
+
+    Sale de la carpeta todo lo que le ganaría a la nueva o se reusaría: la portada que elegía el
+    render, cualquier cover.* (empatan en prioridad con la nueva) y las sombras (`cover_shadow.png`
+    ya hecha se reusa tal cual: llevaría la imagen sin censurar). Lo demás, el audio y las otras
+    imágenes, no se toca. Devuelve dónde quedó cada archivo guardado. Antes de sacar nada de la
+    carpeta, lo copia y compara el tamaño.
+    """
+    carpeta, censurada, guardar_en = Path(carpeta), Path(censurada), Path(guardar_en)
+    elegida = elegir_portada(carpeta)
+    a_guardar = sorted(
+        p
+        for p in carpeta.iterdir()
+        if p.is_file()
+        and p.suffix.lower() in EXTENSIONES_IMAGEN
+        and (p == elegida or p.name.lower().startswith("cover.") or p.name.endswith("_shadow.png"))
+    )
+    guardar_en.mkdir(parents=True, exist_ok=True)
+    marca = time.strftime("%Y%m%d-%H%M%S")
+    guardadas = []
+    for imagen in a_guardar:
+        destino = _destino_libre(guardar_en, f"{marca}-{imagen.name}")
+        shutil.copy2(imagen, destino)
+        if destino.stat().st_size != imagen.stat().st_size:
+            raise OSError(f"la copia de {imagen.name} quedó incompleta")
+        guardadas.append(destino)
+    temporal = carpeta / f"{NOMBRE_PORTADA_CENSURADA}.censura"
+    shutil.copy2(censurada, temporal)
+    for imagen in a_guardar:
+        imagen.unlink()
+    temporal.replace(carpeta / NOMBRE_PORTADA_CENSURADA)
+    return guardadas
