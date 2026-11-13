@@ -78,6 +78,7 @@ from config import (
     USE_RAMDISK,
     RAMDISK_SIZE_GB,
     RAMDISK_PATH,
+    RAM_MARGEN_LIBRE_GB,
 )
 
 # ============================================================================
@@ -243,6 +244,23 @@ def parse_bitrate_to_bps(value: str, default_bps: int) -> int:
     return int(number * multiplier)
 
 
+MEMINFO_PATH = Path("/proc/meminfo")
+
+
+def read_mem_available_bytes(meminfo_path: Path = MEMINFO_PATH) -> int | None:
+    """
+    MemAvailable de /proc/meminfo en bytes, o None si no se puede leer.
+    """
+    try:
+        texto = meminfo_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    coincidencia = re.search(r"^MemAvailable:\s+(\d+)\s*kB", texto, re.MULTILINE)
+    if not coincidencia:
+        return None
+    return int(coincidencia.group(1)) * 1024
+
+
 def estimate_temp_render_bytes(total_duration: float, cpp_pipeline: bool) -> int:
     video_bps = parse_bitrate_to_bps(VIDEO_BITRATE, 45_000_000)
     audio_bps = parse_bitrate_to_bps(AUDIO_BITRATE, 384_000)
@@ -250,8 +268,10 @@ def estimate_temp_render_bytes(total_duration: float, cpp_pipeline: bool) -> int
     base_bytes = max(1, int((total_bps * max(total_duration, 1.0)) / 8))
 
     if cpp_pipeline:
-        # En C++/CUDA coexistirán video_only + final_video durante el mux.
-        required_bytes = int(base_bytes * 2.4)
+        # En C++/CUDA la RAM guarda solo el video sin audio y la mezcla de audio: el mux
+        # escribe el video final directo en el SSD. El 15% cubre un álbum que salga por encima
+        # del bitrate nominal (el CQ 20 rinde ~41 Mbps de 45 en lo medido).
+        required_bytes = int(base_bytes * 1.15)
     else:
         required_bytes = int(base_bytes * 1.3)
 
@@ -279,22 +299,38 @@ def maybe_move_temp_folder_to_ssd(
         return temp_folder_path
 
     reserve_bytes = 1 * 1024 * 1024 * 1024
-    if estimated_bytes <= max(0, free_bytes - reserve_bytes):
+    ramdisk_room = max(0, free_bytes - reserve_bytes)
+    # La RAM del sistema manda tanto como el tamaño del tmpfs: si el álbum no cabe en
+    # MemAvailable menos el margen, el kernel lo mandaría a la swap (zram no comprime video).
+    mem_available = read_mem_available_bytes()
+    memory_room = (
+        None
+        if mem_available is None
+        else max(0, mem_available - RAM_MARGEN_LIBRE_GB * 1024**3)
+    )
+    if (
+        memory_room is not None
+        and estimated_bytes <= ramdisk_room
+        and estimated_bytes <= memory_room
+    ):
         return temp_folder_path
 
     SSD_TEMP_DIR.mkdir(parents=True, exist_ok=True)
     ssd_temp_folder = SSD_TEMP_DIR / folder_name
 
-    if show_progress:
-        log_verbose(
-            "[RAM] Espacio temporal insuficiente para este render. "
-            "Cambiando a SSD para evitar fallo de mux..."
-        )
+    if memory_room is None:
+        reason = "no se pudo leer MemAvailable"
+    elif estimated_bytes > ramdisk_room:
+        reason = "no cabe en el ramdisk"
     else:
-        log_verbose(
-            f"[RAM] {folder_name} requiere más espacio del disponible en ramdisk. "
-            "Usando SSD temporal."
+        reason = (
+            f"la RAM del sistema no alcanza ({format_size_gb(mem_available / 1024**3)} "
+            f"disponibles, margen de {RAM_MARGEN_LIBRE_GB} GB)"
         )
+    if show_progress:
+        log_verbose(f"[RAM] Este render {reason}. Usando SSD temporal...")
+    else:
+        log_verbose(f"[RAM] {folder_name}: {reason}. Usando SSD temporal.")
 
     if ssd_temp_folder.exists():
         shutil.rmtree(ssd_temp_folder)

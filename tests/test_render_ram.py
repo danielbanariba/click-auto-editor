@@ -1,5 +1,5 @@
 """
-Tests del mux directo al SSD de "2. ffmpeg_render.py".
+Tests de la elección RAM/SSD y del mux directo al SSD de "2. ffmpeg_render.py".
 
 Nada de esto toca el ramdisk, el SSD ni la GPU reales: cada directorio se redirige a
 `tmp_path`, el binario de la GPU es un script que escribe un video de 3 s con ffmpeg en CPU
@@ -8,6 +8,7 @@ y MemAvailable sale de una función que los tests reemplazan.
 Ejecutar: pytest tests/test_render_ram.py
 """
 
+import collections
 import importlib.util
 import subprocess
 import sys
@@ -17,6 +18,8 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 SCRIPT_PATH = PROJECT_ROOT / "2. ffmpeg_render.py"
+GIB = 1024**3
+MIB = 1024**2
 
 
 @pytest.fixture(scope="module")
@@ -51,6 +54,138 @@ def intro_chica(tmp_path_factory):
         str(ruta),
     )
     return ruta
+
+
+def duracion_de_video_de(render_mod, gib):
+    """Segundos de álbum cuyo video (más el audio) ocupa `gib` GiB al bitrate configurado."""
+    bps = render_mod.parse_bitrate_to_bps(
+        render_mod.VIDEO_BITRATE, 45_000_000
+    ) + render_mod.parse_bitrate_to_bps(render_mod.AUDIO_BITRATE, 384_000)
+    return gib * GIB * 8 / bps
+
+
+# ---------------------------------------------------------------------------
+# Elección RAM / SSD
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def album_en_el_ramdisk(render_mod, monkeypatch, tmp_path):
+    """Un ramdisk de mentira (una carpeta) con la copia temporal de un álbum adentro."""
+    ram = tmp_path / "ram"
+    temp_ssd = tmp_path / "ssd" / "temp_render"
+    carpeta = ram / "Banda - Disco"
+    carpeta.mkdir(parents=True)
+    (carpeta / "01 - Tema.flac").write_bytes(b"audio")
+    monkeypatch.setattr(render_mod, "RAMDISK_PATH", ram)
+    monkeypatch.setattr(render_mod, "RAMDISK_MOUNTED", True)
+    monkeypatch.setattr(render_mod, "USE_RAMDISK", True)
+    monkeypatch.setattr(render_mod, "USE_SSD_TEMP", True)
+    monkeypatch.setattr(render_mod, "SSD_TEMP_DIR", temp_ssd)
+    return carpeta, temp_ssd
+
+
+def elegir(render_mod, monkeypatch, carpeta, duracion, ramdisk_libre, mem_available):
+    """Corre la elección de prepare_render_job y devuelve dónde quedó la carpeta."""
+    uso = collections.namedtuple("uso", "total used free")
+    uso_real = render_mod.shutil.disk_usage
+
+    def disk_usage(ruta):
+        if Path(ruta) == render_mod.RAMDISK_PATH:
+            return uso(20 * GIB, 20 * GIB - ramdisk_libre, ramdisk_libre)
+        return uso_real(ruta)
+
+    monkeypatch.setattr(render_mod.shutil, "disk_usage", disk_usage)
+    monkeypatch.setattr(render_mod, "read_mem_available_bytes", lambda: mem_available)
+    estimado = render_mod.estimate_temp_render_bytes(duracion, cpp_pipeline=True)
+    resultado = render_mod.maybe_move_temp_folder_to_ssd(
+        carpeta, carpeta.name, estimado, show_progress=False
+    )
+    return resultado, estimado
+
+
+def test_un_album_largo_que_entra_en_el_ramdisk_se_renderiza_en_ram(
+    render_mod, monkeypatch, album_en_el_ramdisk
+):
+    # Con el video final escrito directo al SSD, la RAM solo guarda el video sin audio:
+    # un álbum de la mitad del ramdisk ya no se manda al SSD.
+    carpeta, temp_ssd = album_en_el_ramdisk
+    resultado, _ = elegir(
+        render_mod, monkeypatch, carpeta,
+        duracion=duracion_de_video_de(render_mod, 10),
+        ramdisk_libre=20 * GIB, mem_available=60 * GIB,
+    )
+    assert resultado == carpeta
+    assert carpeta.exists()
+    assert not temp_ssd.exists()
+
+
+def test_un_album_que_no_entra_en_el_ramdisk_pasa_al_ssd(
+    render_mod, monkeypatch, album_en_el_ramdisk
+):
+    carpeta, temp_ssd = album_en_el_ramdisk
+    resultado, _ = elegir(
+        render_mod, monkeypatch, carpeta,
+        duracion=duracion_de_video_de(render_mod, 30),
+        ramdisk_libre=20 * GIB, mem_available=60 * GIB,
+    )
+    assert resultado == temp_ssd / carpeta.name
+    assert (temp_ssd / carpeta.name / "01 - Tema.flac").exists()
+    assert not carpeta.exists()
+
+
+@pytest.mark.parametrize(
+    "mem_available_vs_necesario, queda_en_ram",
+    [(-MIB, False), (+MIB, True)],
+    ids=["no_alcanza_con_el_margen_va_al_ssd", "alcanza_con_el_margen_queda_en_ram"],
+)
+def test_la_ram_solo_se_usa_si_entra_en_memavailable_menos_el_margen(
+    render_mod, monkeypatch, album_en_el_ramdisk, mem_available_vs_necesario, queda_en_ram
+):
+    # El ramdisk tiene lugar de sobra: lo que decide es la memoria del sistema, para que el
+    # render nunca empuje a la swap (en zram el video no se comprime).
+    carpeta, temp_ssd = album_en_el_ramdisk
+    duracion = duracion_de_video_de(render_mod, 8)
+    estimado = render_mod.estimate_temp_render_bytes(duracion, cpp_pipeline=True)
+    mem_available = estimado + render_mod.RAM_MARGEN_LIBRE_GB * GIB + mem_available_vs_necesario
+    resultado, _ = elegir(
+        render_mod, monkeypatch, carpeta, duracion,
+        ramdisk_libre=20 * GIB, mem_available=mem_available,
+    )
+    assert (resultado == carpeta) is queda_en_ram
+
+
+def test_si_no_se_puede_leer_memavailable_el_album_va_al_ssd(
+    render_mod, monkeypatch, album_en_el_ramdisk
+):
+    # Sin el dato no se puede garantizar que la RAM alcance: el SSD funciona siempre.
+    carpeta, temp_ssd = album_en_el_ramdisk
+    resultado, _ = elegir(
+        render_mod, monkeypatch, carpeta,
+        duracion=duracion_de_video_de(render_mod, 1),
+        ramdisk_libre=20 * GIB, mem_available=None,
+    )
+    assert resultado == temp_ssd / carpeta.name
+
+
+def test_memavailable_se_lee_de_proc_meminfo_en_bytes(render_mod, tmp_path):
+    meminfo = tmp_path / "meminfo"
+    meminfo.write_text(
+        "MemTotal:       65741660 kB\n"
+        "MemFree:         4380000 kB\n"
+        "MemAvailable:   30126168 kB\n"
+        "Buffers:           12345 kB\n",
+        encoding="utf-8",
+    )
+    assert render_mod.read_mem_available_bytes(meminfo) == 30126168 * 1024
+
+
+@pytest.mark.parametrize("contenido", [None, "MemTotal: 65741660 kB\n"], ids=["no_existe", "sin_la_linea"])
+def test_memavailable_ilegible_devuelve_none_y_no_levanta(render_mod, tmp_path, contenido):
+    meminfo = tmp_path / "meminfo"
+    if contenido is not None:
+        meminfo.write_text(contenido, encoding="utf-8")
+    assert render_mod.read_mem_available_bytes(meminfo) is None
 
 
 # ---------------------------------------------------------------------------

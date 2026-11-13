@@ -50,6 +50,10 @@ USE_SSD_TEMP = True  # Copiar a almacenamiento rápido antes de renderizar
 USE_RAMDISK = True  # Usar RAM en lugar de SSD (requiere sudo sin password para mount)
 RAMDISK_SIZE_GB = 20  # Tamaño del ramdisk en GB (soporta videos 4K de hasta ~4 horas)
 RAMDISK_PATH = Path("/mnt/ramdisk_render")  # Punto de montaje del tmpfs
+# Memoria que el render deja libre además de lo que usa: el álbum va a la RAM solo si cabe en
+# MemAvailable menos este margen. Con la swap en zram (swappiness 150) un tmpfs que la rebasa se
+# va a swap y el video no se comprime; el margen cubre también las copias del álbum que sigue.
+RAM_MARGEN_LIBRE_GB = 8
 
 # Staging por lotes en NVMe (desactivado - usamos RAM directamente)
 # Con ramdisk habilitado, el staging en NVMe es redundante.
