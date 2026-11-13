@@ -123,7 +123,8 @@ cannot be emptied is reported once.
 cover) moves the album to `BASE_DIR/Censura/` (`a_censura`, `DIR_CENSURA`) and the next question
 comes right away: the analysis runs apart and holds back nothing. `censurar --intento N` asks the
 local Qwen 3.6 (`MODELO_CENSURA`, ollama at `OLLAMA_HOST` or `localhost:11434`) where a penis,
-testicles, a vulva, an anus or a female nipple are, painted or drawn ones too.
+testicles, a vulva, an anus or a female nipple are, painted or drawn ones too. `OLLAMA_HOST` is read
+as the ollama CLI reads it: with no scheme and no port it goes to port 11434.
 - Attempt 1 sends the whole cover, attempt 2 four overlapping 2×2 pieces (60 % of the side each),
   attempt 3 and later nine 3×3 pieces plus the whole cover. NudeNet found nothing on the two
   painted covers tried on 2026-11-13; Qwen found one of them only in the 2×2 pieces.
@@ -132,23 +133,38 @@ testicles, a vulva, an anus or a female nipple are, painted or drawn ones too.
   through. A new attempt adds its boxes to the earlier ones, so the censorship only grows.
 - The candidate and its boxes live in `data/agente/censura/`: nothing changes inside the album
   folder until Aceptar. An analysis stops after 25 min (`PRESUPUESTO_ANALISIS_S`).
+- A piece whose reply cannot be read does not drop the other pieces' boxes, but it is counted:
+  `censurar` returns `pedazos` and `sin_leer`, and if no piece can be read the attempt fails. A
+  reply with items but no usable box counts as unreadable, not as "nothing to cover"; a bare
+  object (no list around it) counts as one box.
 
 When it ends, the original comes as a photo and then the censored one, with "✅ Aceptar",
 "🔁 Volver a analizar" (the next attempt) and "🗑 Eliminar". With nothing found, the question
-says so and Aceptar keeps the cover as it is. A failed analysis asks with the reason, and there
-"🔁 Volver a analizar" repeats the same attempt. Aceptar (`aceptar_censura`) writes the censored
+says so and Aceptar keeps the cover as it is. With pieces that could not be read, the question adds
+"⚠️ N de M pedazos no se pudieron leer: puede quedar algo sin tapar", and with nothing found it says
+"no encontré nada que tapar en lo que pude leer" instead. A failed analysis asks with the reason,
+and there "🔁 Volver a analizar" repeats the same attempt. When an earlier attempt of that album
+did succeed, and when Aceptar itself fails (a folder with that name in the origin, a rename that
+fails), the question also carries "✅ Aceptar" (`censura_reintentar`): it applies the last
+censorship sent, without running the model again. Aceptar (`aceptar_censura`) writes the censored
 cover as `cover.png`, so `elegir_portada` picks it for the render, the background and the
 thumbnail; the old cover goes to `originales/` under `data/agente/censura/` and is never deleted.
+`aplicada.json` keeps the sha256 of the candidate it applied: a second Aceptar after a failed move
+does not apply that one again, but it does apply a newer candidate from a later analysis, and the
+list of saved originals keeps growing.
 The album then goes back to the folder it came from and joins `aceptados`, as with "Renderizar y
 subir", or `lista` if list mode is on at that moment. Eliminar sends it to the trash, and
 "↩️ Deshacer" puts it back where it was before Censurar, so it is asked again. None of these
 questions holds back the queue, and the steps (`censura` in `servicio.json`) are taken up again
-after a restart.
+after a restart. If the restart comes after `eliminar` moved the album but before the service read
+the result, the service finds its trash entry (`entrada_de_papelera`) and still sends the notice
+with "↩️ Deshacer".
 
 The model takes about 17 GB of VRAM (an ollama model made a render fail on 2026-11-03), so an
 analysis and a render never run together: `renderizar` returns `analisis_en_curso` and `censurar`
-returns `render_en_curso`. The service runs one analysis at a time and waits only for the render
-in progress, not for the whole list; the next render waits for the analysis. The model is
+returns `render_en_curso`. The service runs one analysis at a time, never while another session's
+`censurar` runs (`analisis_en_curso`), and waits only for the render in progress, not for the whole
+list; the next render waits for the analysis. The model is
 unloaded after each analysis, and if it stays loaded the service says so.
 
 ```bash
