@@ -114,6 +114,7 @@ class BaseServicio(unittest.TestCase):
             mock.patch.object(pa, "DIR_RENDERIZANDO", self.renderizando),
             mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "pendientes.json"),
             mock.patch.object(pa, "render_en_curso", return_value=False),
+            mock.patch.object(pa, "analisis_en_curso", return_value=False),
         ]
         for parche in parches:
             parche.start()
@@ -381,7 +382,7 @@ class TestAntesDeRenderizar(BaseServicio):
         self.assertIn("Banda - Disco", mensaje["texto"])
         self.assertEqual(
             [etiqueta for etiqueta, _ in mensaje["botones"]],
-            ["✅ Renderizar y subir", "🗑 Eliminar (ya está publicado)"],
+            ["✅ Renderizar y subir", "🔞 Censurar", "🗑 Eliminar (ya está publicado)"],
         )
         self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"]])
         self.assertEqual(self.lanzador.lanzados("renderizar"), [])
@@ -513,6 +514,462 @@ class TestAntesDeRenderizar(BaseServicio):
         self.assertEqual(self.lanzador.lanzados("buscar"), [["buscar"], ["buscar"]])
 
 
+class TestCensurar(BaseServicio):
+    """El botón «🔞 Censurar»: aparta el álbum, analiza su portada sin frenar las preguntas y pide aprobación."""
+
+    CENSURAR = "🔞 Censurar"
+    ACEPTAR = "✅ Aceptar"
+    VOLVER = "🔁 Volver a analizar"
+    ELIMINAR = "🗑 Eliminar"
+    PAPELERA = "/Papelera/20261113-120000-abc123"
+
+    def etiquetas(self, mensaje):
+        return [etiqueta for etiqueta, _ in mensaje["botones"]]
+
+    def preguntas(self):
+        return [m for m in self.telegram.mensajes if m["botones"]]
+
+    def en_censura(self, nombre="Banda - Disco"):
+        return str(self.tmp / "Censura" / nombre)
+
+    def mandar_a_censura(self, nombre="Banda - Disco"):
+        """Aprieta 🔞 Censurar en la pregunta del álbum y deja `a_censura` terminada."""
+        carpeta, pregunta = self.preguntar_antes_de_renderizar(nombre)
+        self.telegram.apretar(pregunta, self.CENSURAR)
+        self.servicio.paso()
+        (self.tmp / "Censura").mkdir(exist_ok=True)
+        shutil.move(carpeta, self.en_censura(nombre))
+        self.lanzador.terminar(
+            "a_censura", {"ok": True, "album": nombre, "carpeta": self.en_censura(nombre)}
+        )
+        self.servicio.paso()
+        return carpeta
+
+    def resultado_del_analisis(self, nombre="Banda - Disco", intento=1, **cambios):
+        resultado = {
+            "ok": True, "album": nombre, "intento": intento, "encontradas": ["pene"], "nuevas": 1,
+            "zonas": 1, "original": str(self.tmp / "vista_original.jpg"),
+            "censurada": str(self.tmp / "vista_censurada.jpg"), "descargado": True,
+        }
+        resultado.update(cambios)
+        return resultado
+
+    def analizado(self, nombre="Banda - Disco", intento=1, **cambios):
+        """Termina el análisis en curso y devuelve la pregunta que llega."""
+        self.lanzador.terminar("censurar", self.resultado_del_analisis(nombre, intento, **cambios))
+        self.servicio.paso()
+        return self.ultima_pregunta()
+
+    def censurado(self, nombre="Banda - Disco"):
+        self.mandar_a_censura(nombre)
+        return self.analizado(nombre)
+
+    def aceptado_de_vuelta(self, nombre="Banda - Disco"):
+        """Termina `aceptar_censura`: el álbum vuelve a la cola con su portada censurada."""
+        shutil.move(self.en_censura(nombre), self.cola / nombre)
+        self.lanzador.terminar(
+            "aceptar_censura", {"ok": True, "album": nombre, "carpeta": str(self.cola / nombre)}
+        )
+        self.servicio.paso()
+
+    # -- S1: apartar y seguir ----------------------------------------------------
+
+    def test_censurar_aparta_el_album_y_la_pregunta_siguiente_no_espera_al_analisis(self):
+        # Defecto: la pregunta siguiente esperaba a que terminara el análisis, que tarda minutos.
+        self.album_en_cola("Banda - Siguiente")
+        carpeta, pregunta = self.preguntar_antes_de_renderizar()
+
+        self.telegram.apretar(pregunta, self.CENSURAR)
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("a_censura"), [["a_censura", "--carpeta", carpeta]])
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [])
+        self.assertEqual(self.lanzador.lanzados("eliminar"), [])
+        # Mientras el álbum no se haya movido, buscar volvería a elegirlo: espera.
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("buscar")), 1)
+
+        shutil.move(carpeta, self.tmp / "Banda - Disco")
+        self.lanzador.terminar("a_censura", {"ok": True, "album": "Banda - Disco", "carpeta": self.en_censura()})
+        self.servicio.paso()
+
+        self.assertEqual(
+            self.lanzador.lanzados("censurar"),
+            [["censurar", "--carpeta", self.en_censura(), "--intento", "1"]],
+        )
+        # El análisis sigue corriendo y el próximo álbum ya se está buscando.
+        self.assertEqual(len(self.lanzador.lanzados("buscar")), 2)
+
+    def test_censurar_en_modo_lista_tampoco_suma_el_album_a_la_lista(self):
+        # Defecto: tratar Censurar como ➕ dejaba el álbum en la lista sin censura y lo renderizaba.
+        escribir_en(self.telegram, "/crear_lista")
+        self.mandar_a_censura()
+        self.album_en_cola("Banda - Siguiente")
+        self.servicio.paso()
+
+        self.assertEqual(self.servicio.estado["lista"], [])
+        self.assertEqual(self.lanzador.lanzados("buscar")[-1], ["buscar"])
+
+    def test_si_a_censura_falla_avisa_y_no_analiza(self):
+        # Defecto: lanzar el análisis sobre un álbum que no se pudo apartar.
+        carpeta, pregunta = self.preguntar_antes_de_renderizar()
+        self.telegram.apretar(pregunta, self.CENSURAR)
+        self.servicio.paso()
+        self.lanzador.terminar("a_censura", {"ok": False, "motivo": "ya_existe"})
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("censurar"), [])
+        aviso = self.telegram.mensajes[-1]["texto"]
+        self.assertIn("No pude apartar Banda - Disco", aviso)
+        self.assertEqual(self.servicio.estado["censura"], {})
+
+    # -- S2 y S8: el resultado ---------------------------------------------------
+
+    def test_al_terminar_manda_primero_la_original_y_despues_la_censurada_con_los_botones(self):
+        # Defecto: Telegram no admite botones en un grupo de fotos; sin dos mensajes no se podría
+        # comparar ni contestar.
+        self.mandar_a_censura()
+
+        self.analizado()
+
+        original, censurada = self.telegram.mensajes[-2:]
+        self.assertEqual(original["foto"], str(self.tmp / "vista_original.jpg"))
+        self.assertEqual(original["botones"], [])
+        self.assertIn("Banda - Disco", original["texto"])
+        self.assertEqual(censurada["foto"], str(self.tmp / "vista_censurada.jpg"))
+        self.assertEqual(self.etiquetas(censurada), [self.ACEPTAR, self.VOLVER, self.ELIMINAR])
+        self.assertIn("Banda - Disco", censurada["texto"])
+        self.assertIn("intento 1", censurada["texto"])
+        self.assertIn("pene", censurada["texto"])
+
+    def test_la_pregunta_del_resultado_sobrevive_un_reinicio(self):
+        # Defecto: perder la pregunta (y con ella el álbum en Censura/) en un reinicio.
+        self.mandar_a_censura()
+        pregunta = self.analizado()
+
+        self.lanzador = LanzadorFalso()
+        self.servicio = self.nuevo_servicio()
+        self.servicio.paso()
+        self.assertEqual(len(self.preguntas()), 2)
+        self.assertEqual(self.lanzador.lanzados("censurar"), [])
+        self.telegram.apretar(pregunta, self.ACEPTAR)
+        self.servicio.paso()
+
+        self.assertEqual(
+            self.lanzador.lanzados("aceptar_censura"), [["aceptar_censura", "--carpeta", self.en_censura()]]
+        )
+
+    def test_la_pregunta_del_resultado_no_frena_al_siguiente_album(self):
+        # Defecto: dejar la aprobación de la censura sin contestar frenaba toda la cola.
+        self.mandar_a_censura()
+        self.album_en_cola("Banda - Siguiente")
+        self.analizado()
+        self.servicio.paso()
+
+        self.assertEqual(len(self.lanzador.lanzados("buscar")), 2)
+
+    def test_volver_a_analizar_cierra_la_pregunta_y_pone_en_cola_el_intento_siguiente(self):
+        # Defecto: repetir el mismo intento mira igual que antes y no encuentra nada nuevo.
+        self.mandar_a_censura()
+        pregunta = self.analizado()
+
+        self.telegram.apretar(pregunta, self.VOLVER)
+        self.servicio.paso()
+
+        self.assertEqual(self.telegram.sin_botones[-1], self.telegram.mensajes.index(pregunta) + 1)
+        self.assertEqual(
+            self.lanzador.lanzados("censurar")[-1], ["censurar", "--carpeta", self.en_censura(), "--intento", "2"]
+        )
+
+    def test_sin_nada_que_tapar_lo_dice_con_el_intento_y_aceptar_deja_la_portada_como_esta(self):
+        # Defecto: mandar la misma imagen dos veces sin decir que no se encontró nada.
+        self.mandar_a_censura()
+
+        pregunta = self.analizado(encontradas=[], nuevas=0, zonas=0, censurada=None)
+
+        self.assertEqual(self.telegram.mensajes[-1], pregunta)
+        self.assertEqual(self.etiquetas(pregunta), [self.ACEPTAR, self.VOLVER, self.ELIMINAR])
+        self.assertIn("intento 1", pregunta["texto"])
+        self.assertIn("no se encontró nada", pregunta["texto"])
+        self.assertEqual(pregunta["foto"], str(self.tmp / "vista_original.jpg"))
+
+    def test_un_intento_sin_cajas_nuevas_dice_que_sigue_la_censura_de_los_anteriores(self):
+        self.mandar_a_censura()
+        pregunta = self.analizado(intento=2, encontradas=[], nuevas=0, zonas=2)
+
+        self.assertIn("intento 2", pregunta["texto"])
+        self.assertIn("anteriores", pregunta["texto"])
+
+    def test_si_el_analisis_falla_dice_por_que_y_deja_volver_a_analizar_o_eliminar(self):
+        # Defecto: un fallo silencioso deja el álbum en Censura/ sin que nadie sepa que hay que actuar.
+        self.mandar_a_censura()
+        self.lanzador.terminar(
+            "censurar", {"ok": False, "motivo": "ollama_caido", "detalle": "Ollama no responde", "intento": 1,
+                         "descargado": True}
+        )
+        self.servicio.paso()
+
+        pregunta = self.ultima_pregunta()
+        self.assertEqual(self.etiquetas(pregunta), [self.VOLVER, self.ELIMINAR])
+        self.assertIn("Banda - Disco", pregunta["texto"])
+        self.assertIn("Ollama no responde", pregunta["texto"])
+        self.assertEqual(self.lanzador.lanzados("eliminar"), [])
+
+        self.telegram.apretar(pregunta, self.VOLVER)
+        self.servicio.paso()
+        # Un intento que falló no cuenta: se repite el mismo, no se salta al siguiente.
+        self.assertEqual(
+            self.lanzador.lanzados("censurar")[-1], ["censurar", "--carpeta", self.en_censura(), "--intento", "1"]
+        )
+
+    def test_un_paso_cortado_por_tiempo_tambien_pregunta_en_vez_de_quedarse_callado(self):
+        self.mandar_a_censura()
+        self.lanzador.terminar("censurar", {"ok": False, "motivo": "tiempo_agotado", "log": "/x.log"})
+        self.servicio.paso()
+
+        self.assertEqual(self.etiquetas(self.ultima_pregunta()), [self.VOLVER, self.ELIMINAR])
+        self.assertIn("tardó demasiado", self.ultima_pregunta()["texto"])
+
+    def test_si_el_modelo_sigue_en_la_gpu_lo_avisa(self):
+        # Defecto: callar que Qwen sigue ocupando 17 GB; el render siguiente falla por memoria.
+        self.mandar_a_censura()
+
+        self.analizado(descargado=False)
+
+        aviso = next(m for m in self.telegram.mensajes if "GPU" in m["texto"])
+        self.assertIn("Banda - Disco", aviso["texto"])
+
+    # -- S6: Aceptar -------------------------------------------------------------
+
+    def test_aceptar_aplica_la_censura_y_despues_renderiza_como_renderizar_y_subir(self):
+        # Defecto: renderizar con la portada sin censurar (antes de que el paso la cambie).
+        self.mandar_a_censura()
+        pregunta = self.analizado()
+
+        self.telegram.apretar(pregunta, self.ACEPTAR)
+        self.servicio.paso()
+
+        self.assertEqual(
+            self.lanzador.lanzados("aceptar_censura"), [["aceptar_censura", "--carpeta", self.en_censura()]]
+        )
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [])
+
+        self.aceptado_de_vuelta()
+
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [["renderizar", "--carpeta", "Banda - Disco"]])
+        self.assertEqual(self.servicio.estado["aceptados"], ["Banda - Disco"])
+        self.assertEqual(self.servicio.estado["censura"], {})
+
+    def test_aceptar_en_modo_lista_suma_el_album_a_la_lista_sin_renderizar(self):
+        # Defecto: renderizar enseguida en modo lista rompe lo que el usuario pidió: juntar y renderizar todo junto.
+        escribir_en(self.telegram, "/crear_lista")
+        self.mandar_a_censura()
+        pregunta = self.analizado()
+        self.telegram.apretar(pregunta, self.ACEPTAR)
+        self.servicio.paso()
+
+        self.aceptado_de_vuelta()
+
+        self.assertEqual(self.servicio.estado["lista"], ["Banda - Disco"])
+        self.assertEqual(self.servicio.estado["aceptados"], [])
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [])
+
+    def test_si_aceptar_no_puede_devolver_el_album_lo_dice_y_deja_volver_a_analizar_o_eliminar(self):
+        # Defecto: el álbum quedaba en Censura/ sin pregunta abierta y nadie se enteraba.
+        self.mandar_a_censura()
+        pregunta = self.analizado()
+        self.telegram.apretar(pregunta, self.ACEPTAR)
+        self.servicio.paso()
+
+        self.lanzador.terminar("aceptar_censura", {"ok": False, "motivo": "ya_existe", "album": "Banda - Disco"})
+        self.servicio.paso()
+
+        fallo = self.ultima_pregunta()
+        self.assertEqual(self.etiquetas(fallo), [self.VOLVER, self.ELIMINAR])
+        self.assertIn("ya hay una carpeta", fallo["texto"])
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [])
+
+    # -- S7: Eliminar y Deshacer -------------------------------------------------
+
+    def test_eliminar_manda_el_album_a_la_papelera_y_deshacer_lo_devuelve_a_su_origen(self):
+        # Defecto: sin Deshacer, un toque de más pierde el álbum; y avisar «ya estaba publicado»
+        # cuando fue por no poder censurarlo.
+        self.mandar_a_censura()
+        pregunta = self.analizado()
+
+        self.telegram.apretar(pregunta, self.ELIMINAR)
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("eliminar"), [["eliminar", "--carpeta", self.en_censura()]])
+        self.lanzador.terminar("eliminar", {"ok": True, "album": "Banda - Disco", "papelera": self.PAPELERA})
+        self.servicio.paso()
+
+        aviso = self.ultima_pregunta()
+        self.assertIn("Borré Banda - Disco", aviso["texto"])
+        self.assertNotIn("ya estaba publicado", aviso["texto"])
+        self.assertEqual(self.etiquetas(aviso), ["↩️ Deshacer"])
+        self.assertEqual(self.servicio.estado["censura"], {})
+
+        self.telegram.apretar(aviso, "↩️ Deshacer")
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("restaurar"), [["restaurar", "--papelera", self.PAPELERA]])
+
+    def test_eliminar_desde_un_fallo_tambien_lleva_el_album_a_la_papelera(self):
+        self.mandar_a_censura()
+        self.lanzador.terminar("censurar", {"ok": False, "motivo": "respuesta_invalida", "intento": 1})
+        self.servicio.paso()
+
+        self.telegram.apretar(self.ultima_pregunta(), self.ELIMINAR)
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("eliminar"), [["eliminar", "--carpeta", self.en_censura()]])
+
+    # -- S5: la GPU --------------------------------------------------------------
+
+    def test_un_analisis_no_arranca_mientras_corre_un_render_de_otra_sesion(self):
+        # Defecto: Qwen (17 GB) y el render pidiendo la GPU a la vez; el render falló así el 2026-11-03.
+        _, pregunta = self.preguntar_antes_de_renderizar()
+        self.telegram.apretar(pregunta, self.CENSURAR)
+        self.servicio.paso()
+        pa.render_en_curso.return_value = True
+        self.lanzador.terminar("a_censura", {"ok": True, "album": "Banda - Disco", "carpeta": self.en_censura()})
+        self.servicio.paso()
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("censurar"), [])
+
+        pa.render_en_curso.return_value = False
+        self.servicio.paso()
+
+        self.assertEqual(len(self.lanzador.lanzados("censurar")), 1)
+
+    def test_un_analisis_espera_al_render_del_servicio_y_no_a_que_termine_la_lista(self):
+        # Defecto: esperar a que termine toda la lista (horas) o arrancar en medio de un render.
+        self.mandar_a_censura("Banda X - Censurado")
+        pregunta = self.analizado("Banda X - Censurado")
+        escribir_en(self.telegram, "/crear_lista")
+        for nombre in ("Banda A - Uno", "Banda B - Dos"):
+            _, p = self.preguntar_antes_de_renderizar(nombre)
+            self.telegram.apretar(p, "➕ A la lista")
+            self.servicio.paso()
+        _, ultima = self.preguntar_antes_de_renderizar("Banda C - Tres")
+        self.telegram.apretar(ultima, "▶️ Renderizar la lista (2)")
+        self.servicio.paso()
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [["renderizar", "--carpeta", "Banda A - Uno"]])
+
+        # «Volver a analizar» con el render de la lista corriendo: el análisis queda en cola.
+        self.telegram.apretar(pregunta, self.VOLVER)
+        self.servicio.paso()
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("censurar")), 1)
+
+        # Cuando termina ESE render, el análisis entra antes que el render siguiente de la lista.
+        carpeta = self.album_renderizado("Banda A - Uno")
+        shutil.rmtree(self.cola / "Banda A - Uno")
+        self.lanzador.terminar("renderizar", {"ok": True, "album": "Banda A - Uno", "carpeta": carpeta})
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("censurar")), 2)
+        self.lanzador.terminar("verificar", self.verificado("Banda A - Uno"))
+        self.servicio.paso()
+        shutil.rmtree(carpeta)
+        self.lanzador.terminar("subir", {"ok": True, "video_id": "V1", "titulo": "A", "carpeta_borrada": True})
+        self.servicio.paso()
+        # ...y el render siguiente espera a que el análisis termine.
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 1)
+
+        self.lanzador.terminar("censurar", self.resultado_del_analisis("Banda X - Censurado", 2))
+        self.servicio.paso()
+        self.assertEqual(
+            self.lanzador.lanzados("renderizar"),
+            [["renderizar", "--carpeta", "Banda A - Uno"], ["renderizar", "--carpeta", "Banda B - Dos"]],
+        )
+
+    def test_un_render_no_arranca_mientras_corre_un_analisis(self):
+        # Defecto: apretar «Renderizar y subir» con el análisis en marcha lanzaba el render encima.
+        self.mandar_a_censura()
+        self.album_en_cola("Banda - Siguiente")
+        self.servicio.paso()
+        self.lanzador.terminar(
+            "buscar",
+            {"ok": True, "album": "Banda - Siguiente", "carpeta": str(self.cola / "Banda - Siguiente"),
+             "portada": None, "captura_busqueda": None, "busqueda": None, "ya_publicados": []},
+        )
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("censurar")), 1)
+
+        self.telegram.apretar(self.ultima_pregunta(), "✅ Renderizar y subir")
+        self.servicio.paso()
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [])
+
+        self.analizado()
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [["renderizar", "--carpeta", "Banda - Siguiente"]])
+
+    def test_un_analisis_de_otra_sesion_tambien_frena_el_render(self):
+        # Defecto: el servicio solo conocía sus propios análisis.
+        _, pregunta = self.preguntar_antes_de_renderizar()
+        pa.analisis_en_curso.return_value = True
+
+        self.telegram.apretar(pregunta, "✅ Renderizar y subir")
+        self.servicio.paso()
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [])
+
+        pa.analisis_en_curso.return_value = False
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("renderizar"), [["renderizar", "--carpeta", "Banda - Disco"]])
+
+    def test_si_el_paso_se_topa_con_un_render_el_analisis_queda_en_cola_sin_avisar(self):
+        # Defecto: preguntar «¿reintento?» por algo que se resuelve solo cuando termine el render.
+        self.mandar_a_censura()
+        avisos = len(self.telegram.mensajes)
+
+        self.lanzador.terminar("censurar", {"ok": False, "motivo": "render_en_curso"})
+        self.servicio.paso()
+        self.assertEqual(len(self.telegram.mensajes), avisos)
+        self.servicio.paso()
+
+        self.assertEqual(len(self.lanzador.lanzados("censurar")), 2)
+
+    def test_un_reinicio_a_mitad_del_analisis_lo_vuelve_a_lanzar(self):
+        # Defecto: perder el análisis y dejar el álbum en Censura/ sin que nadie lo vuelva a mirar.
+        self.mandar_a_censura()
+
+        self.lanzador = LanzadorFalso()
+        self.servicio = self.nuevo_servicio()
+        self.servicio.paso()
+
+        self.assertEqual(
+            self.lanzador.lanzados("censurar"), [["censurar", "--carpeta", self.en_censura(), "--intento", "1"]]
+        )
+
+    def test_un_reinicio_antes_de_apartar_o_de_aceptar_retoma_ese_paso(self):
+        # Defecto: un reinicio entre el botón y el paso dejaba el álbum a medio camino, sin pregunta.
+        carpeta, pregunta = self.preguntar_antes_de_renderizar()
+        self.telegram.apretar(pregunta, self.CENSURAR)
+        self.servicio.paso()
+        self.lanzador = LanzadorFalso()
+        self.servicio = self.nuevo_servicio()
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("a_censura"), [["a_censura", "--carpeta", carpeta]])
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("a_censura")), 1)
+
+        self.lanzador.terminar("a_censura", {"ok": True, "album": "Banda - Disco", "carpeta": self.en_censura()})
+        self.servicio.paso()
+        pregunta = self.analizado()
+        self.telegram.apretar(pregunta, self.ACEPTAR)
+        self.servicio.paso()
+        self.lanzador = LanzadorFalso()
+        self.servicio = self.nuevo_servicio()
+        self.servicio.paso()
+        self.assertEqual(
+            self.lanzador.lanzados("aceptar_censura"), [["aceptar_censura", "--carpeta", self.en_censura()]]
+        )
+
+
 class TestAleatorio(BaseServicio):
     """/aleatorio prende y apaga la elección al azar del próximo álbum."""
 
@@ -585,7 +1042,7 @@ class TestCrearLista(BaseServicio):
         )
         self.assertEqual(
             self.etiquetas(pregunta),
-            ["➕ A la lista", "🗑 Eliminar (ya está publicado)", "▶️ Renderizar la lista (2)"],
+            ["➕ A la lista", "🔞 Censurar", "🗑 Eliminar (ya está publicado)", "▶️ Renderizar la lista (2)"],
         )
 
     def test_renderizar_la_lista_sube_todo_sin_preguntar_y_despues_vuelve_al_de_la_pantalla(self):
@@ -610,7 +1067,8 @@ class TestCrearLista(BaseServicio):
         self.assertEqual(len(con_botones), preguntas_antes + 1)
         self.assertIn("Banda C - Tres", con_botones[-1]["texto"])
         self.assertEqual(
-            self.etiquetas(con_botones[-1]), ["✅ Renderizar y subir", "🗑 Eliminar (ya está publicado)"]
+            self.etiquetas(con_botones[-1]),
+            ["✅ Renderizar y subir", "🔞 Censurar", "🗑 Eliminar (ya está publicado)"],
         )
         # Pasaron horas: la búsqueda vuelve a llegar antes de la pregunta.
         self.assertEqual(self.telegram.mensajes[-2]["foto"], str(self.tmp / "busqueda.png"))

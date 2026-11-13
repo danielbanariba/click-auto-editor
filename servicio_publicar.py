@@ -66,17 +66,28 @@ SIN_CONFIGURACION = 78  # EX_CONFIG: el unit de systemd no reinicia con este có
 
 # Filas de botones. Eliminar va en su propia fila, lejos de Subir, para no apretarlo sin querer.
 BOTONES = {
+    # 🔞 Censurar aparta el álbum en Censura/ y analiza su portada sin frenar las preguntas.
     "renderizar": [
         [("✅ Renderizar y subir", "renderizar")],
+        [("🔞 Censurar", "censurar")],
         [("🗑 Eliminar (ya está publicado)", "eliminar")],
     ],
     # La del modo lista: ➕ guarda el álbum sin renderizarlo y ▶️ renderiza la lista entera.
     # {n} es cuántos álbumes hay en la lista.
     "lista": [
         [("➕ A la lista", "a_la_lista")],
+        [("🔞 Censurar", "censurar")],
         [("🗑 Eliminar (ya está publicado)", "eliminar")],
         [("▶️ Renderizar la lista ({n})", "renderizar_lista")],
     ],
+    # El resultado del análisis de una portada: la censurada (la original va antes, sin botones).
+    "censura": [
+        [("✅ Aceptar", "aceptar")],
+        [("🔁 Volver a analizar", "volver_a_analizar")],
+        [("🗑 Eliminar", "eliminar")],
+    ],
+    # El análisis o el Aceptar fallaron: el álbum sigue en Censura/.
+    "censura_fallida": [[("🔁 Volver a analizar", "volver_a_analizar")], [("🗑 Eliminar", "eliminar")]],
     # No quedan álbumes para sumar: solo queda renderizar la lista.
     "fin_lista": [[("▶️ Renderizar la lista ({n})", "renderizar_lista")]],
     "subir": [
@@ -116,6 +127,9 @@ AVISO_BOTON = {
     "renderizar": "Lo renderizo y lo subo",
     "a_la_lista": "Va a la lista",
     "renderizar_lista": "Renderizo la lista",
+    "censurar": "Analizo la portada; te aviso cuando esté",
+    "aceptar": "Pongo la portada censurada",
+    "volver_a_analizar": "La vuelvo a analizar",
     "subir": "Subiendo…",
     "rechazar": "No lo subo",
     "eliminar": "Borrando…",
@@ -140,7 +154,9 @@ COMANDOS = [
 # Mientras haya una de estas preguntas abiertas no se renderiza otro álbum.
 # "reprogramar" no frena: el video ya está subido y no depende del render.
 PREGUNTAS_QUE_FRENAN = ("renderizar", "subir", "reintentar", "lista", "fin_lista")
-PASOS_DEL_ALBUM = ("buscar", "renderizar", "verificar", "subir", "eliminar")
+# `a_censura` y `aceptar_censura` mueven el álbum entre su carpeta de origen y Censura/: mientras
+# corren, `buscar` podría volver a elegirlo. `censurar` no está: el análisis no frena las preguntas.
+PASOS_DEL_ALBUM = ("buscar", "renderizar", "verificar", "subir", "eliminar", "a_censura", "aceptar_censura")
 # Tiempo máximo de cada paso. Los cortables son idempotentes; los demás mueven o
 # borran carpetas y cortarlos a medias dejaría un álbum a medio mover: solo se avisa.
 LIMITE_PASO_S = 30 * 60  # verificar, eliminar y cualquier paso que no esté abajo
@@ -156,11 +172,24 @@ LIMITES_PASO_S = {
     # Cada reclamo espera hasta 10 min a que pases la verificación. Manda declaraciones
     # legales: no se corta, solo se avisa.
     "impugnar_con_ventana": 4 * 3600,
+    # El análisis de una portada se corta solo a los 25 min; esto es por si ollama se cuelga.
+    "censurar": 40 * 60,
 }
 # `apelar` anota cada video antes de pulsar el envío: cortarlo nunca hace que se repita uno.
 # `seguir_impugnaciones` y `mapear_canal` solo leen Studio. `buscar` aparta los publicados con
-# un rename, que no queda a medias.
-PASOS_CORTABLES = ("buscar", "verificar", "programar", "apelar", "seguir_impugnaciones", "mapear_canal")
+# un rename, que no queda a medias. `censurar` solo lee la portada y escribe la candidata fuera
+# del álbum.
+PASOS_CORTABLES = (
+    "buscar", "verificar", "programar", "apelar", "seguir_impugnaciones", "mapear_canal", "censurar",
+)
+# Lo que se le dice al usuario cuando el análisis de una portada o su Aceptar fallan; el resto
+# muestra el detalle que trae el paso.
+MOTIVOS_CENSURA = {
+    "tiempo_agotado": "el análisis tardó demasiado y lo corté",
+    "sin_portada": "el álbum no tiene portada",
+    "ya_existe": "ya hay una carpeta con ese nombre donde estaba y no la piso",
+    "sin_analisis": "no hay un análisis terminado",
+}
 # Frenan el lote de «Impugnar todos»: con ellos, los demás videos fallarían igual.
 FRENAN_EL_LOTE = ("verificacion_de_identidad", "sin_sesion_en_studio", "canal_no_disponible")
 # Lo que acompaña al botón «🖥 Impugnar con ventana».
@@ -474,10 +503,13 @@ class Servicio:
         # impugnaciones.json que Telegram todavía no recibió: [{"texto", "intentos"}].
         # ventanas_en_curso: los videos (video_id, titulo) de las ventanas de «Impugnar con
         # ventana» lanzadas y sin terminar: si el servicio se reinicia, la ventana muere con él.
+        # censura: los álbumes del botón «🔞 Censurar», por nombre: {"paso", "carpeta", "intento"}.
+        # paso es lo que les toca: a_censura (apartarlo), censurar (analizar, cuando la GPU esté
+        # libre), pregunta (esperan la respuesta), aceptar_censura o eliminar.
         self.estado = {
             "offset": 0, "preguntas": {}, "rechazados": [], "subidos": [], "aceptados": [],
             "aleatorio": False, "modo_lista": False, "lista": [], "despues_de_lista": None,
-            "lote_impugnar": None, "avisos_pendientes": [], "ventanas_en_curso": [],
+            "lote_impugnar": None, "avisos_pendientes": [], "ventanas_en_curso": [], "censura": {},
         }
         self.tareas = []
         self.inicios = {}  # proceso -> momento en que se lanzó
@@ -542,6 +574,7 @@ class Servicio:
         self.revisar_reintentos()
         self.revisar_apelaciones()
         self.revisar_papelera()
+        self.revisar_censura()
         self.enviar_preguntas()
         self.enviar_avisos_pendientes()
         self.avanzar_album()
@@ -612,6 +645,33 @@ class Servicio:
         self.papelera_revisada = self.ahora()
         self.lanzar_paso("vaciar_papelera")
 
+    def analisis_activo(self):
+        """El modelo que analiza portadas ocupa la GPU (unos 17 GB): ningún render arranca encima."""
+        return any(argumentos[0] == "censurar" for argumentos, _ in self.tareas) or pa.analisis_en_curso()
+
+    def revisar_censura(self):
+        """Retoma los pasos de los álbumes de «🔞 Censurar» (también después de un reinicio) y
+        lanza el análisis siguiente cuando la GPU está libre: de a uno y nunca durante un render.
+        Espera solo al render en curso, no a toda la lista: el render siguiente espera al análisis."""
+        corriendo = {(a[0], valor(a, "--carpeta")) for a, _ in self.tareas if "--carpeta" in a}
+        for nombre, entrada in list(self.estado["censura"].items()):
+            paso, carpeta = entrada["paso"], entrada["carpeta"]
+            if paso not in ("a_censura", "aceptar_censura", "eliminar") or (paso, carpeta) in corriendo:
+                continue
+            if paso == "eliminar" and not Path(carpeta).is_dir():
+                # El servicio se reinició cuando la carpeta ya estaba en la papelera.
+                log.info("%s ya no está en Censura/: lo doy por borrado", nombre)
+                del self.estado["censura"][nombre]
+                self.guardar()
+                continue
+            self.lanzar_paso(paso, "--carpeta", carpeta)
+        pendiente = next((e for e in self.estado["censura"].values() if e["paso"] == "censurar"), None)
+        if pendiente is None or any(a[0] in ("censurar", "renderizar") for a, _ in self.tareas):
+            return
+        if pa.render_en_curso():
+            return
+        self.lanzar_paso("censurar", "--carpeta", pendiente["carpeta"], "--intento", str(pendiente["intento"]))
+
     def tras_vaciar_papelera(self, resultado, argumentos):
         """Lo que se vació ya no se puede deshacer: su aviso pierde el botón."""
         vaciadas = set(resultado.get("vaciadas") or [])
@@ -655,7 +715,9 @@ class Servicio:
         # (por ejemplo, después de un reinicio a mitad del render).
         for nombre in list(self.estado["aceptados"]):
             if any((origen / nombre).is_dir() for origen in pa.DIRS_ORIGEN_RENDER):
-                self.lanzar_paso("renderizar", "--carpeta", nombre)
+                # El modelo que analiza portadas ocupa la GPU: el render espera a que termine.
+                if not self.analisis_activo():
+                    self.lanzar_paso("renderizar", "--carpeta", nombre)
                 return
             # Ya no está: el render lo movió a Error404 o alguien lo sacó de la carpeta.
             self.estado["aceptados"].remove(nombre)
@@ -744,7 +806,7 @@ class Servicio:
                     self.estado[lista].remove(nombre)
             self.guardar()
             self.lanzar_paso("verificar", "--carpeta", resultado["carpeta"])
-        elif motivo in ("sin_albumes", "render_en_curso"):
+        elif motivo in ("sin_albumes", "render_en_curso", "analisis_en_curso"):
             return
         elif motivo == "album_no_encontrado":
             self.avisar(f"⚠️ No encontré {resultado.get('album')} en {carpetas_de_origen()}; sigo con el próximo.")
@@ -845,14 +907,29 @@ class Servicio:
 
     def tras_eliminar(self, resultado, argumentos):
         album = Path(valor(argumentos, "--carpeta")).name
+        entrada = self.estado["censura"].get(album)
+        de_censura = entrada is not None and entrada["paso"] == "eliminar"
         if resultado.get("ok"):
+            if de_censura:
+                # Deshacer lo devuelve a donde estaba antes de Censurar: se vuelve a preguntar.
+                del self.estado["censura"][album]
+                texto = f"🗑 Borré {album}, que estaba en Censura/."
+            else:
+                texto = f"🗑 Borré {album}: ya estaba publicado. Sigo con el próximo."
             # No frena al próximo álbum: queda abierta hasta que se aprieta o se vacía la papelera.
             self.preguntar(
                 "deshacer",
-                f"🗑 Borré {album}: ya estaba publicado. Sigo con el próximo.\n\n"
-                "Queda 24 h en la papelera: ↩️ Deshacer lo devuelve a su carpeta.",
+                f"{texto}\n\nQueda 24 h en la papelera: ↩️ Deshacer lo devuelve a su carpeta.",
                 papelera=resultado["papelera"],
                 album=album,
+            )
+            return
+        if de_censura:
+            entrada["paso"] = "pregunta"
+            self.preguntar(
+                "censura_fallida",
+                f"❌ No pude borrar {album} ({resultado.get('motivo')}). Sigue en Censura/.",
+                album=album, carpeta=entrada["carpeta"], intento=entrada["intento"],
             )
             return
         # Que no se vuelva a ofrecer: la carpeta sigue ahí y el usuario ya decidió.
@@ -861,6 +938,111 @@ class Servicio:
         self.avisar(
             f"❌ No pude borrar {album} ({resultado.get('motivo')}). "
             f"Quedó en {Path(valor(argumentos, '--carpeta')).parent.name}/."
+        )
+
+    def tras_a_censura(self, resultado, argumentos):
+        origen = valor(argumentos, "--carpeta")
+        album = resultado.get("album") or Path(origen).name
+        if resultado.get("ok"):
+            # El análisis queda en cola: revisar_censura lo lanza cuando la GPU esté libre.
+            self.estado["censura"][album] = {"paso": "censurar", "carpeta": resultado["carpeta"], "intento": 1}
+            self.guardar()
+            return
+        self.estado["censura"].pop(album, None)
+        self.guardar()
+        motivo = resultado.get("motivo")
+        self.avisar(
+            f"❌ No pude apartar {album} para censurar su portada "
+            f"({MOTIVOS_CENSURA.get(motivo) or resultado.get('detalle') or motivo})."
+        )
+
+    def tras_censurar(self, resultado, argumentos):
+        carpeta = valor(argumentos, "--carpeta")
+        album = Path(carpeta).name
+        entrada = self.estado["censura"].get(album)
+        if entrada is None:
+            log.warning("Terminó el análisis de %s, que ya no está en el estado", album)
+            return
+        motivo = resultado.get("motivo")
+        if motivo == "render_en_curso":
+            # Se resuelve solo cuando termine el render: el análisis sigue en cola.
+            return
+        if resultado.get("descargado") is False:
+            self.avisar(
+                f"⚠️ El modelo que analizó la portada de {album} sigue cargado en la GPU. Un render "
+                "ahora puede fallar por falta de memoria: revisá `ollama ps`."
+            )
+        intento = resultado.get("intento") or int(valor(argumentos, "--intento"))
+        entrada["paso"] = "pregunta"
+        if resultado.get("ok"):
+            self.preguntar_por_censura(album, carpeta, intento, resultado)
+            return
+        causa = MOTIVOS_CENSURA.get(motivo) or resultado.get("detalle") or motivo
+        texto = f"❌ No pude analizar la portada de {album} (intento {intento}): {causa}."
+        if resultado.get("log"):
+            texto += f"\nLog: {resultado['log']}"
+        self.preguntar(
+            "censura_fallida",
+            f"{texto}\n\nSigue en Censura/. 🔁 Volver a analizar repite el intento.",
+            album=album, carpeta=carpeta, intento=intento,
+        )
+
+    def preguntar_por_censura(self, album, carpeta, intento, resultado):
+        """La original va antes, sin botones (Telegram no admite botones en un grupo de fotos), y
+        la censurada después, con la pregunta."""
+        zonas, nuevas = resultado.get("zonas") or 0, resultado.get("nuevas") or 0
+        cuantas = f"{zonas} zona" if zonas == 1 else f"{zonas} zonas"
+        if not zonas:
+            texto = (
+                f"🔞 {album}, intento {intento}: no se encontró nada que tapar.\n\n"
+                "✅ Aceptar deja la portada como está."
+            )
+        elif not nuevas:
+            texto = (
+                f"🔞 {album}, intento {intento}: no encontré nada nuevo; sigue la censura de los "
+                f"intentos anteriores ({cuantas})."
+            )
+        else:
+            tapado = ", ".join(dict.fromkeys(resultado.get("encontradas") or [])) or "lo que encontré"
+            texto = f"🔞 {album}, intento {intento}: tapé {tapado} ({cuantas} en total)."
+        censurada = resultado.get("censurada")
+        previas = []
+        if censurada:
+            texto += " Arriba está la original."
+            previas = [{"texto": f"🖼 {album}: la portada original.", "foto": resultado["original"], "enviada": False}]
+        self.preguntar(
+            "censura",
+            f"{texto}\n\n🔁 Volver a analizar busca con más detalle.",
+            foto=censurada or resultado.get("original"),
+            previas=previas, album=album, carpeta=carpeta, intento=intento,
+        )
+
+    def tras_aceptar_censura(self, resultado, argumentos):
+        carpeta = valor(argumentos, "--carpeta")
+        album = Path(carpeta).name
+        entrada = self.estado["censura"].pop(album, None) or {"carpeta": carpeta, "intento": 1}
+        if resultado.get("ok"):
+            nombre = Path(resultado["carpeta"]).name
+            # Lo mismo que ➕ o «Renderizar y subir», según el modo en que esté el servicio ahora.
+            if self.estado["modo_lista"]:
+                if nombre not in self.estado["lista"]:
+                    self.estado["lista"].append(nombre)
+                texto = f"✅ Puse la portada censurada de {album} y lo sumé a la lista ({len(self.estado['lista'])})."
+            else:
+                if nombre not in self.estado["aceptados"]:
+                    self.estado["aceptados"].append(nombre)
+                texto = f"✅ Puse la portada censurada de {album}; lo renderizo y lo subo."
+            self.guardar()
+            self.avisar(texto)
+            return
+        entrada["paso"] = "pregunta"
+        self.estado["censura"][album] = entrada
+        motivo = resultado.get("motivo")
+        self.preguntar(
+            "censura_fallida",
+            f"❌ No pude poner la portada censurada de {album}: "
+            f"{MOTIVOS_CENSURA.get(motivo) or resultado.get('detalle') or motivo}.\n\nSigue en Censura/.",
+            album=album, carpeta=carpeta, intento=entrada["intento"],
         )
 
     def tras_restaurar(self, resultado, argumentos):
@@ -1617,14 +1799,50 @@ class Servicio:
         if accion == "eliminar":
             self.lanzar_paso("eliminar", "--carpeta", pregunta["carpeta"])
             return
+        if accion == "censurar":
+            self.mandar_a_censura(pregunta)
+            return
         nombre = Path(pregunta["carpeta"]).name
         self.estado["aceptados"].append(nombre)
         self.guardar()
-        self.lanzar_paso("renderizar", "--carpeta", nombre)
+        # Con un análisis de portada en marcha, avanzar_album lo renderiza cuando termine.
+        if not self.analisis_activo():
+            self.lanzar_paso("renderizar", "--carpeta", nombre)
+
+    def mandar_a_censura(self, pregunta):
+        """🔞: el álbum se aparta en Censura/ y la pregunta siguiente sale sin esperar al análisis."""
+        self.estado["censura"][Path(pregunta["carpeta"]).name] = {
+            "paso": "a_censura", "carpeta": pregunta["carpeta"], "intento": 1,
+        }
+        self.guardar()
+        self.lanzar_paso("a_censura", "--carpeta", pregunta["carpeta"])
+
+    def respuesta_censura(self, accion, pregunta):
+        self.seguir_con_la_censura(accion, pregunta, pregunta["intento"] + 1)
+
+    def respuesta_censura_fallida(self, accion, pregunta):
+        # Un intento que falló no cuenta: se repite el mismo.
+        self.seguir_con_la_censura(accion, pregunta, pregunta["intento"])
+
+    def seguir_con_la_censura(self, accion, pregunta, intento):
+        entrada = self.estado["censura"].setdefault(
+            pregunta["album"], {"carpeta": pregunta["carpeta"], "intento": pregunta["intento"]}
+        )
+        if accion == "volver_a_analizar":
+            entrada.update(paso="censurar", intento=intento)
+            self.guardar()
+            self.revisar_censura()
+            return
+        paso = "aceptar_censura" if accion == "aceptar" else "eliminar"
+        entrada["paso"] = paso
+        self.guardar()
+        self.lanzar_paso(paso, "--carpeta", entrada["carpeta"])
 
     def respuesta_lista(self, accion, pregunta):
         if accion == "eliminar":
             self.lanzar_paso("eliminar", "--carpeta", pregunta["carpeta"])
+        elif accion == "censurar":
+            self.mandar_a_censura(pregunta)
         elif accion == "a_la_lista":
             self.estado["lista"].append(Path(pregunta["carpeta"]).name)
             self.guardar()
