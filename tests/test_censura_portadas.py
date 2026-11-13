@@ -5,6 +5,7 @@ El modelo nunca se llama: `requests` es un Ollama falso que contesta como el de 
 """
 import itertools
 import json
+import os
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -151,6 +152,20 @@ class TestPedazos(unittest.TestCase):
             self.assertEqual(max(c[2] for c in trozos), 1000)
             fila = sorted(c for c in trozos if c[1] == 0)
             self.assertTrue(all(a[2] > b[0] for a, b in zip(fila, fila[1:])))
+
+
+class TestUrlDeOllama(unittest.TestCase):
+    def test_un_ollama_host_sin_esquema_ni_puerto_va_al_11434_como_el_cli_de_ollama(self):
+        # Defecto: OLLAMA_HOST=0.0.0.0 o localhost (como lo muestra ollama) apuntaba al puerto 80 y
+        # todo análisis fallaba con «Ollama no responde».
+        with mock.patch.dict(os.environ, {"OLLAMA_HOST": "0.0.0.0"}):
+            self.assertEqual(cp.ClienteOllama().url, "http://0.0.0.0:11434")
+        self.assertEqual(cp.url_de_ollama("localhost"), "http://localhost:11434")
+        self.assertEqual(cp.url_de_ollama("[::1]"), "http://[::1]:11434")
+        # Lo que ya funcionaba sigue igual: con puerto se respeta, y con esquema el puerto que
+        # falta es el del esquema (así lo lee ollama).
+        self.assertEqual(cp.url_de_ollama("otra-pc:8080"), "http://otra-pc:8080")
+        self.assertEqual(cp.url_de_ollama("https://ollama.example/"), "https://ollama.example")
 
 
 class TestLeerDetecciones(unittest.TestCase):

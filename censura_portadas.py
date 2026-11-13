@@ -34,7 +34,8 @@ PRESUPUESTO_ANALISIS_S = 25 * 60
 # lo suelta solo a los pocos segundos.
 KEEP_ALIVE_ENTRE_LLAMADAS = "60s"
 ESPERA_DESCARGA_S = 30
-HOST_POR_DEFECTO = "http://localhost:11434"
+PUERTO_OLLAMA = 11434
+HOST_POR_DEFECTO = f"http://localhost:{PUERTO_OLLAMA}"
 
 # Los textos van en inglés: es lo que mejor entiende el modelo.
 PROMPT_IMAGEN_ENTERA = (
@@ -185,9 +186,16 @@ def a_jpeg(imagen, lado=LADO_AL_MODELO):
 
 
 def url_de_ollama(host=None):
+    """La URL base de Ollama a partir de OLLAMA_HOST, como la lee el CLI de ollama: sin esquema va
+    por http y, si no tiene puerto, al 11434. Con http:// o https:// el puerto que falta es el del
+    esquema."""
     host = (host or "").strip() or HOST_POR_DEFECTO
     if "://" not in host:
-        host = f"http://{host}"
+        direccion, barra, ruta = host.partition("/")
+        _, dos_puntos, puerto = direccion.rpartition(":")
+        if not (dos_puntos and puerto.isdigit()):
+            direccion += f":{PUERTO_OLLAMA}"
+        host = f"http://{direccion}{barra}{ruta}"
     return host.rstrip("/")
 
 
