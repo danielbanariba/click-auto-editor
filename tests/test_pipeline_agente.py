@@ -25,16 +25,22 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import httplib2
 import playwright.sync_api as playwright_api
+import requests
 from google.auth.exceptions import RefreshError, TransportError
 from google.oauth2.credentials import Credentials
 from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build_from_document
 from googleapiclient.errors import HttpError
+from PIL import Image
 
+import censura_portadas as cp
 import pipeline_agente as pa
 import registro_publicados as rp
+from tests.test_censura_portadas import OllamaFalso, respuesta_con
 
 TZ = timezone(timedelta(hours=-6))
+# Antes de que los tests la reemplacen por un falso: la prueba de verdad la busca en /proc.
+ANALISIS_EN_CURSO_REAL = pa.analisis_en_curso
 HAY_FFMPEG = shutil.which("ffmpeg") and shutil.which("ffprobe")
 
 
@@ -322,6 +328,7 @@ class TestOrigenes(unittest.TestCase):
             mock.patch.object(pa, "SSD_TEMP_DIR", self.tmp / "temp_render"),
             mock.patch.object(pa, "MIN_FREE_SPACE_GB", 0),
             mock.patch.object(pa, "render_en_curso", return_value=False),
+            mock.patch.object(pa, "analisis_en_curso", return_value=False),
             mock.patch.object(pa, "REGISTRO_PUBLICADOS", self.tmp / "ya_publicados.tsv"),
             mock.patch.object(pa, "DIR_YA_PUBLICADOS", self.tmp / "Ya publicados"),
         ]
@@ -801,6 +808,398 @@ class TestRetomar(unittest.TestCase):
 
         self.assertFalse(resultado["render_en_curso"])
         self.assertGreater(time.monotonic() - inicio, 1.0)
+
+
+class TestCensura(unittest.TestCase):
+    """`a_censura`, `censurar` y `aceptar_censura`: la portada censurada de un álbum, con el modelo falso."""
+
+    COLOR = (200, 100, 50)
+
+    def setUp(self):
+        TestPreguntarAntesDeRenderizar.setUp(self)
+        self.censura = self.tmp / "Censura"
+        self.datos = self.tmp / "datos_censura"
+        for parche in (
+            mock.patch.object(pa, "DIR_CENSURA", self.censura),
+            mock.patch.object(pa, "DIR_CENSURA_DATOS", self.datos),
+        ):
+            parche.start()
+            self.addCleanup(parche.stop)
+
+    def album_con_portada(self, nombre, origen=None, con_portada=True):
+        carpeta = (origen or self.album) / nombre
+        carpeta.mkdir()
+        (carpeta / "01. pista.flac").write_bytes(b"audio")
+        if con_portada:
+            Image.new("RGB", (400, 200), self.COLOR).save(carpeta / "cover.jpg")
+        return carpeta
+
+    def en_censura(self, nombre, origen=None, con_portada=True):
+        """Un álbum de la cola ya apartado en Censura/, como lo deja `a_censura`."""
+        carpeta = self.album_con_portada(nombre, origen, con_portada)
+        self.assertTrue(pa.a_censura(carpeta)["ok"])
+        return self.censura / nombre
+
+    def censurar(self, carpeta, intento, *respuestas):
+        OllamaFalso(list(respuestas)).parchar(self)
+        return pa.censurar(carpeta, intento)
+
+    def candidata(self, album):
+        return Image.open(self.datos / pa.slug(album) / "candidata.png").convert("RGB")
+
+    # -- a_censura ---------------------------------------------------------------
+
+    def test_a_censura_aparta_el_album_y_buscar_no_lo_vuelve_a_ofrecer_ni_mira_esa_carpeta(self):
+        # Defecto: el álbum que se mandó a censurar volvía a salir en la pregunta siguiente.
+        primero = self.album_con_portada("Banda A - Primero (2024)")
+        self.album_con_portada("Banda B - Segundo (2023)")
+
+        resultado = pa.a_censura(primero)
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(resultado["carpeta"], str(self.censura / primero.name))
+        self.assertFalse(primero.exists())
+        self.assertEqual((self.censura / primero.name / "01. pista.flac").read_bytes(), b"audio")
+        self.assertEqual(pa.origen_de_censura(primero.name), primero)
+        with mock.patch.object(pa, "capturar_busqueda", return_value=(None, "busqueda")):
+            self.assertEqual(pa.buscar()["album"], "Banda B - Segundo (2023)")
+            shutil.rmtree(self.album / "Banda B - Segundo (2023)")
+            self.assertEqual(pa.buscar()["motivo"], "sin_albumes")
+
+    def test_a_censura_no_mueve_lo_que_no_es_un_album_de_origen_ni_pisa_otro_de_censura(self):
+        # Defecto: una ruta mal pasada movería la carpeta madre entera o una parte de un álbum.
+        album = self.album_con_portada("Banda - Doble (2020)")
+        (album / "CD1").mkdir()
+        renderizado = self.tmp / "Renderizando" / "Banda - Listo"
+        renderizado.mkdir(parents=True)
+        for carpeta in (self.album, album / "CD1", renderizado):
+            self.assertEqual(pa.a_censura(carpeta)["motivo"], "carpeta_fuera_de_raiz", carpeta)
+        (self.censura / album.name).mkdir(parents=True)
+
+        self.assertEqual(pa.a_censura(album)["motivo"], "ya_existe")
+
+        self.assertTrue((album / "CD1").is_dir())
+        self.assertTrue(renderizado.is_dir())
+        self.assertEqual(list((self.censura / album.name).iterdir()), [])
+
+    def test_a_censura_repetido_tras_un_reinicio_a_mitad_dice_que_ya_esta_apartado(self):
+        # Defecto: el servicio relanza el paso al reiniciarse; si ya movió el álbum, no puede fallar.
+        carpeta = self.album_con_portada("Banda - Disco (2020)")
+        pa.a_censura(carpeta)
+
+        resultado = pa.a_censura(carpeta)
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(resultado["carpeta"], str(self.censura / carpeta.name))
+        self.assertTrue((self.censura / carpeta.name / "01. pista.flac").is_file())
+
+    def test_un_censurar_nuevo_empieza_de_cero_pero_conserva_las_originales_guardadas(self):
+        # Defecto: las cajas de un Censurar anterior del mismo álbum tapaban de más; y borrar las
+        # originales guardadas rompe la promesa de que la original nunca se pierde.
+        datos = self.datos / pa.slug("Banda - Disco (2020)")
+        (datos / "originales").mkdir(parents=True)
+        (datos / "originales" / "vieja.jpg").write_bytes(b"original de antes")
+        (datos / "cajas_1.json").write_text("[]", encoding="utf-8")
+        (datos / "candidata.png").write_bytes(b"vieja")
+
+        self.en_censura("Banda - Disco (2020)")
+
+        self.assertFalse((datos / "cajas_1.json").exists())
+        self.assertFalse((datos / "candidata.png").exists())
+        self.assertEqual((datos / "originales" / "vieja.jpg").read_bytes(), b"original de antes")
+
+    # -- censurar ----------------------------------------------------------------
+
+    def test_censurar_pinta_de_negro_la_caja_ampliada_y_no_toca_la_carpeta_del_album(self):
+        # Defecto: tocar la carpeta antes de que el usuario acepte; o pintar la caja sin ampliarla.
+        carpeta = self.en_censura("Banda - Disco (2020)")
+        antes = {p.name: p.read_bytes() for p in carpeta.iterdir()}
+
+        resultado = self.censurar(carpeta, 1, respuesta_con(("penis", (250, 400, 500, 800))))
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(resultado["intento"], 1)
+        self.assertEqual(resultado["encontradas"], ["pene"])
+        self.assertEqual(resultado["zonas"], 1)
+        self.assertIs(resultado["descargado"], True)
+        # La caja del modelo es (100, 80)-(200, 160); ampliada llega a (50, 40)-(250, 200).
+        candidata = self.candidata(carpeta.name)
+        self.assertEqual(candidata.getpixel((150, 100)), (0, 0, 0))
+        self.assertEqual(candidata.getpixel((55, 45)), (0, 0, 0))
+        self.assertEqual(candidata.getpixel((245, 195)), (0, 0, 0))
+        self.assertEqual(candidata.getpixel((45, 100)), self.COLOR)
+        self.assertEqual(candidata.getpixel((10, 10)), self.COLOR)
+        # Las dos vistas para el celular existen, y la original sigue sin censura.
+        self.assertEqual(Image.open(resultado["original"]).convert("RGB").getpixel((150, 100)), self.COLOR)
+        self.assertEqual(Image.open(resultado["censurada"]).convert("RGB").getpixel((150, 100)), (0, 0, 0))
+        self.assertEqual({p.name: p.read_bytes() for p in carpeta.iterdir()}, antes)
+
+    def test_un_intento_nuevo_suma_sus_cajas_a_las_de_los_anteriores(self):
+        # Defecto: cada intento empezaba de cero y la censura podía encogerse al volver a analizar.
+        carpeta = self.en_censura("Banda - Disco (2020)")
+        self.censurar(carpeta, 1, respuesta_con(("penis", (50, 50, 100, 150))))
+
+        # El intento 2 mira cuatro pedazos de 240 x 120; el último, abajo a la derecha, nace en (160, 80).
+        resultado = self.censurar(carpeta, 2, "[]", "[]", "[]", respuesta_con(("anus", (0, 0, 1000, 1000))))
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(resultado["encontradas"], ["ano"])
+        candidata = self.candidata(carpeta.name)
+        self.assertEqual(candidata.getpixel((300, 150)), (0, 0, 0))
+        # Lo del intento 1 sigue tapado: caja (20, 10)-(40, 30), ampliada (10, 5)-(50, 35).
+        self.assertEqual(candidata.getpixel((30, 20)), (0, 0, 0))
+        # Y no se tapa de más: lo que ninguna caja alcanza sigue como estaba.
+        self.assertEqual(candidata.getpixel((5, 150)), self.COLOR)
+
+    def test_repetir_el_mismo_intento_reemplaza_sus_cajas_y_no_las_duplica(self):
+        # Defecto: un análisis relanzado tras un reinicio sumaba dos veces el mismo intento.
+        carpeta = self.en_censura("Banda - Disco (2020)")
+        self.censurar(carpeta, 1, respuesta_con(("penis", (0, 0, 100, 100))))
+
+        resultado = self.censurar(carpeta, 1, respuesta_con(("vulva", (900, 900, 1000, 1000))))
+
+        self.assertEqual(resultado["zonas"], 1)
+        candidata = self.candidata(carpeta.name)
+        self.assertEqual(candidata.getpixel((395, 195)), (0, 0, 0))
+        self.assertEqual(candidata.getpixel((5, 5)), self.COLOR)
+
+    def test_si_no_encuentra_nada_lo_dice_y_no_deja_una_candidata(self):
+        # Defecto: dar por censurada una portada sin zonas, o dejar la candidata de un intento anterior.
+        carpeta = self.en_censura("Banda - Disco (2020)")
+
+        resultado = self.censurar(carpeta, 1, "[]")
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual((resultado["encontradas"], resultado["zonas"]), ([], 0))
+        self.assertFalse((self.datos / pa.slug(carpeta.name) / "candidata.png").exists())
+        # Un análisis repetido que ya no encuentra nada no deja la candidata del anterior.
+        self.censurar(carpeta, 1, respuesta_con(("penis", (0, 0, 100, 100))))
+        self.assertTrue((self.datos / pa.slug(carpeta.name) / "candidata.png").is_file())
+        self.censurar(carpeta, 1, "[]")
+        self.assertFalse((self.datos / pa.slug(carpeta.name) / "candidata.png").exists())
+
+    def test_si_el_analisis_falla_dice_por_que_descarga_el_modelo_y_no_anota_el_intento(self):
+        # Defecto: un fallo que no descarga el modelo deja 17 GB en la GPU; y uno que anota el
+        # intento hace que «Volver a analizar» mire con más cuidado sin haber mirado.
+        carpeta = self.en_censura("Banda - Disco (2020)")
+        ollama = OllamaFalso([requests.exceptions.ConnectionError("rechazada")]).parchar(self)
+
+        resultado = pa.censurar(carpeta, 1)
+
+        self.assertEqual((resultado["ok"], resultado["motivo"]), (False, "ollama_caido"))
+        self.assertIn("descargado", resultado)
+        self.assertTrue(any(ruta == "/api/generate" for ruta, _, _ in ollama.pedidos))
+        self.assertEqual(list((self.datos / pa.slug(carpeta.name)).glob("cajas_*.json")), [])
+
+    def test_si_el_modelo_se_queda_cargado_el_resultado_lo_avisa(self):
+        # Defecto: callar que Qwen sigue en la GPU; el próximo render falla por memoria sin aviso.
+        carpeta = self.en_censura("Banda - Disco (2020)")
+        ollama = OllamaFalso(["[]"], ignora_la_descarga=True).parchar(self)
+        cliente = cp.ClienteOllama(host="http://ollama.test", pausa=lambda s: None, espera_descarga_s=2)
+        with mock.patch.object(cp.subprocess, "run", return_value=SimpleNamespace(returncode=0)):
+            resultado = pa.censurar(carpeta, 1, cliente=cliente)
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertTrue(ollama.cargado)
+        self.assertIs(resultado["descargado"], False)
+
+    def test_sin_portada_en_la_carpeta_no_llama_al_modelo(self):
+        # Defecto: gastar la GPU en un álbum sin imagen que analizar.
+        carpeta = self.en_censura("Banda - Disco (2020)", con_portada=False)
+        ollama = OllamaFalso().parchar(self)
+
+        resultado = pa.censurar(carpeta, 1)
+
+        self.assertEqual((resultado["ok"], resultado["motivo"]), (False, "sin_portada"))
+        self.assertEqual(ollama.pedidos, [])
+
+    def test_con_un_render_corriendo_no_analiza_ni_toca_la_gpu(self):
+        # Defecto: dos programas pidiendo VRAM a la vez hacen fallar el render (pasó el 2026-11-03).
+        carpeta = self.en_censura("Banda - Disco (2020)")
+        ollama = OllamaFalso().parchar(self)
+
+        with mock.patch.object(pa, "render_en_curso", return_value=True):
+            resultado = pa.censurar(carpeta, 1)
+
+        self.assertEqual(resultado, {"ok": False, "motivo": "render_en_curso"})
+        self.assertEqual(ollama.pedidos, [])
+
+    def test_censurar_solo_analiza_albumes_de_censura(self):
+        # Defecto: un `--carpeta` mal pasado analizaría (y escribiría datos de) cualquier carpeta.
+        carpeta = self.album_con_portada("Banda - Disco (2020)")
+        ollama = OllamaFalso().parchar(self)
+
+        resultado = pa.censurar(carpeta, 1)
+
+        self.assertEqual(resultado["motivo"], "carpeta_fuera_de_censura")
+        self.assertEqual(ollama.pedidos, [])
+        self.assertFalse(self.datos.exists())
+
+    # -- aceptar_censura ---------------------------------------------------------
+
+    def censurado(self, nombre="Banda - Disco (2020)", origen=None, respuesta=None):
+        """Un álbum en Censura/ con un intento 1 ya analizado."""
+        carpeta = self.en_censura(nombre, origen)
+        self.censurar(carpeta, 1, respuesta or respuesta_con(("penis", (250, 400, 500, 800))))
+        return carpeta
+
+    def test_aceptar_deja_la_censurada_como_portada_guarda_la_original_y_devuelve_el_album(self):
+        # Defecto: reemplazar la portada sin guardar la original; o dejar el álbum en Censura/.
+        carpeta = self.censurado()
+        original = (carpeta / "cover.jpg").read_bytes()
+        destino = self.album / carpeta.name
+
+        resultado = pa.aceptar_censura(carpeta)
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertFalse(carpeta.exists())
+        self.assertEqual(resultado["carpeta"], str(destino))
+        elegida = pa.elegir_portada(destino)
+        self.assertEqual(elegida.name, "cover.png")
+        self.assertEqual(Image.open(elegida).convert("RGB").getpixel((150, 100)), (0, 0, 0))
+        guardadas = list((self.datos / pa.slug(destino.name) / "originales").iterdir())
+        self.assertEqual([p.read_bytes() for p in guardadas], [original])
+        self.assertEqual((destino / "01. pista.flac").read_bytes(), b"audio")
+        # Y `buscar` lo vuelve a ofrecer: de ahí sale el render con la portada censurada.
+        with mock.patch.object(pa, "capturar_busqueda", return_value=(None, "busqueda")):
+            ofrecido = pa.buscar()
+        self.assertEqual(ofrecido["album"], destino.name)
+        self.assertEqual(ofrecido["portada"], str(elegida))
+
+    def test_aceptar_sin_nada_que_tapar_devuelve_el_album_con_su_portada_como_esta(self):
+        # Defecto: cambiar la portada (o fallar) cuando el análisis no encontró nada.
+        carpeta = self.censurado(respuesta="[]")
+
+        resultado = pa.aceptar_censura(carpeta)
+
+        self.assertTrue(resultado["ok"], resultado)
+        devuelto = Path(resultado["carpeta"])
+        self.assertEqual(devuelto.parent, self.album)
+        self.assertEqual(sorted(p.name for p in devuelto.iterdir()), ["01. pista.flac", "cover.jpg"])
+
+    def test_aceptar_un_album_que_nunca_se_analizo_no_mueve_nada(self):
+        # Defecto: aceptar sin haber analizado devolvería el álbum a la cola creyéndolo censurado.
+        carpeta = self.en_censura("Banda - Disco (2020)")
+
+        resultado = pa.aceptar_censura(carpeta)
+
+        self.assertEqual(resultado["motivo"], "sin_analisis")
+        self.assertTrue(carpeta.is_dir())
+
+    def test_aceptar_no_pisa_una_carpeta_que_ya_esta_en_el_origen_y_no_toca_la_portada(self):
+        # Defecto: devolver el álbum encima de otra copia la pisa; y cambiar la portada antes de
+        # saber que puede devolverlo deja el álbum a medias.
+        carpeta = self.censurado()
+        (self.album / carpeta.name).mkdir()
+        antes = sorted(p.name for p in carpeta.iterdir())
+
+        resultado = pa.aceptar_censura(carpeta)
+
+        self.assertEqual(resultado["motivo"], "ya_existe")
+        self.assertEqual(sorted(p.name for p in carpeta.iterdir()), antes)
+        self.assertEqual(list((self.album / carpeta.name).iterdir()), [])
+
+    def test_aceptar_repetido_tras_un_reinicio_no_vuelve_a_cambiar_la_portada(self):
+        # Defecto: relanzar el paso guardaría la censurada como si fuera la original.
+        carpeta = self.censurado()
+        primero = pa.aceptar_censura(carpeta)
+
+        segundo = pa.aceptar_censura(carpeta)
+
+        self.assertTrue(segundo["ok"], segundo)
+        self.assertEqual(segundo["carpeta"], primero["carpeta"])
+        self.assertEqual(len(list((self.datos / pa.slug(carpeta.name) / "originales").iterdir())), 1)
+
+    def test_si_no_puede_devolver_el_album_el_reintento_no_guarda_la_censurada_como_original(self):
+        # Defecto: tras cambiar la portada y fallar al mover el álbum, el reintento tomaba la
+        # censurada por la portada del álbum y la guardaba como «original».
+        carpeta = self.censurado()
+        with mock.patch.object(Path, "rename", side_effect=OSError("disco lleno")):
+            fallo = pa.aceptar_censura(carpeta)
+        self.assertEqual(fallo["motivo"], "no_se_pudo_aplicar")
+        self.assertEqual(pa.elegir_portada(carpeta).name, "cover.png")
+
+        resultado = pa.aceptar_censura(carpeta)
+
+        self.assertTrue(resultado["ok"], resultado)
+        guardadas = list((self.datos / pa.slug(carpeta.name) / "originales").iterdir())
+        self.assertEqual(len(guardadas), 1)
+        self.assertEqual(Image.open(guardadas[0]).convert("RGB").getpixel((150, 100)), self.COLOR)
+
+    # -- eliminar y deshacer desde Censura/ ---------------------------------------
+
+    def test_eliminar_desde_censura_lleva_la_original_a_la_papelera_y_deshacer_vuelve_al_origen(self):
+        # Defecto: Deshacer devolvía el álbum a Censura/, donde nada lo vuelve a preguntar.
+        carpeta = self.en_censura("Banda - Disco (2020)", self.ep)
+
+        resultado = pa.eliminar(carpeta)
+
+        self.assertTrue(resultado["ok"], resultado)
+        entrada = Path(resultado["papelera"])
+        self.assertFalse(carpeta.exists())
+        self.assertTrue((entrada / carpeta.name / "cover.jpg").is_file())
+        self.assertEqual(rp.leer(pa.REGISTRO_PUBLICADOS).buscar(carpeta.name)["origen"], "eliminar")
+        self.assertFalse((self.datos / pa.slug(carpeta.name)).exists())
+
+        devuelto = pa.restaurar(entrada)
+
+        self.assertTrue(devuelto["ok"], devuelto)
+        self.assertEqual(devuelto["carpeta"], str(self.ep / carpeta.name))
+        with mock.patch.object(pa, "capturar_busqueda", return_value=(None, "busqueda")):
+            self.assertEqual(pa.buscar()["album"], carpeta.name)
+
+    def test_eliminar_sigue_sin_aceptar_carpetas_que_no_son_un_album_entero(self):
+        # Defecto: sumar Censura/ como raíz no puede abrir la puerta a carpetas de adentro.
+        carpeta = self.en_censura("Banda - Disco (2020)")
+        (carpeta / "CD1").mkdir()
+
+        self.assertEqual(pa.eliminar(carpeta / "CD1")["motivo"], "carpeta_fuera_de_raiz")
+        self.assertEqual(pa.eliminar(self.censura)["motivo"], "carpeta_fuera_de_raiz")
+
+    # -- GPU: un render no arranca mientras corre un análisis ---------------------
+
+    def test_renderizar_no_arranca_si_hay_un_analisis_corriendo(self):
+        # Defecto: render y Qwen pidiendo la GPU a la vez; el render se queda sin memoria.
+        self.album_con_portada("Banda - Disco (2020)")
+        with mock.patch.object(pa, "analisis_en_curso", return_value=True), mock.patch.object(
+            pa.subprocess, "run", side_effect=AssertionError("lanzó un render")
+        ):
+            resultado = pa.renderizar()
+        self.assertEqual(resultado, {"ok": False, "motivo": "analisis_en_curso"})
+
+    def test_analisis_en_curso_ve_el_subcomando_censurar_de_este_script_y_ningun_otro(self):
+        # Defecto: sin verlo, un análisis lanzado por otra sesión no frena el render.
+        script = f"pipeline_falso_{self.tmp.name}.py"
+        procesos = []
+        self.addCleanup(lambda: [(p.kill(), p.wait()) for p in procesos])
+
+        def lanzar(*argumentos):
+            procesos.append(subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(30)", str(self.tmp / script), *argumentos]
+            ))
+
+        with mock.patch.object(pa, "SCRIPT_PIPELINE", script):
+            self.assertFalse(ANALISIS_EN_CURSO_REAL())
+            lanzar("renderizar", "--carpeta", "censurar")
+            self.assertFalse(ANALISIS_EN_CURSO_REAL())
+            lanzar("censurar", "--carpeta", "x", "--intento", "1")
+            self.assertTrue(ANALISIS_EN_CURSO_REAL())
+
+    # -- la línea de comandos ----------------------------------------------------
+
+    def test_los_subcomandos_de_censura_llaman_a_sus_pasos_con_el_intento_como_numero(self):
+        # Defecto: el servicio los lanza por línea de comandos; un intento que llega como texto
+        # rompe la cuenta de pedazos.
+        salida = io.StringIO()
+        with mock.patch.object(pa, "a_censura", return_value={"ok": True}) as a_censura, \
+                mock.patch.object(pa, "censurar", return_value={"ok": True}) as censurar, \
+                mock.patch.object(pa, "aceptar_censura", return_value={"ok": True}) as aceptar, \
+                contextlib.redirect_stdout(salida):
+            self.assertEqual(pa.main(["a_censura", "--carpeta=/o/Banda"]), 0)
+            self.assertEqual(pa.main(["censurar", "--carpeta=/c/Banda", "--intento", "3"]), 0)
+            self.assertEqual(pa.main(["aceptar_censura", "--carpeta=/c/Banda"]), 0)
+        a_censura.assert_called_once_with("/o/Banda")
+        censurar.assert_called_once_with("/c/Banda", 3)
+        aceptar.assert_called_once_with("/c/Banda")
 
 
 class ClienteDeMiniaturas:

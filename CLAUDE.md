@@ -43,7 +43,8 @@ Scripts are numbered but **not all are sequential**. The active pipeline is:
 before rendering: `buscar` picks the next album and screenshots its YouTube
 search, which goes as one message; then one question with the album cover
 (`portadas.elegir_portada`, the same image the render uses) and the buttons
-"✅ Renderizar y subir" / "🗑 Eliminar (ya está publicado)". Eliminar moves the
+"✅ Renderizar y subir" / "🔞 Censurar" / "🗑 Eliminar (ya está publicado)" (Censurar: see
+below). Eliminar moves the
 album's folder to the trash (`eliminar` records it in the published registry first) and
 the service asks about the next one; nothing is rendered. The notice "🗑 Borré ..." carries
 "↩️ Deshacer" for 24 h (see the trash below); it does not hold back the next question. Renderizar y subir
@@ -61,7 +62,7 @@ desactivado"; while it is on, `buscar --aleatorio` picks at random among the thr
 source folders, still moving registered albums aside. It starts off and the
 setting (`aleatorio`) survives restarts. `/crear_lista` (the menu does not take
 hyphens; typing `/crear-lista` also works) turns list mode on: each question then shows
-"➕ A la lista", "🗑 Eliminar (ya está publicado)" and "▶️ Renderizar la lista (N)".
+"➕ A la lista", "🔞 Censurar", "🗑 Eliminar (ya está publicado)" and "▶️ Renderizar la lista (N)".
 ➕ saves the album in `lista` without rendering it and the next question comes right away
 (`buscar --excluir` skips the albums on the list). ▶️ moves the list into `aceptados`, so
 they are rendered, checked and uploaded one after another with no question, and turns list
@@ -118,6 +119,38 @@ sees the album back with the old row (it would move it to `Ya publicados/`). The
 (`PLAZO_PAPELERA_S`) are deleted, and their notices lose the Deshacer button. A trash that
 cannot be emptied is reported once.
 
+"🔞 Censurar" (added on 2026-11-13, after YouTube warned the channel about an explicit painted
+cover) moves the album to `BASE_DIR/Censura/` (`a_censura`, `DIR_CENSURA`) and the next question
+comes right away: the analysis runs apart and holds back nothing. `censurar --intento N` asks the
+local Qwen 3.6 (`MODELO_CENSURA`, ollama at `OLLAMA_HOST` or `localhost:11434`) where a penis,
+testicles, a vulva, an anus or a female nipple are, painted or drawn ones too.
+- Attempt 1 sends the whole cover, attempt 2 four overlapping 2×2 pieces (60 % of the side each),
+  attempt 3 and later nine 3×3 pieces plus the whole cover. NudeNet found nothing on the two
+  painted covers tried on 2026-11-13; Qwen found one of them only in the 2×2 pieces.
+- Each box grows by half its width and height on every side (`MARGEN_CENSURA`), boxes that touch
+  are merged, and they are filled solid black: never blur or pixelation, which a classifier sees
+  through. A new attempt adds its boxes to the earlier ones, so the censorship only grows.
+- The candidate and its boxes live in `data/agente/censura/`: nothing changes inside the album
+  folder until Aceptar. An analysis stops after 25 min (`PRESUPUESTO_ANALISIS_S`).
+
+When it ends, the original comes as a photo and then the censored one, with "✅ Aceptar",
+"🔁 Volver a analizar" (the next attempt) and "🗑 Eliminar". With nothing found, the question
+says so and Aceptar keeps the cover as it is. A failed analysis asks with the reason, and there
+"🔁 Volver a analizar" repeats the same attempt. Aceptar (`aceptar_censura`) writes the censored
+cover as `cover.png`, so `elegir_portada` picks it for the render, the background and the
+thumbnail; the old cover goes to `originales/` under `data/agente/censura/` and is never deleted.
+The album then goes back to the folder it came from and joins `aceptados`, as with "Renderizar y
+subir", or `lista` if list mode is on at that moment. Eliminar sends it to the trash, and
+"↩️ Deshacer" puts it back where it was before Censurar, so it is asked again. None of these
+questions holds back the queue, and the steps (`censura` in `servicio.json`) are taken up again
+after a restart.
+
+The model takes about 17 GB of VRAM (an ollama model made a render fail on 2026-11-03), so an
+analysis and a render never run together: `renderizar` returns `analisis_en_curso` and `censurar`
+returns `render_en_curso`. The service runs one analysis at a time and waits only for the render
+in progress, not for the whole list; the next render waits for the analysis. The model is
+unloaded after each analysis, and if it stays loaded the service says so.
+
 ```bash
 journalctl --user -u publicar-albumes -f         # what the service is doing
 systemctl --user restart publicar-albumes        # after changing the code
@@ -136,6 +169,9 @@ env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload,
 env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # moves the album folder to the trash of its disk without uploading (already published); a direct child of Renderizando/, upload_video/ or a source folder
 env/bin/python pipeline_agente.py restaurar --papelera "<entry>"  # puts back an album that eliminar moved to the trash and removes its eliminar row from the registry
 env/bin/python pipeline_agente.py vaciar_papelera  # deletes the trash entries older than 24 h (the service runs it every hour)
+env/bin/python pipeline_agente.py a_censura --carpeta "<dir>"  # 🔞 Censurar: moves the album (a direct child of a source folder) to Censura/
+env/bin/python pipeline_agente.py censurar --carpeta "<Censura/dir>" --intento N  # asks the local Qwen what to cover and writes the censored candidate outside the album (never during a render)
+env/bin/python pipeline_agente.py aceptar_censura --carpeta "<Censura/dir>"  # makes the candidate the album cover, keeps the original and moves the album back to where it was
 env/bin/python pipeline_agente.py programar --video-id ID --esperar  # claim check → monetization on → public now / first free moment, or +2 years if claimed
 env/bin/python pipeline_agente.py eliminar_video --video-id ID [--retirado]  # deletes the video from YouTube (irreversible; the service only runs it from a Telegram button); --retirado skips the existence check for a video YouTube removed as a copy
 env/bin/python pipeline_agente.py impugnar --video-id ID [--sin-enviar]  # disputes every claim of the video in Studio (a legal statement in the user's name); --sin-enviar fills the first form and closes it without sending
