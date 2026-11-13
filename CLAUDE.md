@@ -491,13 +491,21 @@ python vhs_effect/test_vhs.py                    # without pytest
 ### Render pipeline (`2. ffmpeg_render.py`, ~111 KB - largest script)
 
 For each album folder in `DIR_AUDIO_SCRIPTS`:
-1. Optionally copies to ramdisk (`/mnt/ramdisk_render`) for fast I/O
+1. Picks RAM or SSD for each album and copies it there. It uses the ramdisk (`/mnt/ramdisk_render`)
+   only if what stays in RAM (the video without audio plus a 15% margin, so about 50 minutes of
+   album in 20 GB) fits in the free ramdisk and in `MemAvailable` minus `RAM_MARGEN_LIBRE_GB`, so a
+   render never pushes the system into swap (zram does not compress video). Otherwise it uses
+   `SSD_TEMP_DIR`. If `MemAvailable` cannot be read, it uses the SSD
 2. Reads audio metadata (mutagen), generates tracklist overlay with auto-sized fonts
 3. Creates drop shadow for cover image (`effects/sombra.py`)
 4. Fetches track titles from DeathGrind API or falls back to filenames
 5. Runs profanity censorship (`limpieza/censura.py`)
 6. Renders via C++/CUDA binary (`cpp/build/vhs_render`) if `USE_CPP_VHS=True`, else FFmpeg
-7. Muxes audio and moves the finished album folder to `DIR_RENDERIZANDO` (`Renderizando/`); `3. subir_video_API.py` reads `DIR_UPLOAD`
+7. Muxes audio straight onto the SSD and moves the finished album folder to `DIR_RENDERIZANDO` (`Renderizando/`); `3. subir_video_API.py` reads `DIR_UPLOAD`.
+   An album rendered in RAM gets its final video written to `SSD_TEMP_DIR/_mux/`, on the same
+   filesystem as `Renderizando/`, and it reaches the queue with a rename: the video is not copied
+   from RAM at the end and `Renderizando/` never holds a half-written video (`estado`, `verificar` and `subir`
+   read that folder). The video without audio and the audio mix are deleted as soon as the mux ends
 
 ### Upload pipeline (`3. subir_video_API.py`, ~109 KB)
 
@@ -521,12 +529,19 @@ Multiple OAuth credential pairs in `credentials/`:
 
 Central config for all scripts. Key settings:
 - `BASE_DIR`: root data directory (external drive at `/mnt/Entretenimiento/01_edicion_automatizada`)
-- `RENDER_SSD_DIR`: SSD (`/mnt/Render`, btrfs) that holds `Renderizando/`; rendered albums wait there for upload, and nothing renders while it is unmounted
-- `SSD_TEMP_DIR`: `/mnt/Render/temp_render`, the render's temp folder for albums that do not fit in the
-  20 GB ramdisk (a 100-minute album made a 31 GB video, and the mux writes a second copy). The render
-  empties only the ramdisk when it exits, and a killed render cleans nothing, so `renderizar` deletes
-  everything in `SSD_TEMP_DIR` before and after each render, except `_rescate/` (finished videos that
-  could not be moved to `Renderizando/`). It only runs when no other render is running.
+- `RENDER_SSD_DIR`: SSD (`/mnt/Render`, ext4) that holds `Renderizando/`; rendered albums wait there for upload, and nothing renders while it is unmounted
+- `SSD_TEMP_DIR`: `/mnt/Render/temp_render`, the render's temp folder for albums that do not fit in
+  RAM (a 100-minute album made a 31 GB video, and in the SSD the mux writes a second copy next to the
+  video without audio). It also holds `_mux/`, where an album rendered in RAM gets its final video
+  before the rename into `Renderizando/`. The render empties only the ramdisk (and `_mux/`) when it
+  exits, and a killed render cleans nothing, so `renderizar` deletes everything in `SSD_TEMP_DIR`
+  before and after each render, except `_rescate/` (finished videos that could not be moved to
+  `Renderizando/`). It only runs when no other render is running.
+- `RAMDISK_SIZE_GB` / `RAM_MARGEN_LIBRE_GB`: size of the tmpfs (20 GB) and the memory the render leaves
+  free beyond the album (8 GB). The album goes to RAM only if its estimate fits in the free ramdisk
+  and in `MemAvailable` minus that margin. The estimate counts the video without audio (nominal
+  45 Mbps, +15%); the CQ 20 output measured about 41 Mbps on two albums. With several renders at once
+  (`MAX_PARALLEL_RENDERS` above 1) each one decides on its own `MemAvailable` reading
 - `USE_CPP_VHS`: enable C++/CUDA VHS renderer (default `True`)
 - `USE_GPU` / `USE_RAMDISK`: GPU and ramdisk flags
 - `ALLOW_FFMPEG_FALLBACK`: fall back to FFmpeg if CUDA fails

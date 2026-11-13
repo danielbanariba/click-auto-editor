@@ -25,7 +25,7 @@ DIR_AUDIO_SCRIPTS = (
 )  # Carpeta fuente para renderizado
 DIR_UPLOAD = BASE_DIR / "upload_video"
 #DIR_UPLOAD = Path("/mnt/DiscoLocal")
-# Los álbumes renderizados esperan la subida en el SSD (btrfs): escribir el
+# Los álbumes renderizados esperan la subida en el SSD (ext4): escribir el
 # video de ~17 GB en el disco NTFS casi lleno tardaba horas por álbum.
 RENDER_SSD_DIR = Path("/mnt/Render")
 DIR_RENDERIZANDO = RENDER_SSD_DIR / "Renderizando"
@@ -40,13 +40,23 @@ DIR_VERIFICACION = BASE_DIR / "verificacion"
 SSD_TEMP_DIR = RENDER_SSD_DIR / "temp_render"
 # Videos terminados que no se pudieron mover a Renderizando/; la limpieza no los toca.
 CARPETA_RESCATE_RENDER = "_rescate"
+# Donde el mux escribe el video final cuando el álbum se renderiza en el ramdisk: en el SSD, junto
+# a Renderizando/, para que llegar a la cola sea un rename y no se vea un video a medias.
+CARPETA_MUX_RENDER = "_mux"
 USE_SSD_TEMP = True  # Copiar a almacenamiento rápido antes de renderizar
 
 # Ramdisk (tmpfs) - Máxima velocidad de I/O
 # El script monta/desmonta automáticamente si USE_RAMDISK=True
 USE_RAMDISK = True  # Usar RAM en lugar de SSD (requiere sudo sin password para mount)
-RAMDISK_SIZE_GB = 20  # Tamaño del ramdisk en GB (soporta videos 4K de hasta ~4 horas)
+# Tamaño del ramdisk en GB. La RAM guarda solo el video sin audio (45 Mbps, ~5,7 MB/s) más un
+# 15% de holgura, porque el mux escribe el video final directo en el SSD: entran álbumes de hasta
+# ~50 min (antes, con 2,4x el video, ~24 min). Los más largos usan el SSD.
+RAMDISK_SIZE_GB = 20
 RAMDISK_PATH = Path("/mnt/ramdisk_render")  # Punto de montaje del tmpfs
+# Memoria que el render deja libre además de lo que usa: el álbum va a la RAM solo si cabe en
+# MemAvailable menos este margen. Con la swap en zram (swappiness 150) un tmpfs que la rebasa se
+# va a swap y el video no se comprime; el margen cubre también las copias del álbum que sigue.
+RAM_MARGEN_LIBRE_GB = 8
 
 # Staging por lotes en NVMe (desactivado - usamos RAM directamente)
 # Con ramdisk habilitado, el staging en NVMe es redundante.
