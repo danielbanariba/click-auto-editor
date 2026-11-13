@@ -1266,6 +1266,20 @@ def eliminar(carpeta, raices=None):
     return {"ok": True, "album": carpeta.name, "papelera": str(entrada)}
 
 
+def entrada_de_papelera(carpeta):
+    """La entrada más nueva de la papelera del disco de `carpeta` que tiene ese álbum, o None.
+
+    Sirve cuando `eliminar` movió el álbum y su resultado se perdió (el servicio se reinició).
+    """
+    carpeta = Path(carpeta)
+    try:
+        entradas = [e for e in papelera_de(carpeta.parent).iterdir() if (e / carpeta.name).is_dir()]
+    except OSError:
+        return None
+    # El nombre empieza con la fecha y la hora: el último es el más nuevo.
+    return str(max(entradas, key=lambda e: e.name)) if entradas else None
+
+
 def restaurar(entrada, raices=None):
     """Devuelve a su carpeta un álbum que `eliminar` apartó y saca del registro su fila.
 

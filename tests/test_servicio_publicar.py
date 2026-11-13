@@ -788,8 +788,10 @@ class TestCensurar(BaseServicio):
         self.assertEqual(self.servicio.estado["aceptados"], [])
         self.assertEqual(self.lanzador.lanzados("renderizar"), [])
 
-    def test_si_aceptar_no_puede_devolver_el_album_lo_dice_y_deja_volver_a_analizar_o_eliminar(self):
-        # Defecto: el álbum quedaba en Censura/ sin pregunta abierta y nadie se enteraba.
+    def test_si_aceptar_no_puede_devolver_el_album_lo_dice_y_deja_reintentar_aceptar(self):
+        # Defecto: el álbum quedaba en Censura/ sin pregunta abierta y nadie se enteraba; y sin
+        # Aceptar en la pregunta del fallo, despejar la carpeta que estorbaba no alcanzaba: había
+        # que volver a gastar la GPU o borrar el álbum.
         self.mandar_a_censura()
         pregunta = self.analizado()
         self.telegram.apretar(pregunta, self.ACEPTAR)
@@ -799,9 +801,35 @@ class TestCensurar(BaseServicio):
         self.servicio.paso()
 
         fallo = self.ultima_pregunta()
-        self.assertEqual(self.etiquetas(fallo), [self.VOLVER, self.ELIMINAR])
+        self.assertEqual(self.etiquetas(fallo), [self.ACEPTAR, self.VOLVER, self.ELIMINAR])
         self.assertIn("ya hay una carpeta", fallo["texto"])
         self.assertEqual(self.lanzador.lanzados("renderizar"), [])
+
+        self.telegram.apretar(fallo, self.ACEPTAR)
+        self.servicio.paso()
+        self.assertEqual(
+            self.lanzador.lanzados("aceptar_censura"), [["aceptar_censura", "--carpeta", self.en_censura()]] * 2
+        )
+
+    def test_si_falla_un_intento_despues_de_uno_que_salio_bien_deja_aceptar_ese(self):
+        # Defecto: si el intento 2 fallaba, la censura del intento 1 seguía en disco pero ya no se
+        # podía aceptar: quedaba borrar el álbum o volver a gastar la GPU.
+        self.mandar_a_censura()
+        self.telegram.apretar(self.analizado(), self.VOLVER)
+        self.servicio.paso()
+        self.lanzador.terminar(
+            "censurar", {"ok": False, "motivo": "respuesta_invalida", "intento": 2, "descargado": True}
+        )
+        self.servicio.paso()
+
+        fallo = self.ultima_pregunta()
+        self.assertEqual(self.etiquetas(fallo), [self.ACEPTAR, self.VOLVER, self.ELIMINAR])
+        self.telegram.apretar(fallo, self.VOLVER)
+        self.servicio.paso()
+        # Un intento que falló no cuenta: se repite el mismo.
+        self.assertEqual(
+            self.lanzador.lanzados("censurar")[-1], ["censurar", "--carpeta", self.en_censura(), "--intento", "2"]
+        )
 
     # -- S7: Eliminar y Deshacer -------------------------------------------------
 
@@ -935,6 +963,20 @@ class TestCensurar(BaseServicio):
         self.servicio.paso()
         self.assertEqual(self.lanzador.lanzados("renderizar"), [["renderizar", "--carpeta", "Banda - Disco"]])
 
+    def test_un_analisis_de_otra_sesion_frena_el_analisis_en_cola(self):
+        # Defecto: con un `censurar` de otra sesión corriendo, el servicio lanzaba otro sobre el
+        # mismo modelo, y el primero en terminar lo descargaba de la GPU con el otro a mitad.
+        pa.analisis_en_curso.return_value = True
+        self.mandar_a_censura()
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("censurar"), [])
+
+        pa.analisis_en_curso.return_value = False
+        self.servicio.paso()
+        self.assertEqual(
+            self.lanzador.lanzados("censurar"), [["censurar", "--carpeta", self.en_censura(), "--intento", "1"]]
+        )
+
     def test_si_el_paso_se_topa_con_un_render_el_analisis_queda_en_cola_sin_avisar(self):
         # Defecto: preguntar «¿reintento?» por algo que se resuelve solo cuando termine el render.
         self.mandar_a_censura()
@@ -982,6 +1024,29 @@ class TestCensurar(BaseServicio):
         self.assertEqual(
             self.lanzador.lanzados("aceptar_censura"), [["aceptar_censura", "--carpeta", self.en_censura()]]
         )
+
+    def test_un_reinicio_con_el_album_ya_en_la_papelera_manda_igual_el_aviso_con_deshacer(self):
+        # Defecto: si el servicio se reiniciaba después de que `eliminar` movió el álbum y antes
+        # de leer su resultado, el álbum quedaba 24 h en la papelera sin aviso ni ↩️ Deshacer.
+        self.mandar_a_censura()
+        self.telegram.apretar(self.analizado(), self.ELIMINAR)
+        self.servicio.paso()
+        entrada = self.tmp / "Papelera" / "20261113-120000-abc123"
+        entrada.mkdir(parents=True)
+        shutil.move(self.en_censura(), entrada / "Banda - Disco")
+
+        self.lanzador = LanzadorFalso()
+        self.servicio = self.nuevo_servicio()
+        self.servicio.paso()
+
+        aviso = self.ultima_pregunta()
+        self.assertIn("Borré Banda - Disco", aviso["texto"])
+        self.assertEqual(self.etiquetas(aviso), ["↩️ Deshacer"])
+        self.assertEqual(self.servicio.estado["censura"], {})
+        self.assertEqual(self.lanzador.lanzados("eliminar"), [])
+        self.telegram.apretar(aviso, "↩️ Deshacer")
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("restaurar"), [["restaurar", "--papelera", str(entrada.resolve())]])
 
 
 class TestAleatorio(BaseServicio):
