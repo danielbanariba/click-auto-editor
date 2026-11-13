@@ -86,6 +86,14 @@ DIR_EP = BASE_DIR / "EP"
 # De dónde toma álbumes el servicio de publicación, en este orden. El
 # render mueve el álbum al SSD y se borra después de publicarlo.
 DIRS_ORIGEN_RENDER = (DIR_AUDIO_SCRIPTS, DIR_ALBUM, DIR_EP)
+# Álbumes que el usuario mandó a censurar con el botón «🔞 Censurar»: esperan ahí el análisis de
+# la portada y su aprobación. No es un origen de render: `buscar` no la mira.
+DIR_CENSURA = BASE_DIR / "Censura"
+# El modelo de visión (Ollama, local) que dice dónde tapar la portada de un álbum.
+MODELO_CENSURA = "qwen3.6:27b"
+# Cada caja crece esta fracción de su ancho a cada lado y de su alto arriba y abajo: con 0.5 mide
+# el doble en cada dimensión.
+MARGEN_CENSURA = 0.5
 
 # ============================================================================
 # ARCHIVOS DEL PROYECTO
