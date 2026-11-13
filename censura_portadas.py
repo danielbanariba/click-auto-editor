@@ -1,9 +1,10 @@
-"""Censura de portadas explícitas con un modelo de visión local (Ollama).
+"""Censura de portadas explícitas o con gore con un modelo de visión local (Ollama).
 
 El modelo solo dice dónde están las zonas; el relleno lo pone este módulo: negro y opaco, nunca
 desenfoque ni pixelado, porque un clasificador puede reconocer el cuerpo a través de ellos.
 
-    buscar_cajas   pregunta al modelo por la imagen entera o por pedazos, según el intento
+    buscar_cajas   pregunta al modelo por la imagen entera o por pedazos, según el intento; a cada
+                   uno, por lo sexual y por el gore, por separado
     ampliar_cajas  agranda cada caja, la recorta al borde y une las que se tocan
     pintar_cajas   las rellena de negro
 
@@ -28,7 +29,8 @@ from config import MARGEN_CENSURA, MODELO_CENSURA
 LADO_AL_MODELO = 1024
 LADO_DE_LA_VISTA = 1280
 ESPERA_LLAMADA_S = 300
-# Tope de un análisis completo: del tercer intento en adelante son diez llamadas.
+# Tope de un análisis completo: del tercer intento en adelante son veinte llamadas (diez pedazos,
+# dos preguntas cada uno). En las pruebas del 2026-11-13 cada llamada tardó de 2 a 22 s.
 PRESUPUESTO_ANALISIS_S = 25 * 60
 # Entre una llamada y otra el modelo sigue cargado; si el proceso muere sin descargarlo, Ollama
 # lo suelta solo a los pocos segundos.
@@ -50,14 +52,40 @@ PROMPT_PEDAZO = (
     'with JSON [{"label": "...", "bbox_2d": [x1, y1, x2, y2]}], coordinates normalized 0-1000; '
     "[] if none."
 )
+# El gore va en otra pregunta: el 2026-11-13, un solo texto que pedía las dos cosas encontró menos
+# zonas sexuales que el de arriba (perdió los pezones de 69 Squad y el pene de Regurgitation).
+PROMPT_GORE_IMAGEN_ENTERA = (
+    "This is album cover art. Find every gore element in the image: blood, open wounds, exposed "
+    "organs or entrails, severed body parts and corpses, painted, drawn or photographed. Answer "
+    'ONLY with JSON: [{"label": "...", "bbox_2d": [x1, y1, x2, y2]}] with coordinates normalized '
+    "0-1000. Answer [] if there is none."
+)
+PROMPT_GORE_PEDAZO = (
+    "Content moderation for a YouTube upload. In this crop of an album cover (painted, drawn or "
+    "photographed), locate any gore: blood, open wounds, exposed organs or entrails, severed body "
+    'parts or corpses. Answer ONLY with JSON [{"label": "...", "bbox_2d": [x1, y1, x2, y2]}], '
+    "coordinates normalized 0-1000; [] if none."
+)
 
-# Lo que el modelo llama a cada zona, dicho para el usuario. La primera clave que aparezca gana.
+# Lo que el modelo llama a cada zona, dicho para el usuario. La primera clave que aparezca gana:
+# lo sexual antes que el gore, y lo que nombra el gore («gore element: blood») antes que «gore».
 ETIQUETAS = (
     ("testic", "testículos"),
     ("penis", "pene"),
     ("vulva", "vulva"),
     ("anus", "ano"),
     ("nipple", "pezón"),
+    ("corpse", "cadáver"),
+    ("dead body", "cadáver"),
+    ("sever", "restos desmembrados"),
+    ("dismember", "restos desmembrados"),
+    ("organ", "vísceras"),
+    ("entrail", "vísceras"),
+    ("viscera", "vísceras"),
+    ("intestin", "vísceras"),
+    ("wound", "heridas"),
+    ("blood", "sangre"),
+    ("gore", "gore"),
 )
 
 
@@ -350,36 +378,40 @@ def buscar_cajas(imagen, intento, cliente, reloj=time.monotonic, presupuesto_s=P
     """Dónde hay zonas que tapar: una `Busqueda` con [(etiqueta, x1, y1, x2, y2)] en píxeles de
     `imagen`.
 
-    Un pedazo cuya respuesta no se entiende no tira las cajas de los demás, pero se cuenta en
-    `sin_leer`: ese pedazo nadie lo miró. Si fallan todos, el intento falla. Entre pedazo y pedazo
-    mira el reloj: pasado el presupuesto, corta.
+    Cada pedazo se pregunta dos veces: por lo sexual y por el gore. Una respuesta que no se entiende
+    no tira las cajas de las demás, pero su pedazo se cuenta en `sin_leer`: esa parte nadie la
+    miró. Si no se entiende ninguna, el intento falla. Antes de cada pregunta mira el reloj:
+    pasado el presupuesto, corta.
     """
     ancho, alto = imagen.size
     limite = reloj() + presupuesto_s
     trozos = pedazos(ancho, alto, intento)
-    encontradas, entendidas = [], 0
+    encontradas, sin_leer, alguna_leida = [], 0, False
     for (x1, y1, x2, y2), entera in trozos:
-        restante = limite - reloj()
-        if restante <= 0:
-            raise ErrorDeCensura("tiempo_agotado", f"el análisis pasó los {presupuesto_s / 60:.0f} min")
-        texto = cliente.chat(
-            PROMPT_IMAGEN_ENTERA if entera else PROMPT_PEDAZO,
-            a_jpeg(imagen.crop((x1, y1, x2, y2))),
-            min(ESPERA_LLAMADA_S, restante),
+        jpeg = a_jpeg(imagen.crop((x1, y1, x2, y2)))
+        preguntas = (
+            (PROMPT_IMAGEN_ENTERA, PROMPT_GORE_IMAGEN_ENTERA) if entera else (PROMPT_PEDAZO, PROMPT_GORE_PEDAZO)
         )
-        detecciones = leer_detecciones(texto)
-        if detecciones is None:
-            continue
-        entendidas += 1
-        for etiqueta, (a, b, c, d) in detecciones:
-            ancho_p, alto_p = x2 - x1, y2 - y1
-            encontradas.append((
-                etiqueta,
-                x1 + a * ancho_p / 1000,
-                y1 + b * alto_p / 1000,
-                x1 + c * ancho_p / 1000,
-                y1 + d * alto_p / 1000,
-            ))
-    if not entendidas:
+        leido = True
+        for prompt in preguntas:
+            restante = limite - reloj()
+            if restante <= 0:
+                raise ErrorDeCensura("tiempo_agotado", f"el análisis pasó los {presupuesto_s / 60:.0f} min")
+            detecciones = leer_detecciones(cliente.chat(prompt, jpeg, min(ESPERA_LLAMADA_S, restante)))
+            if detecciones is None:
+                leido = False
+                continue
+            alguna_leida = True
+            for etiqueta, (a, b, c, d) in detecciones:
+                ancho_p, alto_p = x2 - x1, y2 - y1
+                encontradas.append((
+                    etiqueta,
+                    x1 + a * ancho_p / 1000,
+                    y1 + b * alto_p / 1000,
+                    x1 + c * ancho_p / 1000,
+                    y1 + d * alto_p / 1000,
+                ))
+        sin_leer += not leido
+    if not alguna_leida:
         raise ErrorDeCensura("respuesta_invalida", "el modelo no contestó un JSON que pueda leer")
-    return Busqueda(encontradas, len(trozos), len(trozos) - entendidas)
+    return Busqueda(encontradas, len(trozos), sin_leer)

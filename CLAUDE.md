@@ -122,9 +122,15 @@ cannot be emptied is reported once.
 "🔞 Censurar" (added on 2026-11-13, after YouTube warned the channel about an explicit painted
 cover) moves the album to `BASE_DIR/Censura/` (`a_censura`, `DIR_CENSURA`) and the next question
 comes right away: the analysis runs apart and holds back nothing. `censurar --intento N` asks the
-local Qwen 3.6 (`MODELO_CENSURA`, ollama at `OLLAMA_HOST` or `localhost:11434`) where a penis,
-testicles, a vulva, an anus or a female nipple are, painted or drawn ones too. `OLLAMA_HOST` is read
-as the ollama CLI reads it: with no scheme and no port it goes to port 11434.
+local Qwen 3.6 (`MODELO_CENSURA`, ollama at `OLLAMA_HOST` or `localhost:11434`) two questions about
+each piece of the cover: where a penis, testicles, a vulva, an anus or a female nipple are, painted
+or drawn ones too; and where there is gore: blood, open wounds, exposed organs or entrails, severed
+body parts and corpses, painted, drawn or photographed (gore added on 2026-11-13: "tambien aplica
+para imagenes gore o cadaveres reales, no solo sexuales"; the user accepts that many covers end up
+almost all black). The two go apart because one question for both found fewer sexual zones on
+2026-11-13. The question lists what was found in Spanish (`etiqueta_legible`: "pezón", "sangre",
+"vísceras", "cadáver"...). `OLLAMA_HOST` is read as the ollama CLI reads it: with no scheme and no
+port it goes to port 11434.
 - Attempt 1 sends the whole cover, attempt 2 four overlapping 2×2 pieces (60 % of the side each),
   attempt 3 and later nine 3×3 pieces plus the whole cover. NudeNet found nothing on the two
   painted covers tried on 2026-11-13; Qwen found one of them only in the 2×2 pieces.
@@ -133,8 +139,8 @@ as the ollama CLI reads it: with no scheme and no port it goes to port 11434.
   through. A new attempt adds its boxes to the earlier ones, so the censorship only grows.
 - The candidate and its boxes live in `data/agente/censura/`: nothing changes inside the album
   folder until Aceptar. An analysis stops after 25 min (`PRESUPUESTO_ANALISIS_S`).
-- A piece whose reply cannot be read does not drop the other pieces' boxes, but it is counted:
-  `censurar` returns `pedazos` and `sin_leer`, and if no piece can be read the attempt fails. A
+- A piece where either reply cannot be read does not drop the other boxes, but it is counted:
+  `censurar` returns `pedazos` and `sin_leer`, and if no reply can be read the attempt fails. A
   reply with items but no usable box counts as unreadable, not as "nothing to cover"; a bare
   object (no list around it) counts as one box. A reply whose JSON is cut off, has a stray comma
   or is followed by a second value is unreadable too: no box is taken from inside it.
