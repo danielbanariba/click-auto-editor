@@ -40,6 +40,9 @@ DIR_VERIFICACION = BASE_DIR / "verificacion"
 SSD_TEMP_DIR = RENDER_SSD_DIR / "temp_render"
 # Videos terminados que no se pudieron mover a Renderizando/; la limpieza no los toca.
 CARPETA_RESCATE_RENDER = "_rescate"
+# Donde el mux escribe el video final cuando el álbum se renderiza en el ramdisk: en el SSD, junto
+# a Renderizando/, para que llegar a la cola sea un rename y no se vea un video a medias.
+CARPETA_MUX_RENDER = "_mux"
 USE_SSD_TEMP = True  # Copiar a almacenamiento rápido antes de renderizar
 
 # Ramdisk (tmpfs) - Máxima velocidad de I/O

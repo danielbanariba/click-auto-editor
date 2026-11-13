@@ -58,6 +58,7 @@ from config import (
     NVENC_EXTRA_OPTS,
     SSD_TEMP_DIR,
     CARPETA_RESCATE_RENDER,
+    CARPETA_MUX_RENDER,
     USE_SSD_TEMP,
     DEFAULT_BASE_DIR,
     STAGING_ENABLED,
@@ -1034,6 +1035,10 @@ def finalize_render_output(
     log_verbose(f"[UPLOAD] Carpeta movida a: {destination_folder}")
 
 
+def is_on_render_ssd(path) -> bool:
+    return Path(path).is_relative_to(RENDER_SSD_DIR)
+
+
 def submit_finalize_job(**kwargs):
     """
     Encola la finalización en el hilo de fondo, contabilizando los bytes
@@ -1044,7 +1049,8 @@ def submit_finalize_job(**kwargs):
     final_video = kwargs["final_video"]
     folder_name = kwargs["folder_name"]
     pending = 0
-    if kwargs.get("temp_folder_path"):
+    # Un video que ya está en el SSD no va a ocupar más: el espacio libre ya lo descuenta.
+    if kwargs.get("temp_folder_path") and not is_on_render_ssd(final_video):
         try:
             pending = final_video.stat().st_size
         except OSError:
@@ -2651,6 +2657,23 @@ def is_tracking_failure(stderr_text: str) -> bool:
     return "tracking_errors.cu" in lowered or "tracking errors" in lowered
 
 
+def get_final_video_path(folder_path: Path, folder_name: str) -> Path:
+    """
+    Dónde escribe el mux el video final. Si el álbum se renderiza en el ramdisk, va al SSD
+    (SSD_TEMP_DIR/_mux), el mismo disco que Renderizando/: llegar a la cola es un rename en
+    vez de copiar varios GB desde la RAM, y en Renderizando/ nunca hay un video a medias.
+    Si no, queda con el resto de los temporales del álbum (que ya están en el SSD).
+    """
+    if (
+        USE_SSD_TEMP
+        and USE_RAMDISK
+        and RAMDISK_MOUNTED
+        and folder_path.parent == RAMDISK_PATH
+    ):
+        return SSD_TEMP_DIR / CARPETA_MUX_RENDER / f"{folder_name}.mp4"
+    return folder_path / f"{folder_name}.mp4"
+
+
 def cleanup_temp_render(
     temp_folder_path=None, temp_files=None, track_overlays_path=None
 ):
@@ -2805,7 +2828,10 @@ def render_video_with_cpp(
     """
     video_only = folder_path / f"{folder_name}__video.mp4"
     audio_only = folder_path / f"{folder_name}__audio.m4a"
-    final_video = folder_path / f"{folder_name}.mp4"
+    final_video = get_final_video_path(folder_path, folder_name)
+    # El video final a medias solo se borra si el mux lo escribió fuera de la carpeta del álbum:
+    # dentro, lo que haya con ese nombre puede ser un video anterior que el usuario conserva.
+    staged_video = final_video if final_video.parent != folder_path else None
     audio_proc = None
     timings = {"prep_s": prep_seconds}
 
@@ -2823,7 +2849,7 @@ def render_video_with_cpp(
         if reason != "cuda" or not ALLOW_FFMPEG_FALLBACK:
             cleanup_temp_render(
                 temp_folder_path=temp_folder_path,
-                temp_files=(video_only, audio_only),
+                temp_files=(video_only, audio_only, staged_video),
                 track_overlays_path=track_overlays_path,
             )
         return False, reason
@@ -3109,6 +3135,7 @@ def render_video_with_cpp(
         str(final_video),
     ]
 
+    final_video.parent.mkdir(parents=True, exist_ok=True)
     mux_start = time.time()
     mux_success, mux_stderr = run_ffmpeg_command(
         mux_cmd, False, 0, folder_name, start_time
@@ -3122,10 +3149,13 @@ def render_video_with_cpp(
         log_verbose(f"STDERR: {mux_stderr[-500:]}")
         return fail_cpp("mux")
 
-    if not USE_SSD_TEMP:
-        for temp_file in (video_only, audio_only):
-            if temp_file.exists():
-                temp_file.unlink()
+    # El video sin audio y la mezcla ya no sirven. La finalización corre en segundo plano
+    # mientras el álbum siguiente copia a la RAM: liberarlos ahora, no cuando ella termine.
+    for temp_file in (video_only, audio_only):
+        try:
+            temp_file.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     finalize_kwargs = dict(
         final_video=final_video,
@@ -4251,6 +4281,9 @@ def cleanup_temp():
                 shutil.rmtree(item)
             else:
                 item.unlink()
+    # El mux escribe en el SSD: un corte a mitad de mux deja ahí un video parcial que el
+    # vaciado del ramdisk no alcanza.
+    shutil.rmtree(SSD_TEMP_DIR / CARPETA_MUX_RENDER, ignore_errors=True)
 
 
 if __name__ == "__main__":
