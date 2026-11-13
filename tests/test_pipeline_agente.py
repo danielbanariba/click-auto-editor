@@ -978,6 +978,15 @@ class TestCensura(unittest.TestCase):
         self.censurar(carpeta, 1, "[]")
         self.assertFalse((self.datos / pa.slug(carpeta.name) / "candidata.png").exists())
 
+    def test_el_resultado_dice_cuantos_pedazos_no_se_pudieron_leer(self):
+        # Defecto: el servicio no se enteraba de los pedazos sin leer y daba la portada por limpia.
+        carpeta = self.en_censura("Banda - Disco (2020)")
+
+        resultado = self.censurar(carpeta, 2, "no puedo", "[]", "[]", "[]")
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual((resultado["pedazos"], resultado["sin_leer"]), (4, 1))
+
     def test_si_el_analisis_falla_dice_por_que_descarga_el_modelo_y_no_anota_el_intento(self):
         # Defecto: un fallo que no descarga el modelo deja 17 GB en la GPU; y uno que anota el
         # intento hace que «Volver a analizar» mire con más cuidado sin haber mirado.
@@ -1124,6 +1133,25 @@ class TestCensura(unittest.TestCase):
         guardadas = list((self.datos / pa.slug(carpeta.name) / "originales").iterdir())
         self.assertEqual(len(guardadas), 1)
         self.assertEqual(Image.open(guardadas[0]).convert("RGB").getpixel((150, 100)), self.COLOR)
+
+    def test_tras_un_aceptar_fallido_y_otro_analisis_el_aceptar_pone_la_candidata_nueva(self):
+        # Defecto: el primer Aceptar cambió la portada y no pudo mover el álbum; su marca hacía
+        # saltar la candidata del análisis siguiente, y el render salía sin las zonas nuevas que el
+        # usuario aprobó. Además la lista de originales quedaba vacía.
+        carpeta = self.censurado()
+        with mock.patch.object(Path, "rename", side_effect=OSError("disco lleno")):
+            self.assertEqual(pa.aceptar_censura(carpeta)["motivo"], "no_se_pudo_aplicar")
+        # El intento 2 mira cuatro pedazos de 240 x 120; el último, abajo a la derecha, nace en (160, 80).
+        self.censurar(carpeta, 2, "[]", "[]", "[]", respuesta_con(("anus", (0, 0, 1000, 1000))))
+
+        resultado = pa.aceptar_censura(carpeta)
+
+        self.assertTrue(resultado["ok"], resultado)
+        portada = Image.open(pa.elegir_portada(Path(resultado["carpeta"]))).convert("RGB")
+        self.assertEqual(portada.getpixel((300, 150)), (0, 0, 0))
+        self.assertEqual(portada.getpixel((150, 100)), (0, 0, 0))
+        originales = [Image.open(o).convert("RGB").getpixel((150, 100)) for o in resultado["originales"]]
+        self.assertIn(self.COLOR, originales)
 
     # -- eliminar y deshacer desde Censura/ ---------------------------------------
 

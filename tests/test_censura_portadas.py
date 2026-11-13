@@ -5,6 +5,7 @@ El modelo nunca se llama: `requests` es un Ollama falso que contesta como el de 
 """
 import itertools
 import json
+import os
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -153,6 +154,20 @@ class TestPedazos(unittest.TestCase):
             self.assertTrue(all(a[2] > b[0] for a, b in zip(fila, fila[1:])))
 
 
+class TestUrlDeOllama(unittest.TestCase):
+    def test_un_ollama_host_sin_esquema_ni_puerto_va_al_11434_como_el_cli_de_ollama(self):
+        # Defecto: OLLAMA_HOST=0.0.0.0 o localhost (como lo muestra ollama) apuntaba al puerto 80 y
+        # todo análisis fallaba con «Ollama no responde».
+        with mock.patch.dict(os.environ, {"OLLAMA_HOST": "0.0.0.0"}):
+            self.assertEqual(cp.ClienteOllama().url, "http://0.0.0.0:11434")
+        self.assertEqual(cp.url_de_ollama("localhost"), "http://localhost:11434")
+        self.assertEqual(cp.url_de_ollama("[::1]"), "http://[::1]:11434")
+        # Lo que ya funcionaba sigue igual: con puerto se respeta, y con esquema el puerto que
+        # falta es el del esquema (así lo lee ollama).
+        self.assertEqual(cp.url_de_ollama("otra-pc:8080"), "http://otra-pc:8080")
+        self.assertEqual(cp.url_de_ollama("https://ollama.example/"), "https://ollama.example")
+
+
 class TestLeerDetecciones(unittest.TestCase):
     def test_lee_el_json_aunque_venga_con_texto_o_comillas_de_codigo_alrededor(self):
         # Defecto: el modelo envuelve el JSON en ```json ...```; leerlo tal cual lo descartaba.
@@ -165,6 +180,30 @@ class TestLeerDetecciones(unittest.TestCase):
         self.assertIsNone(cp.leer_detecciones("I cannot help with that."))
         self.assertIsNone(cp.leer_detecciones('[{"label": "penis", "bbox_2d": [1, 2'))
         self.assertIsNone(cp.leer_detecciones('{"label": "penis"}'))
+
+    def test_un_objeto_suelto_con_su_caja_se_lee_como_una_deteccion(self):
+        # Defecto: sin la lista alrededor, se leía solo el [x1, y1, x2, y2] de adentro y la
+        # portada salía «sin nada que tapar» aunque el modelo hubiera ubicado la zona.
+        texto = 'Encontré esto: {"label": "penis", "bbox_2d": [100, 200, 300, 400]}'
+        self.assertEqual(cp.leer_detecciones(texto), [("penis", (100, 200, 300, 400))])
+
+    def test_una_lista_con_elementos_pero_ninguna_caja_usable_no_es_nada_que_tapar(self):
+        # Defecto: si el modelo cambia el formato (otra clave, números como texto, pares), todo se
+        # salteaba y el pedazo contaba como limpio en vez de como no entendido.
+        self.assertIsNone(cp.leer_detecciones('[{"label": "penis", "box": [100, 200, 300, 400]}]'))
+        self.assertIsNone(cp.leer_detecciones('[{"label": "penis", "bbox_2d": ["100", "200", "300", "400"]}]'))
+        self.assertIsNone(cp.leer_detecciones("[[100, 200, 300, 400]]"))
+
+    def test_una_respuesta_rota_o_con_dos_valores_no_se_lee_a_medias(self):
+        # Defecto: con la lista de afuera rota (una coma de más, cortada) o con dos valores
+        # seguidos, se tomaba solo la primera caja y el pedazo contaba como leído: las otras zonas
+        # que marcó el modelo quedaban sin tapar y sin aviso.
+        caja = '{"label": "penis", "bbox_2d": [100, 200, 300, 400]}'
+        otra = '{"label": "anus", "bbox_2d": [500, 500, 600, 600]}'
+        self.assertIsNone(cp.leer_detecciones(f"[{caja}, {otra},]"))
+        self.assertIsNone(cp.leer_detecciones(f'[{caja}, {{"label": "anus", "bbox_2d": [5'))
+        self.assertIsNone(cp.leer_detecciones(f"{caja}\n{otra}"))
+        self.assertIsNone(cp.leer_detecciones(f"[{caja}]\n[{otra}]"))
 
     def test_salta_las_cajas_rotas_sin_tirar_las_buenas(self):
         # Defecto: una sola caja mal formada tiraba todas las del mismo pedazo.
@@ -194,7 +233,7 @@ class TestBuscarCajas(unittest.TestCase):
         # Defecto: devolver coordenadas 0-1000 sin pasarlas a píxeles taparía la esquina de la imagen.
         ollama = OllamaFalso([respuesta_con(("penis", (100, 200, 300, 400)))])
 
-        cajas = self.buscar(ollama)
+        cajas = self.buscar(ollama).cajas
 
         self.assertEqual(cajas, [("penis", 200.0, 200.0, 600.0, 400.0)])
         (pedido,) = ollama.chats()
@@ -218,7 +257,7 @@ class TestBuscarCajas(unittest.TestCase):
         # Defecto: sin sumar el origen del pedazo, la caja del pedazo de abajo a la derecha queda arriba a la izquierda.
         ollama = OllamaFalso([respuesta_con(("penis", (0, 0, 1000, 1000)))] + ["[]"] * 3)
 
-        cajas = self.buscar(ollama, intento=2)
+        cajas = self.buscar(ollama, intento=2).cajas
 
         self.assertEqual(len(ollama.chats()), 4)
         # El primer pedazo es el de arriba a la izquierda, de 1200 x 600 px.
@@ -228,10 +267,19 @@ class TestBuscarCajas(unittest.TestCase):
         # Defecto: un pedazo con texto en vez de JSON hacía fallar el intento entero.
         ollama = OllamaFalso(["no puedo", respuesta_con(("anus", (0, 0, 500, 500))), "[]", "[]"])
 
-        cajas = self.buscar(ollama, intento=2)
+        cajas = self.buscar(ollama, intento=2).cajas
 
         # Segundo pedazo: nace en x=800 (0.4 de 2000), y=0.
         self.assertEqual(cajas, [("anus", 800.0, 0.0, 1400.0, 300.0)])
+
+    def test_cuenta_los_pedazos_que_no_se_pudieron_leer(self):
+        # Defecto: un pedazo que el modelo no contestó se daba por limpio sin avisar, y el usuario
+        # veía «no se encontró nada que tapar» justo cuando ese pedazo tenía lo explícito.
+        ollama = OllamaFalso(["no puedo", "[]", "I cannot help with that.", "[]"])
+
+        resultado = self.buscar(ollama, intento=2)
+
+        self.assertEqual((resultado.cajas, resultado.pedazos, resultado.sin_leer), ([], 4, 2))
 
     def test_si_ningun_pedazo_se_entiende_el_intento_falla(self):
         # Defecto: dar «no hay nada que tapar» cuando el modelo no contestó nada utilizable

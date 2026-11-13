@@ -15,10 +15,10 @@ import io
 import json
 import math
 import os
-import re
 import shutil
 import subprocess
 import time
+from typing import NamedTuple
 
 import requests
 from PIL import Image, ImageDraw, ImageOps
@@ -34,7 +34,8 @@ PRESUPUESTO_ANALISIS_S = 25 * 60
 # lo suelta solo a los pocos segundos.
 KEEP_ALIVE_ENTRE_LLAMADAS = "60s"
 ESPERA_DESCARGA_S = 30
-HOST_POR_DEFECTO = "http://localhost:11434"
+PUERTO_OLLAMA = 11434
+HOST_POR_DEFECTO = f"http://localhost:{PUERTO_OLLAMA}"
 
 # Los textos van en inglés: es lo que mejor entiende el modelo.
 PROMPT_IMAGEN_ENTERA = (
@@ -185,9 +186,16 @@ def a_jpeg(imagen, lado=LADO_AL_MODELO):
 
 
 def url_de_ollama(host=None):
+    """La URL base de Ollama a partir de OLLAMA_HOST, como la lee el CLI de ollama: sin esquema va
+    por http y, si no tiene puerto, al 11434. Con http:// o https:// el puerto que falta es el del
+    esquema."""
     host = (host or "").strip() or HOST_POR_DEFECTO
     if "://" not in host:
-        host = f"http://{host}"
+        direccion, barra, ruta = host.partition("/")
+        _, dos_puntos, puerto = direccion.rpartition(":")
+        if not (dos_puntos and puerto.isdigit()):
+            direccion += f":{PUERTO_OLLAMA}"
+        host = f"http://{direccion}{barra}{ruta}"
     return host.rstrip("/")
 
 
@@ -277,19 +285,37 @@ class ClienteOllama:
         return self._esperar_descarga()
 
 
+def primer_json(texto):
+    """El valor JSON que empieza en el primer «[» o «{» del texto, o None.
+
+    También None si ese valor no se puede leer entero (cortado, con una coma de más) o si después
+    viene otro: nunca se toma un valor de adentro ni solo el primero de varios, porque así se
+    perderían las otras zonas que marcó el modelo. Las comillas de código y el texto alrededor
+    no importan.
+    """
+    inicio = min((i for i in (texto.find("["), texto.find("{")) if i >= 0), default=None)
+    if inicio is None:
+        return None
+    try:
+        datos, fin = json.JSONDecoder().raw_decode(texto, inicio)
+    except ValueError:
+        return None
+    resto = texto[fin:]
+    if "[" in resto or "{" in resto:
+        return None
+    return datos
+
+
 def leer_detecciones(texto):
     """Las cajas del JSON que contestó el modelo: [(etiqueta, (x1, y1, x2, y2))] de 0 a 1000.
 
-    None si no hay un JSON de lista (el modelo no entendió); [] si contestó que no hay nada. Una
-    caja mal formada se salta sin tirar las demás.
+    [] si contestó una lista vacía (no hay nada). None si no contestó un JSON, o si contestó
+    elementos sin ninguna caja usable: eso es no haber entendido, no «nada que tapar». Un objeto
+    suelto cuenta como una lista de uno. Una caja mal formada se salta sin tirar las demás.
     """
-    coincidencia = re.search(r"\[.*\]", texto or "", re.S)
-    if not coincidencia:
-        return None
-    try:
-        datos = json.loads(coincidencia.group(0))
-    except ValueError:
-        return None
+    datos = primer_json(texto or "")
+    if isinstance(datos, dict):
+        datos = [datos]
     if not isinstance(datos, list):
         return None
     detecciones = []
@@ -307,19 +333,32 @@ def leer_detecciones(texto):
         if x2 <= x1 or y2 <= y1:
             continue
         detecciones.append((str(item.get("label") or "zona"), (x1, y1, x2, y2)))
+    if datos and not detecciones:
+        return None
     return detecciones
 
 
-def buscar_cajas(imagen, intento, cliente, reloj=time.monotonic, presupuesto_s=PRESUPUESTO_ANALISIS_S):
-    """Dónde hay zonas que tapar: [(etiqueta, x1, y1, x2, y2)] en píxeles de `imagen`.
+class Busqueda(NamedTuple):
+    """Lo que dejó un intento: las cajas en píxeles, cuántos pedazos miró y cuántos no pudo leer."""
 
-    Un pedazo cuya respuesta no es un JSON válido no tira las cajas de los demás; si fallan todos,
-    el intento falla. Entre pedazo y pedazo mira el reloj: pasado el presupuesto, corta.
+    cajas: list
+    pedazos: int
+    sin_leer: int
+
+
+def buscar_cajas(imagen, intento, cliente, reloj=time.monotonic, presupuesto_s=PRESUPUESTO_ANALISIS_S):
+    """Dónde hay zonas que tapar: una `Busqueda` con [(etiqueta, x1, y1, x2, y2)] en píxeles de
+    `imagen`.
+
+    Un pedazo cuya respuesta no se entiende no tira las cajas de los demás, pero se cuenta en
+    `sin_leer`: ese pedazo nadie lo miró. Si fallan todos, el intento falla. Entre pedazo y pedazo
+    mira el reloj: pasado el presupuesto, corta.
     """
     ancho, alto = imagen.size
     limite = reloj() + presupuesto_s
+    trozos = pedazos(ancho, alto, intento)
     encontradas, entendidas = [], 0
-    for (x1, y1, x2, y2), entera in pedazos(ancho, alto, intento):
+    for (x1, y1, x2, y2), entera in trozos:
         restante = limite - reloj()
         if restante <= 0:
             raise ErrorDeCensura("tiempo_agotado", f"el análisis pasó los {presupuesto_s / 60:.0f} min")
@@ -343,4 +382,4 @@ def buscar_cajas(imagen, intento, cliente, reloj=time.monotonic, presupuesto_s=P
             ))
     if not entendidas:
         raise ErrorDeCensura("respuesta_invalida", "el modelo no contestó un JSON que pueda leer")
-    return encontradas
+    return Busqueda(encontradas, len(trozos), len(trozos) - entendidas)

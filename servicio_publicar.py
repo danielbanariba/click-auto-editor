@@ -88,6 +88,12 @@ BOTONES = {
     ],
     # El análisis o el Aceptar fallaron: el álbum sigue en Censura/.
     "censura_fallida": [[("🔁 Volver a analizar", "volver_a_analizar")], [("🗑 Eliminar", "eliminar")]],
+    # Lo mismo, con un análisis anterior que salió bien todavía en disco: se puede aceptar ese.
+    "censura_reintentar": [
+        [("✅ Aceptar", "aceptar")],
+        [("🔁 Volver a analizar", "volver_a_analizar")],
+        [("🗑 Eliminar", "eliminar")],
+    ],
     # No quedan álbumes para sumar: solo queda renderizar la lista.
     "fin_lista": [[("▶️ Renderizar la lista ({n})", "renderizar_lista")]],
     "subir": [
@@ -659,8 +665,13 @@ class Servicio:
             if paso not in ("a_censura", "aceptar_censura", "eliminar") or (paso, carpeta) in corriendo:
                 continue
             if paso == "eliminar" and not Path(carpeta).is_dir():
-                # El servicio se reinició cuando la carpeta ya estaba en la papelera.
-                log.info("%s ya no está en Censura/: lo doy por borrado", nombre)
+                # El servicio se reinició cuando la carpeta ya estaba en la papelera: el aviso con
+                # ↩️ Deshacer sale igual.
+                papelera = pa.entrada_de_papelera(carpeta)
+                if papelera:
+                    self.tras_eliminar({"ok": True, "album": nombre, "papelera": papelera}, ["eliminar", "--carpeta", carpeta])
+                    continue
+                log.info("%s ya no está en Censura/ ni en la papelera: lo doy por borrado", nombre)
                 del self.estado["censura"][nombre]
                 self.guardar()
                 continue
@@ -668,7 +679,9 @@ class Servicio:
         pendiente = next((e for e in self.estado["censura"].values() if e["paso"] == "censurar"), None)
         if pendiente is None or any(a[0] in ("censurar", "renderizar") for a, _ in self.tareas):
             return
-        if pa.render_en_curso():
+        # Otro análisis (de otra sesión, o uno que sobrevivió a un reinicio) usa el mismo modelo:
+        # el primero en terminar lo descargaría de la GPU con el otro a mitad.
+        if pa.render_en_curso() or pa.analisis_en_curso():
             return
         self.lanzar_paso("censurar", "--carpeta", pendiente["carpeta"], "--intento", str(pendiente["intento"]))
 
@@ -975,26 +988,32 @@ class Servicio:
         intento = resultado.get("intento") or int(valor(argumentos, "--intento"))
         entrada["paso"] = "pregunta"
         if resultado.get("ok"):
+            # Desde acá hay una censura en disco que se puede aceptar aunque falle el intento siguiente.
+            entrada["analizado"] = True
             self.preguntar_por_censura(album, carpeta, intento, resultado)
             return
         causa = MOTIVOS_CENSURA.get(motivo) or resultado.get("detalle") or motivo
         texto = f"❌ No pude analizar la portada de {album} (intento {intento}): {causa}."
         if resultado.get("log"):
             texto += f"\nLog: {resultado['log']}"
-        self.preguntar(
-            "censura_fallida",
-            f"{texto}\n\nSigue en Censura/. 🔁 Volver a analizar repite el intento.",
-            album=album, carpeta=carpeta, intento=intento,
-        )
+        texto += "\n\nSigue en Censura/. 🔁 Volver a analizar repite el intento."
+        tipo = "censura_fallida"
+        if entrada.get("analizado"):
+            tipo = "censura_reintentar"
+            texto += " ✅ Aceptar pone la última censura que te mandé."
+        self.preguntar(tipo, texto, album=album, carpeta=carpeta, intento=intento)
 
     def preguntar_por_censura(self, album, carpeta, intento, resultado):
         """La original va antes, sin botones (Telegram no admite botones en un grupo de fotos), y
         la censurada después, con la pregunta."""
         zonas, nuevas = resultado.get("zonas") or 0, resultado.get("nuevas") or 0
+        sin_leer = resultado.get("sin_leer") or 0
         cuantas = f"{zonas} zona" if zonas == 1 else f"{zonas} zonas"
         if not zonas:
+            # Con pedazos sin leer, «nada que tapar» sería afirmar algo que nadie miró.
+            encontrado = "no encontré nada que tapar en lo que pude leer" if sin_leer else "no se encontró nada que tapar"
             texto = (
-                f"🔞 {album}, intento {intento}: no se encontró nada que tapar.\n\n"
+                f"🔞 {album}, intento {intento}: {encontrado}.\n\n"
                 "✅ Aceptar deja la portada como está."
             )
         elif not nuevas:
@@ -1005,6 +1024,11 @@ class Servicio:
         else:
             tapado = ", ".join(dict.fromkeys(resultado.get("encontradas") or [])) or "lo que encontré"
             texto = f"🔞 {album}, intento {intento}: tapé {tapado} ({cuantas} en total)."
+        if sin_leer:
+            texto += (
+                f"\n\n⚠️ {sin_leer} de {resultado.get('pedazos') or sin_leer} pedazos no se pudieron "
+                "leer: puede quedar algo sin tapar."
+            )
         censurada = resultado.get("censurada")
         previas = []
         if censurada:
@@ -1038,8 +1062,9 @@ class Servicio:
         entrada["paso"] = "pregunta"
         self.estado["censura"][album] = entrada
         motivo = resultado.get("motivo")
+        # El análisis sigue en disco: ✅ Aceptar lo vuelve a intentar sin gastar la GPU.
         self.preguntar(
-            "censura_fallida",
+            "censura_fallida" if motivo == "sin_analisis" else "censura_reintentar",
             f"❌ No pude poner la portada censurada de {album}: "
             f"{MOTIVOS_CENSURA.get(motivo) or resultado.get('detalle') or motivo}.\n\nSigue en Censura/.",
             album=album, carpeta=carpeta, intento=entrada["intento"],
@@ -1823,6 +1848,8 @@ class Servicio:
     def respuesta_censura_fallida(self, accion, pregunta):
         # Un intento que falló no cuenta: se repite el mismo.
         self.seguir_con_la_censura(accion, pregunta, pregunta["intento"])
+
+    respuesta_censura_reintentar = respuesta_censura_fallida
 
     def seguir_con_la_censura(self, accion, pregunta, intento):
         entrada = self.estado["censura"].setdefault(
