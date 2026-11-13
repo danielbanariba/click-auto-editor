@@ -136,7 +136,8 @@ as the ollama CLI reads it: with no scheme and no port it goes to port 11434.
 - A piece whose reply cannot be read does not drop the other pieces' boxes, but it is counted:
   `censurar` returns `pedazos` and `sin_leer`, and if no piece can be read the attempt fails. A
   reply with items but no usable box counts as unreadable, not as "nothing to cover"; a bare
-  object (no list around it) counts as one box.
+  object (no list around it) counts as one box. A reply whose JSON is cut off, has a stray comma
+  or is followed by a second value is unreadable too: no box is taken from inside it.
 
 When it ends, the original comes as a photo and then the censored one, with "✅ Aceptar",
 "🔁 Volver a analizar" (the next attempt) and "🗑 Eliminar". With nothing found, the question

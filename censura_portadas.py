@@ -286,19 +286,24 @@ class ClienteOllama:
 
 
 def primer_json(texto):
-    """El primer valor JSON del texto que empiece con «[» o «{», o None si no hay ninguno.
+    """El valor JSON que empieza en el primer «[» o «{» del texto, o None.
 
-    Lo que venga antes o después (comillas de código, una explicación) no importa.
+    También None si ese valor no se puede leer entero (cortado, con una coma de más) o si después
+    viene otro: nunca se toma un valor de adentro ni solo el primero de varios, porque así se
+    perderían las otras zonas que marcó el modelo. Las comillas de código y el texto alrededor
+    no importan.
     """
-    decodificador = json.JSONDecoder()
-    for posicion, caracter in enumerate(texto):
-        if caracter not in "[{":
-            continue
-        try:
-            return decodificador.raw_decode(texto, posicion)[0]
-        except ValueError:
-            continue
-    return None
+    inicio = min((i for i in (texto.find("["), texto.find("{")) if i >= 0), default=None)
+    if inicio is None:
+        return None
+    try:
+        datos, fin = json.JSONDecoder().raw_decode(texto, inicio)
+    except ValueError:
+        return None
+    resto = texto[fin:]
+    if "[" in resto or "{" in resto:
+        return None
+    return datos
 
 
 def leer_detecciones(texto):

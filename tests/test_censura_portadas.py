@@ -194,6 +194,17 @@ class TestLeerDetecciones(unittest.TestCase):
         self.assertIsNone(cp.leer_detecciones('[{"label": "penis", "bbox_2d": ["100", "200", "300", "400"]}]'))
         self.assertIsNone(cp.leer_detecciones("[[100, 200, 300, 400]]"))
 
+    def test_una_respuesta_rota_o_con_dos_valores_no_se_lee_a_medias(self):
+        # Defecto: con la lista de afuera rota (una coma de más, cortada) o con dos valores
+        # seguidos, se tomaba solo la primera caja y el pedazo contaba como leído: las otras zonas
+        # que marcó el modelo quedaban sin tapar y sin aviso.
+        caja = '{"label": "penis", "bbox_2d": [100, 200, 300, 400]}'
+        otra = '{"label": "anus", "bbox_2d": [500, 500, 600, 600]}'
+        self.assertIsNone(cp.leer_detecciones(f"[{caja}, {otra},]"))
+        self.assertIsNone(cp.leer_detecciones(f'[{caja}, {{"label": "anus", "bbox_2d": [5'))
+        self.assertIsNone(cp.leer_detecciones(f"{caja}\n{otra}"))
+        self.assertIsNone(cp.leer_detecciones(f"[{caja}]\n[{otra}]"))
+
     def test_salta_las_cajas_rotas_sin_tirar_las_buenas(self):
         # Defecto: una sola caja mal formada tiraba todas las del mismo pedazo.
         texto = json.dumps([
