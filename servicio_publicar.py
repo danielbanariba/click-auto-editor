@@ -991,10 +991,13 @@ class Servicio:
         """La original va antes, sin botones (Telegram no admite botones en un grupo de fotos), y
         la censurada después, con la pregunta."""
         zonas, nuevas = resultado.get("zonas") or 0, resultado.get("nuevas") or 0
+        sin_leer = resultado.get("sin_leer") or 0
         cuantas = f"{zonas} zona" if zonas == 1 else f"{zonas} zonas"
         if not zonas:
+            # Con pedazos sin leer, «nada que tapar» sería afirmar algo que nadie miró.
+            encontrado = "no encontré nada que tapar en lo que pude leer" if sin_leer else "no se encontró nada que tapar"
             texto = (
-                f"🔞 {album}, intento {intento}: no se encontró nada que tapar.\n\n"
+                f"🔞 {album}, intento {intento}: {encontrado}.\n\n"
                 "✅ Aceptar deja la portada como está."
             )
         elif not nuevas:
@@ -1005,6 +1008,11 @@ class Servicio:
         else:
             tapado = ", ".join(dict.fromkeys(resultado.get("encontradas") or [])) or "lo que encontré"
             texto = f"🔞 {album}, intento {intento}: tapé {tapado} ({cuantas} en total)."
+        if sin_leer:
+            texto += (
+                f"\n\n⚠️ {sin_leer} de {resultado.get('pedazos') or sin_leer} pedazos no se pudieron "
+                "leer: puede quedar algo sin tapar."
+            )
         censurada = resultado.get("censurada")
         previas = []
         if censurada:

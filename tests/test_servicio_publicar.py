@@ -693,6 +693,20 @@ class TestCensurar(BaseServicio):
         self.assertIn("no se encontró nada", pregunta["texto"])
         self.assertEqual(pregunta["foto"], str(self.tmp / "vista_original.jpg"))
 
+    def test_con_pedazos_sin_leer_avisa_que_puede_quedar_algo_sin_tapar(self):
+        # Defecto: con un pedazo que el modelo no contestó, la pregunta decía «no se encontró nada
+        # que tapar» y el usuario aceptaba una portada que nadie había mirado entera.
+        self.mandar_a_censura()
+
+        vacia = self.analizado(intento=2, encontradas=[], nuevas=0, zonas=0, censurada=None, pedazos=4, sin_leer=1)
+        self.assertIn("1 de 4 pedazos no se pudieron leer", vacia["texto"])
+        self.assertNotIn("no se encontró nada que tapar", vacia["texto"])
+
+        self.telegram.apretar(vacia, self.VOLVER)
+        self.servicio.paso()
+        tapada = self.analizado(intento=3, pedazos=10, sin_leer=3)
+        self.assertIn("3 de 10 pedazos no se pudieron leer", tapada["texto"])
+
     def test_un_intento_sin_cajas_nuevas_dice_que_sigue_la_censura_de_los_anteriores(self):
         self.mandar_a_censura()
         pregunta = self.analizado(intento=2, encontradas=[], nuevas=0, zonas=2)

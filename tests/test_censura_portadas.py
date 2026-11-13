@@ -166,6 +166,19 @@ class TestLeerDetecciones(unittest.TestCase):
         self.assertIsNone(cp.leer_detecciones('[{"label": "penis", "bbox_2d": [1, 2'))
         self.assertIsNone(cp.leer_detecciones('{"label": "penis"}'))
 
+    def test_un_objeto_suelto_con_su_caja_se_lee_como_una_deteccion(self):
+        # Defecto: sin la lista alrededor, se leía solo el [x1, y1, x2, y2] de adentro y la
+        # portada salía «sin nada que tapar» aunque el modelo hubiera ubicado la zona.
+        texto = 'Encontré esto: {"label": "penis", "bbox_2d": [100, 200, 300, 400]}'
+        self.assertEqual(cp.leer_detecciones(texto), [("penis", (100, 200, 300, 400))])
+
+    def test_una_lista_con_elementos_pero_ninguna_caja_usable_no_es_nada_que_tapar(self):
+        # Defecto: si el modelo cambia el formato (otra clave, números como texto, pares), todo se
+        # salteaba y el pedazo contaba como limpio en vez de como no entendido.
+        self.assertIsNone(cp.leer_detecciones('[{"label": "penis", "box": [100, 200, 300, 400]}]'))
+        self.assertIsNone(cp.leer_detecciones('[{"label": "penis", "bbox_2d": ["100", "200", "300", "400"]}]'))
+        self.assertIsNone(cp.leer_detecciones("[[100, 200, 300, 400]]"))
+
     def test_salta_las_cajas_rotas_sin_tirar_las_buenas(self):
         # Defecto: una sola caja mal formada tiraba todas las del mismo pedazo.
         texto = json.dumps([
@@ -194,7 +207,7 @@ class TestBuscarCajas(unittest.TestCase):
         # Defecto: devolver coordenadas 0-1000 sin pasarlas a píxeles taparía la esquina de la imagen.
         ollama = OllamaFalso([respuesta_con(("penis", (100, 200, 300, 400)))])
 
-        cajas = self.buscar(ollama)
+        cajas = self.buscar(ollama).cajas
 
         self.assertEqual(cajas, [("penis", 200.0, 200.0, 600.0, 400.0)])
         (pedido,) = ollama.chats()
@@ -218,7 +231,7 @@ class TestBuscarCajas(unittest.TestCase):
         # Defecto: sin sumar el origen del pedazo, la caja del pedazo de abajo a la derecha queda arriba a la izquierda.
         ollama = OllamaFalso([respuesta_con(("penis", (0, 0, 1000, 1000)))] + ["[]"] * 3)
 
-        cajas = self.buscar(ollama, intento=2)
+        cajas = self.buscar(ollama, intento=2).cajas
 
         self.assertEqual(len(ollama.chats()), 4)
         # El primer pedazo es el de arriba a la izquierda, de 1200 x 600 px.
@@ -228,10 +241,19 @@ class TestBuscarCajas(unittest.TestCase):
         # Defecto: un pedazo con texto en vez de JSON hacía fallar el intento entero.
         ollama = OllamaFalso(["no puedo", respuesta_con(("anus", (0, 0, 500, 500))), "[]", "[]"])
 
-        cajas = self.buscar(ollama, intento=2)
+        cajas = self.buscar(ollama, intento=2).cajas
 
         # Segundo pedazo: nace en x=800 (0.4 de 2000), y=0.
         self.assertEqual(cajas, [("anus", 800.0, 0.0, 1400.0, 300.0)])
+
+    def test_cuenta_los_pedazos_que_no_se_pudieron_leer(self):
+        # Defecto: un pedazo que el modelo no contestó se daba por limpio sin avisar, y el usuario
+        # veía «no se encontró nada que tapar» justo cuando ese pedazo tenía lo explícito.
+        ollama = OllamaFalso(["no puedo", "[]", "I cannot help with that.", "[]"])
+
+        resultado = self.buscar(ollama, intento=2)
+
+        self.assertEqual((resultado.cajas, resultado.pedazos, resultado.sin_leer), ([], 4, 2))
 
     def test_si_ningun_pedazo_se_entiende_el_intento_falla(self):
         # Defecto: dar «no hay nada que tapar» cuando el modelo no contestó nada utilizable

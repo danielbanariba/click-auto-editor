@@ -1100,9 +1100,9 @@ def censurar(carpeta, intento, cliente=None):
     cliente = cliente or censura_portadas.ClienteOllama()
     fallo = None
     try:
-        nuevas = censura_portadas.buscar_cajas(imagen, intento, cliente)
+        busqueda = censura_portadas.buscar_cajas(imagen, intento, cliente)
     except censura_portadas.ErrorDeCensura as exc:
-        nuevas, fallo = [], exc
+        fallo = exc
     finally:
         descargado = cliente.descargar()
     if fallo is not None:
@@ -1110,6 +1110,7 @@ def censurar(carpeta, intento, cliente=None):
             "ok": False, "motivo": fallo.motivo, "detalle": fallo.detalle, "album": album,
             "intento": intento, "descargado": descargado,
         }
+    nuevas = busqueda.cajas
 
     datos = datos_de_censura(album)
     datos.mkdir(parents=True, exist_ok=True)
@@ -1140,6 +1141,8 @@ def censurar(carpeta, intento, cliente=None):
         "encontradas": etiquetas,
         "nuevas": len(nuevas),
         "zonas": len(zonas),
+        "pedazos": busqueda.pedazos,
+        "sin_leer": busqueda.sin_leer,
         "original": str(original),
         "censurada": str(censurada) if censurada else None,
         "descargado": descargado,

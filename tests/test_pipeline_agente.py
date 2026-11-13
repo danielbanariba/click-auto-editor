@@ -978,6 +978,15 @@ class TestCensura(unittest.TestCase):
         self.censurar(carpeta, 1, "[]")
         self.assertFalse((self.datos / pa.slug(carpeta.name) / "candidata.png").exists())
 
+    def test_el_resultado_dice_cuantos_pedazos_no_se_pudieron_leer(self):
+        # Defecto: el servicio no se enteraba de los pedazos sin leer y daba la portada por limpia.
+        carpeta = self.en_censura("Banda - Disco (2020)")
+
+        resultado = self.censurar(carpeta, 2, "no puedo", "[]", "[]", "[]")
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual((resultado["pedazos"], resultado["sin_leer"]), (4, 1))
+
     def test_si_el_analisis_falla_dice_por_que_descarga_el_modelo_y_no_anota_el_intento(self):
         # Defecto: un fallo que no descarga el modelo deja 17 GB en la GPU; y uno que anota el
         # intento hace que «Volver a analizar» mire con más cuidado sin haber mirado.
