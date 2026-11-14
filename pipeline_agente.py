@@ -453,6 +453,33 @@ def elegir_fecha(ahora, con_reclamo, tomados):
     return max(momento, ahora + timedelta(minutes=ANTICIPACION_MIN))
 
 
+def ultimo_programado(video_id):
+    """El último registro de `registrar_programado` para el video; None si no hay."""
+    ultimo = None
+    if PROGRAMADOS_JSONL.exists():
+        with open(PROGRAMADOS_JSONL, "r", encoding="utf-8") as f:
+            for linea in f:
+                try:
+                    registro = json.loads(linea)
+                except json.JSONDecodeError:
+                    continue
+                if registro.get("video_id") == video_id:
+                    ultimo = registro
+    return ultimo
+
+
+def fecha_ya_programada(video_id, status, ahora):
+    """La fecha que `programar` ya le puso al video como uno sin reclamo, si YouTube la conserva y
+    no pasó; si no, None. La de un video aparcado tiene su registro con reclamo: no cuenta."""
+    if status.get("privacyStatus") != "private" or not status.get("publishAt"):
+        return None
+    publica_en = datetime.fromisoformat(status["publishAt"]).astimezone()
+    registro = ultimo_programado(video_id)
+    if publica_en <= ahora or not registro or registro.get("con_reclamo") is not False:
+        return None
+    return publica_en if datetime.fromisoformat(registro["publica_en"]) == publica_en else None
+
+
 def armar_status_programado(status_actual, publica_en):
     # videos.update borra los campos de status que no se mandan.
     status = {
@@ -1921,13 +1948,18 @@ def reclamantes_en_lista_negra(reclamantes, lista_negra):
 
 
 def armar_resumen_programado(
-    titulo, publica_en, con_reclamo, reclamantes, monetizacion=None, publicado_ahora=False
+    titulo, publica_en, con_reclamo, reclamantes, monetizacion=None, publicado_ahora=False, ya_programado=False
 ):
     fecha = publica_en.strftime("%Y-%m-%d %H:%M")
     if con_reclamo:
         quienes = f" ({', '.join(reclamantes)})" if reclamantes else ""
         return f"⚠️ {titulo}\nTiene reclamo{quienes}: programado para {fecha}, hasta que se resuelva el reclamo."
-    cuando = "publicado ahora" if publicado_ahora else f"programado para {fecha}"
+    if ya_programado:
+        cuando = f"ya estaba programado para {fecha}, no lo muevo"
+    elif publicado_ahora:
+        cuando = "publicado ahora"
+    else:
+        cuando = f"programado para {fecha}"
     marca = "🎉✅" if publicado_ahora else "✓"
     texto = f"{marca} {titulo}\nSin reclamos: {cuando}."
     if (monetizacion or {}).get("estado") in ("activada", "ya_activa"):
@@ -1993,6 +2025,31 @@ def programar(
             # De a un `programar` por vez: la revisión en Studio comparte el perfil
             # del navegador, y dos procesos a la vez elegirían la misma hora libre.
             with bloqueo("programar"):
+                # Un video liberado dos veces (mapear_canal y seguir_impugnaciones) ya tiene fecha:
+                # elegir otra lo mandaría al final de la fila, porque la suya cuenta como tomada.
+                # Se lee de nuevo acá: otro `programar` pudo ponérsela mientras este esperaba.
+                if reclamo is False:
+                    _, actual = consultar_video(uploader, yt, video_id)
+                    ya_programado = fecha_ya_programada(video_id, actual, datetime.now().astimezone())
+                    if ya_programado:
+                        print(f"{video_id} ya estaba programado para {ya_programado.isoformat()}: no se mueve.")
+                        # La pasada que puso la fecha pudo fallar en la monetización.
+                        monetizacion = activar_sin_frenar(activar, video_id)
+                        return {
+                            "ok": True,
+                            "video_id": video_id,
+                            "titulo": titulo,
+                            "con_reclamo": False,
+                            "reclamantes": [],
+                            "publica_en": ya_programado.isoformat(),
+                            "publicado_ahora": False,
+                            "ya_programado": True,
+                            "monetizacion": monetizacion,
+                            "resumen": armar_resumen_programado(
+                                titulo, ya_programado, False, [], monetizacion, ya_programado=True
+                            ),
+                            "log": str(log),
+                        }
                 reclamantes = []
                 captura_studio = None
                 if reclamo is None:

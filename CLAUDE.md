@@ -220,6 +220,19 @@ channel's uploads, scheduled ones from the API and `programados.jsonl`);
 otherwise it is scheduled for the earliest moment that keeps one hour from
 every published or scheduled video. Claimed videos go two years ahead, on the
 first free hour, and monetization is not attempted for them.
+`programar --reclamo no` keeps the date it already gave the video as an unclaimed one
+(`fecha_ya_programada`) and says "ya estaba programado para ..., no lo muevo".
+- That date is still in the future, and the video's last `programados.jsonl` row has no claim and
+  the same date YouTube has. On 2026-11-14 that held for 38 of the 39 parked videos; the other one
+  had been moved since.
+- This was added on 2026-11-14: `mapear_canal` and `seguir_impugnaciones` freed the same video,
+  and the second run moved it from 11-14 13:00 to 11-16 21:00, because its own date counted as
+  taken.
+- A video parked by a claim is not kept, even when its date is less than a year away: its last row
+  has the claim. It still goes into the queue.
+- Monetization is still attempted, since the run that set the date may have failed at it.
+- The date is read again inside the `programar` lock, so a run that waited for the lock does not
+  move a date another run has just set.
 
 Studio (claim check and monetization) runs Brave headless with a copy of the
 signed-in profile (`.runtime_browser_profiles/agente`). It must launch without
