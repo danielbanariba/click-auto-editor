@@ -453,6 +453,14 @@ def elegir_fecha(ahora, con_reclamo, tomados):
     return max(momento, ahora + timedelta(minutes=ANTICIPACION_MIN))
 
 
+def fecha_ya_programada(status, ahora):
+    """La fecha de un video privado que sale antes de UMBRAL_APARCADO (uno sin reclamo); si no, None."""
+    if status.get("privacyStatus") != "private" or not status.get("publishAt"):
+        return None
+    publica_en = datetime.fromisoformat(status["publishAt"]).astimezone()
+    return publica_en if ahora < publica_en <= ahora + UMBRAL_APARCADO else None
+
+
 def armar_status_programado(status_actual, publica_en):
     # videos.update borra los campos de status que no se mandan.
     status = {
@@ -1993,6 +2001,29 @@ def programar(
             # De a un `programar` por vez: la revisión en Studio comparte el perfil
             # del navegador, y dos procesos a la vez elegirían la misma hora libre.
             with bloqueo("programar"):
+                # Un video liberado dos veces (mapear_canal y seguir_impugnaciones) ya tiene fecha:
+                # elegir otra lo mandaría al final de la fila, porque la suya cuenta como tomada.
+                # Se lee de nuevo acá: otro `programar` pudo ponérsela mientras este esperaba.
+                if reclamo is False:
+                    _, actual = consultar_video(uploader, yt, video_id)
+                    ya_programado = fecha_ya_programada(actual, datetime.now().astimezone())
+                    if ya_programado:
+                        print(f"{video_id} ya estaba programado para {ya_programado.isoformat()}: no se mueve.")
+                        return {
+                            "ok": True,
+                            "video_id": video_id,
+                            "titulo": titulo,
+                            "con_reclamo": False,
+                            "reclamantes": [],
+                            "publica_en": ya_programado.isoformat(),
+                            "publicado_ahora": False,
+                            "ya_programado": True,
+                            "resumen": (
+                                f"✓ {titulo}\nSin reclamos: ya estaba programado para "
+                                f"{ya_programado.strftime('%Y-%m-%d %H:%M')}, no lo muevo."
+                            ),
+                            "log": str(log),
+                        }
                 reclamantes = []
                 captura_studio = None
                 if reclamo is None:

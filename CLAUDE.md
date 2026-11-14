@@ -220,6 +220,12 @@ channel's uploads, scheduled ones from the API and `programados.jsonl`);
 otherwise it is scheduled for the earliest moment that keeps one hour from
 every published or scheduled video. Claimed videos go two years ahead, on the
 first free hour, and monetization is not attempted for them.
+`programar --reclamo no` keeps the date of a video that already has one less than a year ahead
+(`fecha_ya_programada`) and opens no Studio. The notice says "ya estaba programado para ..., no
+lo muevo". This was added on 2026-11-14: `mapear_canal` and `seguir_impugnaciones` freed the same
+video, and the second run moved it from 11-14 13:00 to 11-16 21:00, because its own date counted
+as taken. The date is read again inside the `programar` lock, so a run that waited for the lock
+does not move a date another run has just set.
 
 Studio (claim check and monetization) runs Brave headless with a copy of the
 signed-in profile (`.runtime_browser_profiles/agente`). It must launch without
