@@ -527,6 +527,8 @@ class Servicio:
         # nombra el id.
         self.titulos_por_borrar = {}
         self.album_pausado_hasta = 0.0
+        # Álbum cuyo render se lanzó durante una subida: al terminar no se verifica enseguida.
+        self.render_adelantado = None
         self.avisos = set()
         # Álbumes publicados que no se pudieron mover: se avisan una vez (avisos se vacía en cada render).
         self.no_apartados = set()
@@ -705,7 +707,10 @@ class Servicio:
         self.avisar_una_vez("vaciar_papelera", "\n".join(["⚠️ No pude vaciar la papelera:", *detalle]))
 
     def avanzar_album(self):
-        if any(argumentos[0] in PASOS_DEL_ALBUM for argumentos, _ in self.tareas):
+        en_curso = [argumentos[0] for argumentos, _ in self.tareas if argumentos[0] in PASOS_DEL_ALBUM]
+        # Mientras sube un álbum la GPU no hace nada: se adelanta el render del siguiente aceptado.
+        adelantar = en_curso == ["subir"]
+        if en_curso and not adelantar:
             return
         abiertas = [p for p in self.estado["preguntas"].values() if p["tipo"] in PREGUNTAS_QUE_FRENAN]
         # Un chequeo que falló en un álbum aceptado pregunta sin frenar al resto de la lista.
@@ -717,6 +722,9 @@ class Servicio:
         # Un render que lanzó otro (a mano o una sesión vieja) puede estar
         # moviendo el mp4 a Renderizando/: se espera a que termine.
         if pa.render_en_curso():
+            return
+        if adelantar:
+            self.adelantar_render()
             return
         descartados = set(self.estado["rechazados"]) | set(self.estado["subidos"])
         descartados |= {Path(p["carpeta"]).name for p in abiertas if p.get("carpeta")}
@@ -751,6 +759,23 @@ class Servicio:
                 "sin_albumes",
                 f"📭 No quedan álbumes en {carpetas_de_origen()}. Sigo solo cuando aparezca uno.",
             )
+
+    def adelantar_render(self):
+        """Renderiza el siguiente álbum aceptado mientras otro se sube.
+
+        Uno solo por adelantado: si ya hay un aceptado renderizado esperando, no se lanza otro (los
+        videos esperan en el SSD). Se verifica y se sube cuando termina la subida en curso.
+        """
+        if self.analisis_activo():
+            return
+        renderizados = {Path(carpeta).name for carpeta in pa.albumes_por_aprobar()}
+        if any(nombre in renderizados for nombre in self.estado["aceptados"]):
+            return
+        for nombre in self.estado["aceptados"]:
+            if any((origen / nombre).is_dir() for origen in pa.DIRS_ORIGEN_RENDER):
+                self.render_adelantado = nombre
+                self.lanzar_paso("renderizar", "--carpeta", nombre)
+                return
 
     # -- resultados de cada paso -------------------------------------------
 
@@ -803,6 +828,10 @@ class Servicio:
             self.album_pausado_hasta = self.reloj() + REINTENTO_S
 
     def tras_renderizar(self, resultado, argumentos):
+        lanzado = valor(argumentos, "--carpeta")
+        adelantado = self.render_adelantado is not None and lanzado == self.render_adelantado
+        if adelantado:
+            self.render_adelantado = None
         apartados = resultado.get("ya_publicados") or []
         self.avisar_apartados(apartados)
         motivo = resultado.get("motivo")
@@ -818,6 +847,9 @@ class Servicio:
                 if nombre in self.estado[lista]:
                     self.estado[lista].remove(nombre)
             self.guardar()
+            if adelantado:
+                # Lo verifica avanzar_album cuando termine la subida y nada frene la cola.
+                return
             self.lanzar_paso("verificar", "--carpeta", resultado["carpeta"])
         elif motivo in ("sin_albumes", "render_en_curso", "analisis_en_curso"):
             return
