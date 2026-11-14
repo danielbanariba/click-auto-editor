@@ -50,6 +50,9 @@ P_FILA_DE_LA_LISTA = {
     "edad": re.compile(r"mayores de 18", re.IGNORECASE),
     "anuncios": re.compile(r"ingresos publicitarios limitados|sin ingresos publicitarios", re.IGNORECASE),
 }
+# Un video que YouTube retiró sigue en las listas filtradas con un solo aviso, "Retirado", y no
+# se puede apelar. Visto el 2026-11-14: desde el 2026-11-08 uno así frenaba toda la corrida.
+P_RETIRADO = re.compile(r"\bretirado\b", re.IGNORECASE)
 P_MAYORES_DE_18 = re.compile(r"mayores de 18", re.IGNORECASE)
 P_ANUNCIOS_LIMITADOS = re.compile(r"ingresos publicitarios limitados", re.IGNORECASE)
 P_SIGUIENTE = re.compile(r"(página siguiente|next page)", re.IGNORECASE)
@@ -191,7 +194,9 @@ def _filas_de_la_lista(pagina, tipo, distinta_de=None):
 
     def listas():
         filas = pagina.evaluate(JS_FILAS)
-        if not filas or not all(f["video_id"] and patron.search(f["avisos"]) for f in filas):
+        if not filas or not all(
+            f["video_id"] and (patron.search(f["avisos"]) or P_RETIRADO.search(f["avisos"])) for f in filas
+        ):
             return None
         if distinta_de and filas[0]["video_id"] == distinta_de:
             return None
@@ -224,6 +229,10 @@ def candidatos(pagina, canal, tipo, registro, recorrido):
         for fila in filas:
             datos = registro.get(f"{tipo}:{fila['video_id']}")
             if datos is not None and not espera_resultado(datos):
+                continue
+            # Sigue contando como visto: una apelación esperando resultado no se da por aceptada.
+            if P_RETIRADO.search(fila["avisos"]):
+                print(f"{tipo}:{fila['video_id']}: retirado por YouTube, no se apela")
                 continue
             # Un video con restricción de edad también sale en la lista de anuncios: su
             # apelación es la de edad.
