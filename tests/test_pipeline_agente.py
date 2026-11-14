@@ -1689,19 +1689,18 @@ class VideosFalsos:
 
 class VideoQueGuardaSuFecha:
     """Un video privado ya procesado. Como en YouTube, la fecha que manda `update` queda en su
-    status. `otra_fecha_tras_la_primera_lectura` es otro `programar` que se la cambia mientras tanto."""
+    status."""
 
-    def __init__(self, publica_en, otra_fecha_tras_la_primera_lectura=None):
+    def __init__(self, publica_en):
         self.status = {"privacyStatus": "private", "uploadStatus": "processed", "publishAt": publica_en.isoformat()}
-        self.otra_fecha = otra_fecha_tras_la_primera_lectura
         self.actualizaciones = []
 
     def list(self, part, id):
-        respuesta = Llamada({"items": [{"status": dict(self.status), "processingDetails": {"processingStatus": "succeeded"}}]})
-        if self.otra_fecha:
-            self.status["publishAt"] = self.otra_fecha.isoformat()
-            self.otra_fecha = None
-        return respuesta
+        status = dict(self.status)
+        if "publishAt" in status:  # como la devuelve la API: en UTC, con "Z"
+            utc = datetime.fromisoformat(status["publishAt"]).astimezone(timezone.utc)
+            status["publishAt"] = utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return Llamada({"items": [{"status": status, "processingDetails": {"processingStatus": "succeeded"}}]})
 
     def update(self, part, body):
         self.actualizaciones.append(body)
@@ -1888,7 +1887,6 @@ class TestProgramar(unittest.TestCase):
         ]
         for parche in self.parches:
             parche.start()
-        self.activadas = []
 
     def tearDown(self):
         for parche in self.parches:
@@ -1938,10 +1936,6 @@ class TestProgramar(unittest.TestCase):
         uploader.fetch_scheduled_publish_times = lambda cliente, max_items: ({*fila, *video.fechas()}, {})
         return uploader
 
-    def activar(self, video_id):
-        self.activadas.append(video_id)
-        return monetizacion_activada(video_id)
-
     def test_un_video_liberado_dos_veces_conserva_la_fecha_que_ya_tenia(self):
         # Defecto (2026-11-14): mapear_canal y seguir_impugnaciones liberaron el mismo video; el
         # segundo `programar` contó su propia fecha como tomada y lo mandó al final de la fila.
@@ -1949,32 +1943,63 @@ class TestProgramar(unittest.TestCase):
         video = VideoQueGuardaSuFecha(pa.sumar_dos_anios(ahora))
         fila = [ahora + timedelta(minutes=30, hours=hora) for hora in range(48)]
         uploader = self.uploader_con_fila(video, fila)
+        fallida = {"estado": "fallo", "motivo": "error_navegador"}
 
-        primero = pa.programar("V1", reclamo=False, activar=self.activar, uploader=uploader)
-        segundo = pa.programar("V1", reclamo=False, activar=self.activar, uploader=uploader)
+        primero = pa.programar("V1", reclamo=False, activar=lambda video_id: fallida, uploader=uploader)
+        segundo = pa.programar("V1", reclamo=False, activar=monetizacion_activada, uploader=uploader)
 
         self.assertTrue(primero["ok"], primero)
         self.assertLess(datetime.fromisoformat(primero["publica_en"]), ahora + timedelta(days=3))
         self.assertTrue(segundo["ok"], segundo)
         self.assertEqual(segundo["publica_en"], primero["publica_en"])
         self.assertEqual(len(video.actualizaciones), 1)
-        self.assertEqual(self.activadas, ["V1"])
         self.assertIn("ya estaba programado", segundo["resumen"])
+        # La pasada que puso la fecha pudo fallar en la monetización: la segunda la intenta igual.
+        self.assertEqual(segundo["monetizacion"]["estado"], "activada")
 
     def test_la_fecha_que_otro_programar_puso_mientras_esperaba_el_candado_no_se_mueve(self):
         # Defecto: seguir_impugnaciones no mira si ya corre un `programar` del video; el segundo
         # leyó el video aparcado antes de esperar el candado y, al entrar, lo movía igual.
         ahora = datetime.now().astimezone().replace(microsecond=0)
         en_la_fila = ahora + timedelta(hours=5)
-        video = VideoQueGuardaSuFecha(pa.sumar_dos_anios(ahora), otra_fecha_tras_la_primera_lectura=en_la_fila)
+        video = VideoQueGuardaSuFecha(pa.sumar_dos_anios(ahora))
+        bloqueo_real = pa.bloqueo
+        esperas = []
 
-        resultado = pa.programar("V1", reclamo=False, activar=self.activar, uploader=self.uploader_con_fila(video))
+        @contextlib.contextmanager
+        def bloqueo_tras_otro_programar(nombre):
+            with bloqueo_real(nombre):
+                if nombre == "programar" and not esperas:
+                    esperas.append(nombre)
+                    # El otro `programar` del mismo video terminó mientras este esperaba.
+                    video.status["publishAt"] = en_la_fila.isoformat()
+                    pa.registrar_programado("V1", "Banda - Disco", en_la_fila, False)
+                yield
+
+        with mock.patch.object(pa, "bloqueo", bloqueo_tras_otro_programar):
+            resultado = pa.programar(
+                "V1", reclamo=False, activar=monetizacion_activada, uploader=self.uploader_con_fila(video)
+            )
 
         self.assertTrue(resultado["ok"], resultado)
         self.assertEqual(datetime.fromisoformat(resultado["publica_en"]), en_la_fila)
         self.assertEqual(video.actualizaciones, [])
-        self.assertEqual(self.activadas, [])
 
+    def test_un_video_aparcado_hace_mas_de_un_anio_que_se_libera_entra_a_la_fila(self):
+        # Defecto: tras un año aparcado, la fecha del reclamo queda a menos de un año; tomarla por
+        # una ya elegida lo dejaba meses sin publicar después de liberarse.
+        ahora = datetime.now().astimezone().replace(microsecond=0)
+        aparcado_hasta = ahora + timedelta(days=300)
+        pa.registrar_programado("V1", "Banda - Disco", aparcado_hasta, True)
+        video = VideoQueGuardaSuFecha(aparcado_hasta)
+
+        resultado = pa.programar(
+            "V1", reclamo=False, activar=monetizacion_activada, uploader=self.uploader_con_fila(video)
+        )
+
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertLess(datetime.fromisoformat(resultado["publica_en"]), ahora + timedelta(days=1))
+        self.assertEqual(len(video.actualizaciones), 1)
 
     def programar_un_video_que_la_api_no_ve(self, retiro):
         """`programar` de un video que `videos.list` no devuelve; `retiro` es lo que lee Studio."""
