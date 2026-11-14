@@ -69,6 +69,13 @@ they are rendered, checked and uploaded one after another with no question, and 
 mode off. The album on screen does not join the list: it is asked again, as a normal
 question, when the list ends (`despues_de_lista`). A failed check of a list album asks as
 usual and the rest of the list goes on; a failed upload or a Reintentar render stops it.
+While an album uploads the GPU is idle, so the next accepted album (from the list, or one
+accepted after Censurar) is rendered meanwhile (`adelantar_render`, added on 2026-11-13: on
+2026-11-12 renders took 2-8 min and uploads 2-10 min, one after the other). It is checked and
+uploaded when that upload ends. Only one album is rendered ahead (the videos wait on the SSD),
+never during a cover analysis; after a failed upload it waits in `Renderizando/` until the
+question is answered. The render and the upload then log in to DeathGrind at the same time; on
+2026-11-13 a second login did not end the first session.
 With no albums left to add, one message comes with only ▶️. Writing `/crear_lista` again
 only says how many albums the list holds, and a "Renderizar y subir" question that was
 open comes back with the list buttons. Messages from anyone else, or any other

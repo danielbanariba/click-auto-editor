@@ -1109,6 +1109,101 @@ class TestCrearLista(BaseServicio):
             )
             self.servicio.paso()
 
+    def empezar_la_lista(self, *nombres):
+        """Suma los álbumes a la lista y aprieta ▶️: se lanza el render del primero."""
+        self.en_lista(*nombres)
+        _, pregunta = self.preguntar_antes_de_renderizar("Banda Z - En pantalla")
+        self.telegram.apretar(pregunta, f"▶️ Renderizar la lista ({len(nombres)})")
+        self.servicio.paso()
+        self.servicio.paso()
+
+    def subiendo(self, nombre):
+        """Render y chequeos del álbum que se está renderizando; deja su subida corriendo."""
+        carpeta = self.album_renderizado(nombre)
+        shutil.rmtree(self.cola / nombre)
+        self.lanzador.terminar("renderizar", {"ok": True, "album": nombre, "carpeta": carpeta})
+        self.servicio.paso()
+        self.lanzador.terminar("verificar", self.verificado(nombre))
+        self.servicio.paso()
+        return carpeta
+
+    def renderizado_por_adelantado(self, nombre):
+        carpeta = self.album_renderizado(nombre)
+        shutil.rmtree(self.cola / nombre)
+        self.lanzador.terminar("renderizar", {"ok": True, "album": nombre, "carpeta": carpeta})
+        self.servicio.paso()
+        self.servicio.paso()
+        return carpeta
+
+    def test_mientras_sube_un_album_se_renderiza_el_siguiente_de_la_lista(self):
+        # Defecto: la GPU quedaba quieta durante cada subida (de 2 a 10 min el 2026-11-12) y el
+        # render siguiente arrancaba recién cuando la subida terminaba.
+        self.empezar_la_lista("Banda A - Uno", "Banda B - Dos")
+
+        carpeta = self.subiendo("Banda A - Uno")
+
+        self.assertEqual(self.lanzador.lanzados("subir"), [["subir", "--carpeta", carpeta]])
+        self.assertEqual(self.lanzador.lanzados("renderizar")[-1], ["renderizar", "--carpeta", "Banda B - Dos"])
+
+    def test_el_adelantado_se_verifica_y_se_sube_recien_cuando_termina_la_subida(self):
+        # Defecto: dos subidas a la vez se reparten la conexión y la cuota, y renderizar toda la
+        # lista por adelantado llenaría el SSD de videos que esperan: se adelanta uno solo.
+        self.empezar_la_lista("Banda A - Uno", "Banda B - Dos", "Banda C - Tres")
+        carpeta_a = self.subiendo("Banda A - Uno")
+        carpeta_b = self.renderizado_por_adelantado("Banda B - Dos")
+
+        self.assertEqual(len(self.lanzador.lanzados("verificar")), 1)
+        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 2)
+
+        shutil.rmtree(carpeta_a)
+        self.lanzador.terminar(
+            "subir", {"ok": True, "video_id": "VID1", "titulo": "Banda A - Uno", "carpeta_borrada": True}
+        )
+        self.servicio.paso()
+        self.lanzador.terminar("verificar", self.verificado("Banda B - Dos"))
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("verificar")[-1], ["verificar", "--carpeta", carpeta_b])
+        # Sigue aceptado: se sube sin preguntar, y durante esa subida se adelanta el siguiente.
+        self.assertEqual(self.lanzador.lanzados("subir")[-1], ["subir", "--carpeta", carpeta_b])
+        self.assertEqual(self.lanzador.lanzados("renderizar")[-1], ["renderizar", "--carpeta", "Banda C - Tres"])
+
+    def test_un_analisis_de_portada_frena_el_render_adelantado(self):
+        # Defecto: render y Qwen juntos en la GPU; el 2026-11-03 un modelo de ollama hizo fallar
+        # un render por falta de memoria.
+        self.empezar_la_lista("Banda A - Uno", "Banda B - Dos")
+        pa.analisis_en_curso.return_value = True
+
+        self.subiendo("Banda A - Uno")
+        self.servicio.paso()
+
+        # La subida sigue corriendo: es el momento en que se adelantaría el render.
+        self.assertEqual(len(self.lanzador.lanzados("subir")), 1)
+        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 1)
+        pa.analisis_en_curso.return_value = False
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("renderizar")[-1], ["renderizar", "--carpeta", "Banda B - Dos"])
+
+    def test_si_la_subida_termina_antes_el_adelantado_se_verifica_al_terminar_su_render(self):
+        # Defecto: si el render adelantado terminaba después de la subida, nadie lo verificaba.
+        self.empezar_la_lista("Banda A - Uno", "Banda B - Dos")
+        carpeta_a = self.subiendo("Banda A - Uno")
+        shutil.rmtree(carpeta_a)
+        self.lanzador.terminar(
+            "subir", {"ok": True, "video_id": "VID1", "titulo": "Banda A - Uno", "carpeta_borrada": True}
+        )
+        self.servicio.paso()
+
+        carpeta_b = self.album_renderizado("Banda B - Dos")
+        shutil.rmtree(self.cola / "Banda B - Dos")
+        self.lanzador.terminar("renderizar", {"ok": True, "album": "Banda B - Dos", "carpeta": carpeta_b})
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("verificar")[-1], ["verificar", "--carpeta", carpeta_b])
+        self.lanzador.terminar("verificar", self.verificado("Banda B - Dos"))
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("subir")[-1], ["subir", "--carpeta", carpeta_b])
+
     def test_a_la_lista_guarda_el_album_sin_renderizar_y_pregunta_el_siguiente(self):
         # Defecto: sin esto, aprobar un álbum lo renderiza enseguida y el teléfono suena cada vez.
         self.en_lista("Banda A - Uno", "Banda B - Dos")
@@ -1196,23 +1291,20 @@ class TestCrearLista(BaseServicio):
 
     def test_una_subida_que_falla_frena_el_resto_de_la_lista(self):
         # Defecto: con el límite del canal, cada álbum restante se renderizaría y fallaría igual.
-        self.en_lista("Banda A - Uno", "Banda B - Dos")
-        _, pregunta = self.preguntar_antes_de_renderizar("Banda C - Tres")
-        self.telegram.apretar(pregunta, "▶️ Renderizar la lista (2)")
-        self.servicio.paso()
-        self.servicio.paso()
-        carpeta = self.album_renderizado("Banda A - Uno")
-        shutil.rmtree(self.cola / "Banda A - Uno")
-        self.lanzador.terminar("renderizar", {"ok": True, "album": "Banda A - Uno", "carpeta": carpeta})
-        self.servicio.paso()
-        self.lanzador.terminar("verificar", self.verificado("Banda A - Uno"))
-        self.servicio.paso()
+        # Solo queda el que se adelantó durante la subida: espera en Renderizando/ sin verificarse.
+        self.empezar_la_lista("Banda A - Uno", "Banda B - Dos", "Banda C - Tres")
+        self.subiendo("Banda A - Uno")
 
         self.lanzador.terminar("subir", {"ok": False, "motivo": "limite_canal"})
         self.servicio.paso()
-        self.servicio.paso()
+        self.renderizado_por_adelantado("Banda B - Dos")
 
-        self.assertEqual(len(self.lanzador.lanzados("renderizar")), 1)
+        self.assertEqual(
+            self.lanzador.lanzados("renderizar"),
+            [["renderizar", "--carpeta", "Banda A - Uno"], ["renderizar", "--carpeta", "Banda B - Dos"]],
+        )
+        self.assertEqual(len(self.lanzador.lanzados("verificar")), 1)
+        self.assertEqual(len(self.lanzador.lanzados("subir")), 1)
 
     def test_sin_mas_albumes_llega_solo_el_boton_de_renderizar(self):
         # Defecto: sin álbumes nuevos no había pregunta con ▶️ y buscar se relanzaba en cada vuelta.
