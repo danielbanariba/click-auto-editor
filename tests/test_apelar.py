@@ -169,13 +169,16 @@ pintarFilas();
 CAUSA_ANUNCIOS = "Los anunciantes no muestran anuncios en este tipo de contenido"
 
 
-def video(video_id, edad=None, anuncios=None, revisar=False):
+def video(video_id, edad=None, anuncios=None, revisar=False, retirado=False):
     """Un video de la lista: `edad` apelable/rechazada, `anuncios` comentarios/otro.
 
     `revisar`: el globo trae solo "Revisar y tomar medidas" en lugar de las causas (visto en
-    vivo en videos con la apelación ya rechazada).
+    vivo en videos con la apelación ya rechazada). `retirado`: YouTube lo retiró; sigue en las
+    listas filtradas y sus avisos dicen solo "Retirado" (visto en vivo el 2026-11-14).
     """
-    if edad:
+    if retirado:
+        avisos, botones = "Retirado", []
+    elif edad:
         avisos = "Visible para mayores de 18 años Sin ingresos publicitarios +1"
         botones = ["Revisar y tomar medidas"] if revisar else [sa.CAUSA_EDAD, CAUSA_ANUNCIOS]
     elif anuncios == "comentarios":
@@ -366,6 +369,38 @@ class TestApelar(unittest.TestCase):
         self.assertTrue(resultado["ok"], resultado)
         self.assertEqual(self.anotados()["anuncios:videoID0002"]["estado"], "enviado")
         self.assertNotIn("anuncios:videoID0001", self.anotados())
+
+    def test_un_video_retirado_en_la_lista_de_edad_no_frena_las_apelaciones(self):
+        # Defecto (2026-11-08 a 2026-11-14): Pigto - The Collector, retirado tras su apelación
+        # rechazada, decía solo "Retirado" en la lista de edad; la lista se daba por no cargada y
+        # no salía ninguna apelación. Uno retirado sin apelar no se intenta: fallaría todos los días.
+        self.registrar({"edad:videoID0001": {"estado": "enviado", "resultado": "rechazada"}})
+        studio = StudioFalso([
+            video("videoID0001", edad="rechazada", retirado=True),
+            video("videoID0002", edad="apelable", retirado=True),
+            video("videoID0003", edad="apelable"),
+        ])
+        resultado = self.apelar(studio)
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual([a["id"] for a in studio.apelaciones], ["videoID0003"])
+
+    def test_un_video_retirado_en_la_lista_de_anuncios_no_frena_los_comentarios(self):
+        # Defecto: el 2026-11-07 la lista de anuncios tampoco "terminó de cargar".
+        studio = StudioFalso([video("videoID0001", anuncios="otro", retirado=True), video("videoID0002", anuncios="comentarios")])
+        resultado = self.apelar(studio)
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual([c["id"] for c in studio.comentarios], ["videoID0002"])
+
+    def test_una_apelacion_esperando_resultado_cuyo_video_se_retira_no_se_da_por_aceptada(self):
+        # Defecto: quitar de la lista las filas retiradas haría que el video falte dos corridas
+        # seguidas y se avisara como apelación aceptada.
+        self.registrar({"edad:videoID0001": {"estado": "enviado", "tipo": "edad", "video_id": "videoID0001", "titulo": "x"}})
+        studio = StudioFalso([video("videoID0001", edad="enviada", retirado=True), video("videoID0002", edad="apelable")])
+        primero = self.apelar(studio)
+        segundo = self.apelar(studio)
+        self.assertTrue(segundo["ok"], segundo)
+        self.assertEqual(primero["resultados"] + segundo["resultados"], [])
+        self.assertNotIn("ausente", self.anotados()["edad:videoID0001"])
 
     def test_sin_revision_manual_no_manda_nada_y_lo_anota(self):
         # Defecto: pulsar un botón desconocido del globo o volver a abrirlo todos los días.

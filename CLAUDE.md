@@ -491,6 +491,12 @@ characters):
   inside the `google.com/tools/feedback` one; its box is the textarea labelled
   "Explica tus comentarios (obligatorio)". This is not a formal appeal. A tooltip with
   no "Ver comentarios" (no manual review) is recorded as `sin_opcion`, without sending.
+- A video YouTube removed stays in both filtered lists, and its only notice is "Retirado"
+  (`P_RETIRADO`). Nothing is appealed or followed up for it.
+  - It still counts as a row of the list, so its page is not taken as half-loaded.
+  - It also counts as present, so a pending appeal on it is not taken as accepted.
+  - This was added on 2026-11-14. From 2026-11-08, Pigto - The Collector (removed after its
+    appeal was rejected) stopped every run with `lista_no_disponible`, and nothing was sent.
 
 `data/agente/apelaciones.json` keeps one entry per `<tipo>:<video_id>`. Each one is
 written before the send button is pressed (`enviando`), so a cut or crash never sends
