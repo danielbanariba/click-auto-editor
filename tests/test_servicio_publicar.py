@@ -1177,7 +1177,32 @@ class TestCrearLista(BaseServicio):
         self.subiendo("Banda A - Uno")
         self.servicio.paso()
 
+        # La subida sigue corriendo: es el momento en que se adelantaría el render.
+        self.assertEqual(len(self.lanzador.lanzados("subir")), 1)
         self.assertEqual(len(self.lanzador.lanzados("renderizar")), 1)
+        pa.analisis_en_curso.return_value = False
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("renderizar")[-1], ["renderizar", "--carpeta", "Banda B - Dos"])
+
+    def test_si_la_subida_termina_antes_el_adelantado_se_verifica_al_terminar_su_render(self):
+        # Defecto: si el render adelantado terminaba después de la subida, nadie lo verificaba.
+        self.empezar_la_lista("Banda A - Uno", "Banda B - Dos")
+        carpeta_a = self.subiendo("Banda A - Uno")
+        shutil.rmtree(carpeta_a)
+        self.lanzador.terminar(
+            "subir", {"ok": True, "video_id": "VID1", "titulo": "Banda A - Uno", "carpeta_borrada": True}
+        )
+        self.servicio.paso()
+
+        carpeta_b = self.album_renderizado("Banda B - Dos")
+        shutil.rmtree(self.cola / "Banda B - Dos")
+        self.lanzador.terminar("renderizar", {"ok": True, "album": "Banda B - Dos", "carpeta": carpeta_b})
+        self.servicio.paso()
+
+        self.assertEqual(self.lanzador.lanzados("verificar")[-1], ["verificar", "--carpeta", carpeta_b])
+        self.lanzador.terminar("verificar", self.verificado("Banda B - Dos"))
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("subir")[-1], ["subir", "--carpeta", carpeta_b])
 
     def test_a_la_lista_guarda_el_album_sin_renderizar_y_pregunta_el_siguiente(self):
         # Defecto: sin esto, aprobar un álbum lo renderiza enseguida y el teléfono suena cada vez.
