@@ -28,10 +28,15 @@ class RespuestaFalsa:
 
 
 class OllamaFalso:
-    """Contesta /api/chat con las respuestas dadas, en orden; un Exception se lanza, un int es un HTTP."""
+    """Contesta /api/chat con las respuestas dadas, en orden; un Exception se lanza, un int es un HTTP.
 
-    def __init__(self, respuestas=(), ignora_la_descarga=False):
+    Las preguntas por lo sexual toman de `respuestas`; las del gore, de `gore`, y cuando se acaba
+    contesta "[]" (nada de gore).
+    """
+
+    def __init__(self, respuestas=(), ignora_la_descarga=False, gore=()):
         self.respuestas = list(respuestas)
+        self.gore = list(gore)
         self.pedidos = []
         self.cargado = False
         self.ignora_la_descarga = ignora_la_descarga
@@ -44,7 +49,11 @@ class OllamaFalso:
         ruta = urlparse(url).path
         self.pedidos.append((ruta, json, timeout))
         if ruta == "/api/chat":
-            respuesta = self.respuestas.pop(0)
+            pregunta = json["messages"][0]["content"]
+            if pregunta in (cp.PROMPT_GORE_IMAGEN_ENTERA, cp.PROMPT_GORE_PEDAZO):
+                respuesta = self.gore.pop(0) if self.gore else "[]"
+            else:
+                respuesta = self.respuestas.pop(0)
             if isinstance(respuesta, Exception):
                 raise respuesta
             if isinstance(respuesta, int):
@@ -221,6 +230,24 @@ class TestLeerDetecciones(unittest.TestCase):
         self.assertEqual(cp.leer_detecciones(texto), [("penis", (0, 400, 300, 1000))])
 
 
+class TestEtiquetaLegible(unittest.TestCase):
+    def test_el_gore_sale_en_castellano_por_lo_que_nombra_y_lo_sexual_gana(self):
+        # Defecto: el aviso decía «gore element: exposed organs or entrails» en inglés, «gore» donde
+        # el modelo dijo sangre, o «sangre» donde había un pene. Las etiquetas son del modelo real.
+        casos = {
+            "gore element: exposed organs or entrails": "vísceras",
+            "gore element: blood": "sangre",
+            "open wounds": "heridas",
+            "corpses": "cadáver",
+            "severed body parts": "restos desmembrados",
+            "gore": "gore",
+            "bloody exposed penis": "pene",
+        }
+        for etiqueta, texto in casos.items():
+            with self.subTest(etiqueta):
+                self.assertEqual(cp.etiqueta_legible(etiqueta), texto)
+
+
 class TestBuscarCajas(unittest.TestCase):
     def setUp(self):
         self.imagen = Image.new("RGB", (2000, 1000), "white")
@@ -236,11 +263,11 @@ class TestBuscarCajas(unittest.TestCase):
         cajas = self.buscar(ollama).cajas
 
         self.assertEqual(cajas, [("penis", 200.0, 200.0, 600.0, 400.0)])
-        (pedido,) = ollama.chats()
-        self.assertIs(pedido["think"], False)
-        self.assertEqual(pedido["options"]["temperature"], 0)
-        self.assertIs(pedido["stream"], False)
-        self.assertEqual(len(pedido["messages"][0]["images"]), 1)
+        for pedido in ollama.chats():
+            self.assertIs(pedido["think"], False)
+            self.assertEqual(pedido["options"]["temperature"], 0)
+            self.assertIs(pedido["stream"], False)
+            self.assertEqual(len(pedido["messages"][0]["images"]), 1)
 
     def test_la_imagen_va_achicada_a_1024_de_lado(self):
         # Defecto: mandar la portada de 4000 px entera satura la VRAM y tarda minutos.
@@ -259,7 +286,8 @@ class TestBuscarCajas(unittest.TestCase):
 
         cajas = self.buscar(ollama, intento=2).cajas
 
-        self.assertEqual(len(ollama.chats()), 4)
+        # Dos preguntas por pedazo: lo sexual y el gore.
+        self.assertEqual(len(ollama.chats()), 8)
         # El primer pedazo es el de arriba a la izquierda, de 1200 x 600 px.
         self.assertEqual(cajas, [("penis", 0.0, 0.0, 1200.0, 600.0)])
 
@@ -281,10 +309,37 @@ class TestBuscarCajas(unittest.TestCase):
 
         self.assertEqual((resultado.cajas, resultado.pedazos, resultado.sin_leer), ([], 4, 2))
 
+    def test_cada_pedazo_se_pregunta_aparte_por_el_gore_y_sus_cajas_se_tapan(self):
+        # Defecto: una portada con un cadáver, sangre o vísceras salía «sin nada que tapar», porque
+        # solo se buscaba lo sexual.
+        ollama = OllamaFalso(
+            [respuesta_con(("penis", (100, 200, 300, 400)))],
+            gore=[respuesta_con(("blood", (500, 0, 1000, 1000)))],
+        )
+
+        cajas = self.buscar(ollama).cajas
+
+        self.assertEqual(cajas, [("penis", 200.0, 200.0, 600.0, 400.0), ("blood", 1000.0, 0.0, 2000.0, 1000.0)])
+        self.assertEqual(len(ollama.chats()), 2)
+
+    def test_una_pregunta_sin_leer_marca_el_pedazo_sin_tirar_lo_que_contesto_la_otra(self):
+        # Defecto: si el modelo se negaba a la pregunta del gore, el pedazo se daba por limpio sin
+        # aviso; si se negaba a la sexual, el intento fallaba y se perdía la sangre que sí marcó.
+        casos = {
+            "gore sin leer": (["[]"], ["no puedo"], []),
+            "sexual sin leer": (
+                ["no puedo"], [respuesta_con(("blood", (0, 0, 500, 500)))], [("blood", 0.0, 0.0, 1000.0, 500.0)]
+            ),
+        }
+        for caso, (sexual, gore, cajas) in casos.items():
+            with self.subTest(caso):
+                resultado = self.buscar(OllamaFalso(sexual, gore=gore))
+                self.assertEqual((resultado.cajas, resultado.pedazos, resultado.sin_leer), (cajas, 1, 1))
+
     def test_si_ningun_pedazo_se_entiende_el_intento_falla(self):
         # Defecto: dar «no hay nada que tapar» cuando el modelo no contestó nada utilizable
         # deja pasar una portada sin censurar.
-        ollama = OllamaFalso(["no puedo"] * 4)
+        ollama = OllamaFalso(["no puedo"] * 4, gore=["no puedo"] * 4)
         with self.assertRaises(cp.ErrorDeCensura) as error:
             self.buscar(ollama, intento=2)
         self.assertEqual(error.exception.motivo, "respuesta_invalida")
@@ -303,7 +358,7 @@ class TestBuscarCajas(unittest.TestCase):
                     self.buscar(OllamaFalso([respuesta]))
                 self.assertEqual(error.exception.motivo, motivo)
 
-    def test_un_analisis_que_pasa_su_presupuesto_se_corta_entre_pedazo_y_pedazo(self):
+    def test_un_analisis_que_pasa_su_presupuesto_se_corta_antes_de_la_siguiente_pregunta(self):
         # Defecto: diez pedazos con un modelo lento mantienen la GPU ocupada horas.
         ollama = OllamaFalso(["[]"] * 4)
         reloj = itertools.count(0, 6).__next__
