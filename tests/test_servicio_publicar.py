@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -113,6 +114,7 @@ class BaseServicio(unittest.TestCase):
             mock.patch.object(pa, "DIRS_ORIGEN_RENDER", (self.cola,)),
             mock.patch.object(pa, "DIR_RENDERIZANDO", self.renderizando),
             mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "pendientes.json"),
+            mock.patch.object(pa, "REGISTRO_PUBLICADOS", self.tmp / "ya_publicados.tsv"),
             mock.patch.object(pa, "render_en_curso", return_value=False),
             mock.patch.object(pa, "analisis_en_curso", return_value=False),
         ]
@@ -264,11 +266,12 @@ class TestAprobacion(BaseServicio):
         self.assertIn("Banda - Disco", self.telegram.mensajes[-1]["texto"])
 
     def test_si_falla_la_subida_vuelve_a_preguntar(self):
+        # Solo el límite del canal espera solo (TestLimiteDelCanal); lo demás pregunta.
         carpeta, mensaje = self.pedir_aprobacion()
 
         self.telegram.apretar(mensaje, "✅ Subir")
         self.servicio.paso()
-        self.lanzador.terminar("subir", {"ok": False, "motivo": "limite_canal"})
+        self.lanzador.terminar("subir", {"ok": False, "motivo": "sin_credenciales"})
         self.servicio.paso()
         self.telegram.apretar(self.ultima_pregunta(), "✅ Subir")
         self.servicio.paso()
@@ -1289,15 +1292,16 @@ class TestCrearLista(BaseServicio):
         self.servicio.paso()
         self.assertIn("Banda C - Tres", self.ultima_pregunta()["texto"])
 
-    def test_una_subida_que_falla_frena_el_resto_de_la_lista(self):
+    def test_con_el_limite_del_canal_la_lista_espera_y_sigue_cuando_la_subida_entra(self):
         # Defecto: con el límite del canal, cada álbum restante se renderizaría y fallaría igual.
         # Solo queda el que se adelantó durante la subida: espera en Renderizando/ sin verificarse.
+        # Defecto: la lista quedaba frenada hasta que alguien tocara «¿Reintento?».
         self.empezar_la_lista("Banda A - Uno", "Banda B - Dos", "Banda C - Tres")
-        self.subiendo("Banda A - Uno")
+        carpeta_a = self.subiendo("Banda A - Uno")
 
         self.lanzador.terminar("subir", {"ok": False, "motivo": "limite_canal"})
         self.servicio.paso()
-        self.renderizado_por_adelantado("Banda B - Dos")
+        carpeta_b = self.renderizado_por_adelantado("Banda B - Dos")
 
         self.assertEqual(
             self.lanzador.lanzados("renderizar"),
@@ -1305,6 +1309,44 @@ class TestCrearLista(BaseServicio):
         )
         self.assertEqual(len(self.lanzador.lanzados("verificar")), 1)
         self.assertEqual(len(self.lanzador.lanzados("subir")), 1)
+        # Sin subidas en el registro, el primer reintento es a la hora.
+        self.ahora += 3600
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("subir")[-1], ["subir", "--carpeta", carpeta_a])
+        shutil.rmtree(carpeta_a)
+        self.lanzador.terminar(
+            "subir", {"ok": True, "video_id": "VID1", "titulo": "Banda A - Uno", "carpeta_borrada": True}
+        )
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("verificar")[-1], ["verificar", "--carpeta", carpeta_b])
+
+    def test_otro_album_que_choca_con_el_limite_no_reemplaza_la_espera(self):
+        # Defecto: el «✅ Subir» de un chequeo fallido, tocado durante la espera, la pisaba y el
+        # álbum que esperaba ya no se reintentaba.
+        self.empezar_la_lista("Banda A - Uno", "Banda B - Dos")
+        self.renderizar_y_subir("Banda A - Uno", "VID1", ok=False)
+        fallida = self.ultima_pregunta()
+        carpeta_b = self.subiendo("Banda B - Dos")
+        self.lanzador.terminar("subir", {"ok": False, "motivo": "limite_canal"})
+        self.servicio.paso()
+
+        self.telegram.apretar(fallida, "✅ Subir")
+        self.servicio.paso()
+        carpeta_a = self.lanzador.lanzados("subir")[-1][2]
+        self.lanzador.terminar("subir", {"ok": False, "motivo": "limite_canal"})
+        self.servicio.paso()
+
+        self.assertIn("Banda A - Uno", self.telegram.mensajes[-1]["texto"])
+        self.ahora += 3600
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("subir")[-1], ["subir", "--carpeta", carpeta_b])
+        # Cuando B entra, A se vuelve a ofrecer.
+        shutil.rmtree(carpeta_b)
+        self.lanzador.terminar(
+            "subir", {"ok": True, "video_id": "VID2", "titulo": "Banda B - Dos", "carpeta_borrada": True}
+        )
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("verificar")[-1], ["verificar", "--carpeta", carpeta_a])
 
     def test_sin_mas_albumes_llega_solo_el_boton_de_renderizar(self):
         # Defecto: sin álbumes nuevos no había pregunta con ▶️ y buscar se relanzaba en cada vuelta.
@@ -1351,6 +1393,130 @@ class TestCrearLista(BaseServicio):
 
         self.assertIn(["buscar", "--excluir=Banda A - Uno"], self.lanzador.lanzados("buscar"))
         self.assertEqual(self.etiquetas(pregunta)[0], "➕ A la lista")
+
+
+class TestLimiteDelCanal(BaseServicio):
+    """YouTube deja subir una cantidad de videos por día: el servicio avisa una vez y reintenta solo.
+
+    El 2026-11-14 el límite llegó a las 12:51, después de 102 subidas desde las 18:12 del día
+    anterior. El servicio preguntaba «¿Reintento?», cada toque fallaba en 20 s (siete entre las
+    13:28 y las 18:24) y la subida entró recién a las 24 h de la primera.
+    """
+
+    HORA = 3600
+    T0 = 2_000_000_000.0
+
+    def setUp(self):
+        super().setUp()
+        self.ahora = self.T0
+        self.servicio = self.nuevo_servicio()
+        self.servicio.estado["ultima_apelacion"] = self.ahora  # la corrida diaria no toca
+
+    def subida_registrada(self, hace_s, origen="subir"):
+        """Una fila del registro de publicados con la fecha de hace `hace_s` segundos."""
+        fecha = datetime.fromtimestamp(self.ahora - hace_s).astimezone().isoformat(timespec="seconds")
+        with open(pa.REGISTRO_PUBLICADOS, "a", encoding="utf-8") as archivo:
+            archivo.write(f"banda {hace_s}|disco\tBanda {hace_s} - Disco\t{origen}\tV{hace_s}\t{fecha}\n")
+
+    def subida_al_limite(self, nombre="Banda - Disco"):
+        """Lleva un álbum hasta su subida y la hace chocar con el límite del canal."""
+        carpeta, mensaje = self.pedir_aprobacion(nombre)
+        self.telegram.apretar(mensaje, "✅ Subir")
+        self.servicio.paso()
+        self.lanzador.terminar("subir", {"ok": False, "motivo": "limite_canal"})
+        self.servicio.paso()
+        return carpeta, mensaje
+
+    def hora(self, momento):
+        return time.strftime("%H:%M", time.localtime(momento))
+
+    def test_avisa_una_vez_y_reintenta_cuando_la_subida_mas_vieja_cumple_24_horas(self):
+        # Defecto: preguntaba «¿Reintento?» en vez de esperar; o el reintento se calculaba con
+        # otra subida que la más vieja de las últimas 24 h (o contaba filas que no son subidas).
+        self.subida_registrada(30 * self.HORA)  # ya salió de las 24 h
+        self.subida_registrada(20 * self.HORA)
+        self.subida_registrada(10 * self.HORA)
+        self.subida_registrada(self.HORA)
+        self.subida_registrada(2 * self.HORA, origen="eliminar")  # no es una subida
+
+        carpeta, mensaje = self.subida_al_limite()
+
+        self.assertIs(self.ultima_pregunta(), mensaje)
+        aviso = self.telegram.mensajes[-1]["texto"]
+        libre = self.T0 + 4 * self.HORA + sp.MARGEN_LIMITE_S
+        self.assertIn("3 en 24 h", aviso)
+        self.assertIn(self.hora(libre), aviso)
+        self.assertIn("Banda - Disco", aviso)
+        self.ahora = libre - 1
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("subir")), 1)
+        self.ahora = libre
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("subir"), [["subir", "--carpeta", carpeta]] * 2)
+
+    def test_si_el_reintento_choca_otra_vez_prueba_cada_hora_sin_repetir_el_aviso(self):
+        # Defecto: un aviso por cada reintento, o ningún reintento después del primero; y
+        # después de entrar, la espera seguía y relanzaba la subida de una carpeta ya borrada.
+        self.subida_registrada(20 * self.HORA)
+        carpeta, _ = self.subida_al_limite()
+        self.ahora += 4 * self.HORA + sp.MARGEN_LIMITE_S
+        self.servicio.paso()
+        mensajes = len(self.telegram.mensajes)
+
+        self.lanzador.terminar("subir", {"ok": False, "motivo": "limite_canal"})
+        self.servicio.paso()
+        self.assertEqual(len(self.telegram.mensajes), mensajes)
+        self.ahora += self.HORA - 1
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("subir")), 2)
+        self.ahora += 1
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("subir")), 3)
+
+        shutil.rmtree(carpeta)
+        self.lanzador.terminar(
+            "subir", {"ok": True, "video_id": "VID1", "titulo": "Banda - Disco", "carpeta_borrada": True}
+        )
+        self.servicio.paso()
+        self.ahora += 2 * self.HORA
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("subir")), 3)
+        self.assertEqual(self.lanzador.lanzados("programar"), [["programar", "--video-id", "VID1", "--esperar"]])
+
+    def test_la_espera_sobrevive_un_reinicio(self):
+        # Defecto: con la espera solo en memoria, al reiniciar el álbum se verificaba y se
+        # preguntaba otra vez, y nada lo reintentaba.
+        self.subida_registrada(20 * self.HORA)
+        carpeta, mensaje = self.subida_al_limite()
+
+        self.servicio = self.nuevo_servicio()
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("verificar")), 1)
+        self.assertIs(self.ultima_pregunta(), mensaje)
+        self.ahora += 4 * self.HORA + sp.MARGEN_LIMITE_S
+        self.servicio.paso()
+        self.assertEqual(self.lanzador.lanzados("subir"), [["subir", "--carpeta", carpeta]] * 2)
+
+    def test_un_album_que_ya_quedo_subido_no_se_vuelve_a_subir_al_reintentar(self):
+        # Defecto: si el servicio se cortaba (un corte de luz) durante el reintento, al volver
+        # encontraba la espera en disco y subía otra vez un video que YouTube ya tenía.
+        carpeta, _ = self.subida_al_limite()
+        self.ahora += self.HORA
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("subir")), 2)
+        pa.guardar_pendientes(
+            [{"video_id": "VID1", "titulo": "Banda - Disco", "album": "Banda - Disco", "subido_en": self.ahora}]
+        )
+
+        self.servicio = self.nuevo_servicio()
+        self.servicio.paso()
+        self.ahora += self.HORA
+        self.servicio.paso()
+
+        self.assertEqual(len(self.lanzador.lanzados("subir")), 2)
+        self.assertEqual(self.lanzador.lanzados("programar"), [["programar", "--video-id", "VID1", "--esperar"]])
+        self.assertEqual(len(self.lanzador.lanzados("verificar")), 1)
+        self.assertTrue(Path(carpeta).is_dir())
 
 
 class TestReclamos(BaseServicio):
