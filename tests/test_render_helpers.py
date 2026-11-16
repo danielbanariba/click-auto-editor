@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -246,6 +247,62 @@ def test_el_render_usa_la_portada_que_muestra_el_servicio_y_no_la_propaganda_de_
 
     assert job.error is None
     assert job.cover_main == carpeta / "Cover_2018.jpg"
+
+
+def _contraste(a, b):
+    """Razón de contraste WCAG entre dos colores RGB: de 1 (iguales) a 21 (negro y blanco)."""
+
+    def luminancia(rgb):
+        canales = [c / 255 for c in rgb]
+        canales = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in canales]
+        return 0.2126 * canales[0] + 0.7152 * canales[1] + 0.0722 * canales[2]
+
+    claro, oscuro = sorted((luminancia(a), luminancia(b)), reverse=True)
+    return (claro + 0.05) / (oscuro + 0.05)
+
+
+def _blanca_con_la_derecha_negra():
+    portada = Image.new("RGB", (100, 100), "white")
+    portada.paste((0, 0, 0), (60, 0, 100, 100))
+    return portada
+
+
+@pytest.mark.parametrize(
+    ("portada", "fondo"),
+    [
+        # Secreted - Clownin' Around (2026-11-14): el inverso de una portada de tono medio es otro
+        # tono medio, y la lista no se leía.
+        (Image.new("RGB", (100, 100), (150, 120, 135)), (150, 120, 135)),
+        # La lista va sobre la parte derecha del fondo, que es negra; el resto de la portada es
+        # blanco, así que su promedio pide letras oscuras.
+        (_blanca_con_la_derecha_negra(), (0, 0, 0)),
+    ],
+    ids=["portada_de_tono_medio", "fondo_distinto_del_promedio"],
+)
+def test_la_lista_de_temas_contrasta_con_el_fondo_que_tiene_detras(
+    render_mod, monkeypatch, tmp_path, wav_file, portada, fondo
+):
+    carpeta = tmp_path / "Banda - Disco (2020)"
+    carpeta.mkdir()
+    shutil.copy(wav_file, carpeta / "01 Tema.wav")
+    portada.save(carpeta / "cover.png")
+    monkeypatch.setattr(render_mod, "USE_SSD_TEMP", False)
+    monkeypatch.setattr(render_mod, "USE_RAMDISK", False)
+    monkeypatch.setattr(render_mod, "USE_CPP_VHS", True)
+    monkeypatch.setattr(render_mod, "ensure_shadow_cover", lambda portada, *args: portada)
+    monkeypatch.setattr(render_mod, "obtener_tracklist_deathgrind", lambda *args: None)
+
+    job = render_mod.prepare_render_job(carpeta, carpeta.name)
+
+    assert job.error is None and job.track_overlays_path, job
+    capa = np.asarray(Image.open(job.track_overlays_path / "track_000.png").convert("RGBA"))
+    # A la derecha de la portada, lo opaco es el texto del tema que suena (la sombra es translúcida).
+    lista = capa[:, capa.shape[1] * 6 // 10 :]
+    texto = lista[lista[..., 3] == 255][:, :3]
+    assert len(texto) > 0
+    colores, cuantos = np.unique(texto, axis=0, return_counts=True)
+    color = tuple(int(c) for c in colores[cuantos.argmax()])
+    assert _contraste(color, fondo) >= 4.5, (color, round(_contraste(color, fondo), 2))
 
 
 def test_sin_memoria_en_la_gpu_el_album_no_va_a_error404_y_el_lote_se_frena(

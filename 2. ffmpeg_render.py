@@ -1,3 +1,4 @@
+import colorsys
 import os
 import errno
 import random
@@ -109,6 +110,12 @@ TRACKLIST_TEXT_SHADOW_OFFSET = 4
 TRACKLIST_TEXT_SHADOW_BLUR = 5
 TRACKLIST_TEXT_SHADOW_ALPHA = 200
 TRACKLIST_TEXT_SHADOW_ALPHA_HIGHLIGHT = 230
+# Contraste (WCAG) que busca el color de la lista contra el fondo que tiene detrás. El inverso del
+# promedio de la portada daba tonos medios ilegibles (Secreted - Clownin' Around, 2026-11-14).
+TRACKLIST_TEXT_CONTRAST = 7.0
+# Contorno de la sombra alrededor de cada letra (px, antes del desenfoque): separa el texto de un
+# fondo cargado, donde el contraste medio no alcanza (letras oscuras sobre partes negras).
+TRACKLIST_TEXT_HALO = 6
 
 CUDA_ERROR_FLAG = Path(__file__).parent / ".cuda_cpp_disabled"
 ENV_LOADED = False
@@ -2098,6 +2105,65 @@ def invert_color(avg_color):
     return (255 - int(r), 255 - int(g), 255 - int(b))
 
 
+def relative_luminance(rgb):
+    """Luminancia relativa (WCAG) de un color RGB de 0 a 255: de 0 (negro) a 1 (blanco)."""
+    canales = [c / 255 for c in rgb]
+    canales = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in canales]
+    return 0.2126 * canales[0] + 0.7152 * canales[1] + 0.0722 * canales[2]
+
+
+def contrast_ratio(luminance_a, luminance_b):
+    """Razón de contraste (WCAG) entre dos luminancias: de 1 (iguales) a 21 (negro y blanco)."""
+    clara, oscura = max(luminance_a, luminance_b), min(luminance_a, luminance_b)
+    return (clara + 0.05) / (oscura + 0.05)
+
+
+def luminance_behind_list(background_path: Path, box, width: int, height: int):
+    """Luminancia media del fondo del video dentro de `box` (x0, y0, x1, y1 en px del video).
+
+    El fondo es la portada escalada hasta cubrir el cuadro y recortada al centro, como lo arma
+    vhs_render (cover_pipeline.cpp). Se mide a 1/8 del tamaño: alcanza para un promedio.
+    """
+    paso = 8
+    w, h = max(1, width // paso), max(1, height // paso)
+    with Image.open(background_path) as imagen:
+        portada = imagen.convert("RGB")
+    escala = max(w / portada.width, h / portada.height)
+    ancho = max(w, round(portada.width * escala))
+    alto = max(h, round(portada.height * escala))
+    fondo = portada.resize((ancho, alto), Image.BILINEAR)
+    x, y = (ancho - w) // 2, (alto - h) // 2
+    fondo = fondo.crop((x, y, x + w, y + h))
+    x0, y0, x1, y1 = (max(0, v // paso) for v in box)
+    zona = np.asarray(fondo.crop((x0, y0, max(x0 + 1, x1), max(y0 + 1, y1))), dtype=np.float64) / 255
+    lineal = np.where(zona <= 0.03928, zona / 12.92, ((zona + 0.055) / 1.055) ** 2.4)
+    return float((lineal @ np.array([0.2126, 0.7152, 0.0722])).mean())
+
+
+def legible_text_color(color, background_luminance, target=TRACKLIST_TEXT_CONTRAST):
+    """El color más cercano a `color`, con su mismo tono, que contrasta `target` con el fondo.
+
+    Va hacia el claro o hacia el oscuro según cuál de los dos extremos contrasta más con el fondo,
+    y se detiene en la primera luminosidad que alcanza el contraste (así conserva el tinte). Si
+    ninguna lo alcanza, devuelve blanco o negro.
+    """
+    tono, luz, saturacion = colorsys.rgb_to_hls(*(c / 255 for c in color))
+    claro = contrast_ratio(1.0, background_luminance) >= contrast_ratio(0.0, background_luminance)
+
+    def con_luz(valor):
+        return tuple(int(round(c * 255)) for c in colorsys.hls_to_rgb(tono, valor, saturacion))
+
+    pasos = [i / 100 for i in range(101)]
+    hacia_el_extremo = sorted(
+        (p for p in pasos if (p >= luz if claro else p <= luz)), key=lambda p: abs(p - luz)
+    )
+    for valor in hacia_el_extremo:
+        candidato = con_luz(valor)
+        if contrast_ratio(relative_luminance(candidato), background_luminance) >= target:
+            return candidato
+    return (255, 255, 255) if claro else (0, 0, 0)
+
+
 def generate_tracklist_overlays(
     cover_overlay_path: Path,
     text_color,
@@ -2105,9 +2171,13 @@ def generate_tracklist_overlays(
     output_dir: Path,
     width: int,
     height: int,
+    background_path: Path = None,
 ):
     """
     Genera overlays PNG con portada izquierda y lista de canciones.
+
+    Con `background_path` (la portada que vhs_render usa de fondo), el color del texto se ajusta
+    para contrastar con lo que queda detrás de la lista.
     """
     if not cover_overlay_path or not cover_overlay_path.exists():
         return None, None
@@ -2233,6 +2303,14 @@ def generate_tracklist_overlays(
     cover_y = int((height - cover_height) / 2)
 
     text_color = text_color or (255, 255, 255)
+    if background_path:
+        caja = (list_x, top_margin, width - right_margin, height - bottom_margin)
+        try:
+            fondo = luminance_behind_list(Path(background_path), caja, width, height)
+        except OSError as exc:
+            log_verbose(f"[TRACKLIST] No pude leer el fondo {background_path}: {exc}")
+        else:
+            text_color = legible_text_color(text_color, fondo)
     base_luminance = (
         0.299 * text_color[0] + 0.587 * text_color[1] + 0.114 * text_color[2]
     )
@@ -2292,6 +2370,14 @@ def generate_tracklist_overlays(
             shadow_fill = (shadow_rgb[0], shadow_rgb[1], shadow_rgb[2], shadow_alpha)
 
             for line_text in lines:
+                shadow_draw.text(
+                    (list_x, y),
+                    line_text,
+                    font=font_to_use,
+                    fill=shadow_fill,
+                    stroke_width=TRACKLIST_TEXT_HALO,
+                    stroke_fill=shadow_fill,
+                )
                 shadow_draw.text(
                     (
                         list_x + TRACKLIST_TEXT_SHADOW_OFFSET,
@@ -3429,6 +3515,7 @@ def prepare_render_job(folder_path, folder_name, show_progress=False):
                     output_dir=overlays_dir,
                     width=VIDEO_WIDTH,
                     height=VIDEO_HEIGHT,
+                    background_path=Path(cover_bg),
                 )
 
         job.folder_path = folder_path

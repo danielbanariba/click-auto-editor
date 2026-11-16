@@ -65,7 +65,9 @@ struct Controls {
     float wrinkle_chance = 40.0f;
     float wrinkle_radius = 5.0f;
     // Output
-    bool tape_frame = true;  // Frame Style 0 draws the tape frame, Style 1 draws nothing
+    // Frame Style 0 draws the tape frame (black bars on the sides, the top darkened), Style 1 draws
+    // nothing. Off: the album videos showed those bars as a black border (2026-11-16).
+    bool tape_frame = false;
     float post_noise = 3.0f;
     float seed = 9300.0f;  // Random Seed
 };

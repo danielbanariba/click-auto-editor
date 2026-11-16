@@ -400,7 +400,9 @@ __device__ __forceinline__ void damage_finish(const DamageParams& d, int x, int 
     const RowData row = d.rows[y];
     const float u = (xc - row.shift) / sc;
     const float full_w = static_cast<float>(d.w) / sc;
-    if (u < 0.0f || u > full_w) {
+    // The black Frame Jitter uncovers at the sides belongs to the tape frame. Without the frame the
+    // shifted rows keep their edge pixel (shift_rows_kernel clamps), so no black shows at the sides.
+    if (d.frame && (u < 0.0f || u > full_w)) {
         rgb[0] = rgb[1] = rgb[2] = 0.0f;
     } else if (d.frame) {
         const float uf = xc / sc;

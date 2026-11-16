@@ -645,7 +645,7 @@ arsenal::Controls transition_look() {
     c.frame_jitter = 0.0f;
     c.pop_line_freq = 0.0f;
     c.post_noise = 0.0f;
-    c.tape_frame = true;
+    c.tape_frame = false;  // the video after the transition has no tape frame either
     c.seed = 1000.0f + kRandomSeed;
     return c;
 }
