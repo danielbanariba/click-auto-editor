@@ -614,7 +614,11 @@ For each album folder in `DIR_AUDIO_SCRIPTS`:
 3. Creates drop shadow for cover image (`effects/sombra.py`)
 4. Fetches track titles from DeathGrind API or falls back to filenames
 5. Runs profanity censorship (`limpieza/censura.py`)
-6. Renders via C++/CUDA binary (`cpp/build/vhs_render`) if `USE_CPP_VHS=True`, else FFmpeg
+6. Renders via C++/CUDA binary (`cpp/build/vhs_render`) if `USE_CPP_VHS=True`, else FFmpeg.
+   The VHS look draws no tape frame (`Controls.tape_frame = false`, also in the intro transition):
+   it put wavy black bars on the sides and darkened the top. Without it, the rows that Frame Jitter
+   shifts keep their edge pixel instead of leaving black at the sides. After a change in `cpp/`,
+   rebuild with `cmake --build cpp/build` while no render is running
 7. Muxes audio straight onto the SSD and moves the finished album folder to `DIR_RENDERIZANDO` (`Renderizando/`); `3. subir_video_API.py` reads `DIR_UPLOAD`.
    An album rendered in RAM gets its final video written to `SSD_TEMP_DIR/_mux/`, on the same
    filesystem as `Renderizando/`, and it reaches the queue with a rename: the video is not copied
