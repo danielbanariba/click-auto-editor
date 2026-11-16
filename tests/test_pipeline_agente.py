@@ -36,6 +36,7 @@ from PIL import Image
 import censura_portadas as cp
 import pipeline_agente as pa
 import registro_publicados as rp
+import subir_video.authenticate as auth
 from tests.test_censura_portadas import OllamaFalso, respuesta_con
 
 TZ = timezone(timedelta(hours=-6))
@@ -1298,7 +1299,7 @@ class TestSubir(unittest.TestCase):
             QuotaExceededError=QuotaExceededError,
             UploadLimitExceededError=UploadLimitExceededError,
             cargar_env=lambda: None,
-            probar_credenciales_disponibles=lambda prefix: (self.youtube, [], [], []),
+            probar_credenciales_disponibles=lambda prefix, es_error_de_red=None: (self.youtube, [], [], []),
             encontrar_video=lambda carpeta: next(carpeta.glob("*.mp4"), None),
             cargar_generos=lambda: ([], {}),
             cargar_repertorio=lambda: {},
@@ -1448,6 +1449,99 @@ class TestSubir(unittest.TestCase):
         self.assertEqual(resultado["motivo"], "carpeta_fuera_de_raiz")
         self.assertEqual(self.subidas, [])
         self.assertTrue(afuera.exists())
+
+
+class TestCredencialesSinRed(unittest.TestCase):
+    """Sin red, los pasos que prueban las credenciales de subida responden `sin_conexion`.
+
+    El 2026-11-15 el servicio arrancó antes que el DNS: `programar` probó las cinco credenciales,
+    ninguna pudo refrescar su token y respondió `sin_credenciales` (13:34 y 19:29). Las
+    credenciales estaban bien: con la red arriba, el mismo paso respondió enseguida.
+    Los tokens son reales y vencidos, y google-auth los refresca de verdad: el DNS caído se
+    simula en `socket.getaddrinfo`, así que ningún pedido sale de la máquina.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.credenciales = self.tmp / "credentials"
+        self.credenciales.mkdir()
+        self.raiz = self.tmp / "Renderizando"
+        self.carpeta = self.raiz / "Banda - Album"
+        self.carpeta.mkdir(parents=True)
+        self.parches = [
+            mock.patch.object(auth, "CREDENTIALS_DIR", self.credenciales),
+            mock.patch.object(pa, "DIR_LOGS", self.tmp / "logs"),
+            mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "pendientes.json"),
+            mock.patch.object(pa, "PROGRAMADOS_JSONL", self.tmp / "programados.jsonl"),
+            mock.patch.object(pa, "REGISTRO_PUBLICADOS", self.tmp / "ya_publicados.tsv"),
+            mock.patch.object(pa, "MAPEO_JSON", self.tmp / "mapeo_canal.json"),
+        ]
+        for parche in self.parches:
+            parche.start()
+        auth.reset_exhausted_credentials()
+        self.uploader = SimpleNamespace(
+            cargar_env=lambda: None,
+            probar_credenciales_disponibles=auth.probar_credenciales_disponibles,
+        )
+
+    def tearDown(self):
+        for parche in self.parches:
+            parche.stop()
+        auth.reset_exhausted_credentials()
+        shutil.rmtree(self.tmp)
+
+    def credencial(self, numero, refresh_token="refresco"):
+        """Un par client_secrets/token de subida con el token vencido."""
+        (self.credenciales / f"client_secrets_upload_{numero}.json").write_text("{}", encoding="utf-8")
+        token = {
+            "token": "vencido",
+            "refresh_token": refresh_token,
+            "client_id": "cliente",
+            "client_secret": "secreto",
+            "scopes": auth.SCOPES,
+            "expiry": "2000-01-01T00:00:00Z",
+        }
+        (self.credenciales / f"token_upload_{numero}.json").write_text(json.dumps(token), encoding="utf-8")
+
+    def resultados(self):
+        pasos = {
+            "subir": lambda: pa.subir(self.carpeta, uploader=self.uploader, raices=(self.raiz,)),
+            "programar": lambda: pa.programar("VID1", uploader=self.uploader),
+            "mapear_canal": lambda: pa.mapear_canal(uploader=self.uploader),
+            "eliminar_video": lambda: pa.eliminar_video("VID1", uploader=self.uploader),
+            "sembrar_publicados": lambda: pa.sembrar_publicados(uploader=self.uploader),
+        }
+        for nombre, paso in pasos.items():
+            auth.reset_exhausted_credentials()
+            yield nombre, paso()
+
+    def test_sin_red_cada_paso_responde_sin_conexion(self):
+        # Defecto: el paso respondía `sin_credenciales` y el aviso culpaba a credenciales sanas.
+        self.credencial(1)
+        self.credencial(2)
+        dns_caido = socket.gaierror(socket.EAI_AGAIN, "Temporary failure in name resolution")
+
+        with mock.patch("socket.getaddrinfo", side_effect=dns_caido):
+            resultados = list(self.resultados())
+
+        for nombre, resultado in resultados:
+            with self.subTest(paso=nombre):
+                self.assertFalse(resultado["ok"])
+                self.assertEqual(resultado["motivo"], "sin_conexion")
+                self.assertIn("TransportError", resultado["detalle"])
+
+    def test_sin_tokens_que_se_puedan_renovar_sigue_siendo_sin_credenciales(self):
+        # Lo de antes se mantiene: un token vencido sin refresh_token no sirve, haya red o no.
+        # Sin refresh_token no se intenta refrescar: el paso no toca la red.
+        self.credencial(1, refresh_token=None)
+
+        with mock.patch("socket.getaddrinfo", side_effect=AssertionError("no debía tocar la red")):
+            resultados = list(self.resultados())
+
+        for nombre, resultado in resultados:
+            with self.subTest(paso=nombre):
+                self.assertFalse(resultado["ok"])
+                self.assertEqual(resultado["motivo"], "sin_credenciales")
 
 
 class PlaywrightFalso:
@@ -1719,7 +1813,7 @@ def monetizacion_activada(video_id):
 def uploader_para_programar(youtube, programados=()):
     return SimpleNamespace(
         cargar_env=lambda: None,
-        probar_credenciales_disponibles=lambda prefix: (youtube, [], [], []),
+        probar_credenciales_disponibles=lambda prefix, es_error_de_red=None: (youtube, [], [], []),
         get_uploads_playlist_id=lambda cliente: "UU1",
         fetch_scheduled_publish_times=lambda cliente, max_items: (set(programados), {}),
         is_quota_error=lambda exc: False,

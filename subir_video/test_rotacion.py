@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from google.auth.exceptions import RefreshError
+from google.auth.exceptions import RefreshError, TransportError
 
 import subir_video.authenticate as auth
 
@@ -40,15 +40,19 @@ class _FakeYouTube:
         return {"items": [{"id": "UCxxxxxxxx"}]}
 
 
-def _instalar_fakes(upload_pool=None, dead=None, cliente_fake=False):
+def _instalar_fakes(upload_pool=None, dead=None, cliente_fake=False, sin_red=None):
     """Instala fakes de auth.
 
     'dead' = nombres de client_secrets cuyo token esta revocado:
     authenticate_with_credentials(..., interactive=False) lanza RefreshError,
     igual que un invalid_grant real. Con interactive=True el fake igual
-    devuelve cliente (simula que el browser reautentica)."""
+    devuelve cliente (simula que el browser reautentica).
+
+    'sin_red' = nombres de client_secrets cuyo token no se puede refrescar porque
+    no hay red: lanza TransportError, como google-auth cuando falla el DNS."""
     pool = list(upload_pool) if upload_pool is not None else [_UP1, _UP2]
     dead_names = set(dead or [])
+    sin_red_names = set(sin_red or [])
 
     def _fake_get(prefix=None):
         if prefix == "upload":
@@ -58,6 +62,8 @@ def _instalar_fakes(upload_pool=None, dead=None, cliente_fake=False):
 
     def _fake_auth(secrets, token, interactive=True):
         name = Path(secrets).name
+        if name in sin_red_names:
+            raise TransportError(f"Failed to resolve 'oauth2.googleapis.com' ({name})")
         if name in dead_names and not interactive:
             raise RefreshError(f"invalid_grant: token revocado {name}")
         return _FakeYouTube() if cliente_fake else f"YT::{name}"
@@ -145,6 +151,59 @@ def test_probar_credenciales_reporta_muertas_sin_colgar():
     assert _UP2[0] in sanas
     assert _UP1[0] in muertas
     assert _UP1[0] not in sanas
+
+
+def _es_de_red(exc):
+    return isinstance(exc, TransportError)
+
+
+def test_probar_credenciales_sin_red_lanza_el_corte_si_se_pide():
+    """Sin red ninguna credencial se puede probar: decir que no hay credenciales
+    es falso. El 2026-11-15 el servicio arranco antes que el DNS y programar
+    respondio sin_credenciales con las cinco credenciales sanas."""
+    _instalar_fakes(
+        upload_pool=[_UP1, _UP2],
+        sin_red={"client_secrets_upload_1.json", "client_secrets_upload_2.json"},
+        cliente_fake=True,
+    )
+
+    try:
+        auth.probar_credenciales_disponibles(prefix="upload", es_error_de_red=_es_de_red)
+    except TransportError as exc:
+        assert "Failed to resolve" in str(exc), exc
+    else:
+        raise AssertionError("debia lanzar el corte de red")
+
+
+def test_probar_credenciales_sin_red_sin_pedirlo_devuelve_none():
+    """Sin es_error_de_red sigue como antes (3. subir_video_API.py): un corte
+    de red cuenta como credencial que no sirve y no lanza nada."""
+    _instalar_fakes(
+        upload_pool=[_UP1, _UP2],
+        sin_red={"client_secrets_upload_1.json", "client_secrets_upload_2.json"},
+        cliente_fake=True,
+    )
+
+    resultado = auth.probar_credenciales_disponibles(prefix="upload")
+
+    assert resultado == (None, [], [], []), resultado
+
+
+def test_probar_credenciales_con_una_sana_no_lanza_por_otra_sin_red():
+    """Si una credencial responde, hay red para trabajar: se usa esa aunque
+    otra no se haya podido probar."""
+    _instalar_fakes(
+        upload_pool=[_UP1, _UP2],
+        sin_red={"client_secrets_upload_1.json"},
+        cliente_fake=True,
+    )
+
+    youtube, sanas, _, _ = auth.probar_credenciales_disponibles(
+        prefix="upload", es_error_de_red=_es_de_red
+    )
+
+    assert youtube is not None
+    assert sanas == [_UP2[0]], sanas
 
 
 def main():
