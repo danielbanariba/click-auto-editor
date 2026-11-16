@@ -216,6 +216,7 @@ GRACIA_CORTE_S = 10  # entre SIGTERM y SIGKILL
 MOTIVOS_SUBIDA = {
     "limite_canal": "YouTube no deja subir más videos por hoy",
     "sin_credenciales": "no hay credenciales con cuota",
+    "sin_conexion": "no hay conexión a internet",
     "sin_metadata": "no se pudo armar la descripción",
 }
 MOTIVOS_MONETIZACION = {

@@ -96,7 +96,7 @@ class CanalFalso:
 def uploader_del_canal(canal):
     return SimpleNamespace(
         cargar_env=lambda: None,
-        probar_credenciales_disponibles=lambda prefix: (canal, [], [], []),
+        probar_credenciales_disponibles=lambda prefix, es_error_de_red=None: (canal, [], [], []),
         get_uploads_playlist_id=lambda cliente: "UU1",
         is_quota_error=lambda exc: False,
         is_invalid_grant_error=lambda exc: False,

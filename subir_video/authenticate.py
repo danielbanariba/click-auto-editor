@@ -199,7 +199,7 @@ def reset_exhausted_credentials():
     _exhausted_credentials.clear()
 
 
-def probar_credenciales_disponibles(prefix="upload"):
+def probar_credenciales_disponibles(prefix="upload", es_error_de_red=None):
     """Prueba cada credencial del pool con una llamada barata (1 unit) y
     devuelve las que NO estan agotadas.
 
@@ -223,6 +223,12 @@ def probar_credenciales_disponibles(prefix="upload"):
     Side effect: las credenciales agotadas y muertas quedan registradas en
     _exhausted_credentials, asi que llamadas posteriores (authenticate /
     authenticate_next) las saltean.
+
+    es_error_de_red: funcion que dice si un error de la verificacion es un corte
+    de red. Si se pasa y ninguna credencial sirve, se vuelve a lanzar el primero
+    de esos errores: sin red no se sabe si las credenciales sirven, y responder
+    que no hay ninguna seria falso. Sin ella, un corte de red cuenta como una
+    credencial que no sirve.
     """
     from googleapiclient.errors import HttpError
 
@@ -234,6 +240,7 @@ def probar_credenciales_disponibles(prefix="upload"):
     agotadas = []
     muertas = []
     youtube_sano = None
+    corte_de_red = None
 
     for secrets_path, token_path in pairs:
         if str(secrets_path) in _exhausted_credentials:
@@ -260,11 +267,15 @@ def probar_credenciales_disponibles(prefix="upload"):
             continue
         except Exception as exc:
             print(f"Error verificando {secrets_path.name}: {exc}")
+            if corte_de_red is None and es_error_de_red and es_error_de_red(exc):
+                corte_de_red = exc
             continue
         sanas.append(secrets_path)
         if youtube_sano is None:
             youtube_sano = yt
 
+    if youtube_sano is None and corte_de_red is not None:
+        raise corte_de_red
     return youtube_sano, sanas, agotadas, muertas
 
 

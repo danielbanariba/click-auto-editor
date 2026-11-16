@@ -706,4 +706,11 @@ Central config for all scripts. Key settings:
   (`pipeline_agente.py`) counts it as a connection failure like any other: `ejecutar_api` retries it
   `REINTENTOS_CONEXION` times and the steps then return `motivo = sin_conexion`. Any other `OSError` (missing
   file, permissions) is neither retried nor turned into `sin_conexion`
+- Each step that uses the upload credentials (`subir`, `programar`, `mapear_canal`, `eliminar_video`,
+  `sembrar_publicados`) first tests them with `cliente_de_subida`.
+  - If no credential works and at least one could not be tested because of a network failure,
+    the step returns `motivo = sin_conexion` with the error in `detalle`, not `sin_credenciales`.
+  - This was added on 2026-11-15. The service started before DNS was up, and `programar`
+    reported `sin_credenciales` twice while all five credentials were fine.
+  - `3. subir_video_API.py` still counts a network failure as an unusable credential.
 - `12. mapear_playlists.py` runs as a systemd service (`systemd/mapear_playlists.service`, installed as a copy in `/etc/systemd/system/`) with auto-restart

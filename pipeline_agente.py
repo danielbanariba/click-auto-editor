@@ -1363,9 +1363,9 @@ def subir(carpeta, uploader=None, sin_deathgrind=False, raices=RAICES_BORRABLES)
     log = ruta_log("subir")
     with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
         uploader.cargar_env()
-        youtube, *_ = uploader.probar_credenciales_disponibles(prefix="upload")
+        youtube, fallo = cliente_de_subida(uploader)
         if not youtube:
-            return {"ok": False, "motivo": "sin_credenciales", "log": str(log)}
+            return {"ok": False, **fallo, "log": str(log)}
         video = uploader.encontrar_video(carpeta)
         if not video:
             return {"ok": False, "motivo": "sin_video", "carpeta": str(carpeta)}
@@ -1427,6 +1427,28 @@ def es_error_de_conexion(exc):
     if isinstance(exc, ERRORES_DE_CONEXION):
         return True
     return isinstance(exc, OSError) and exc.errno in ERRNOS_DE_RED
+
+
+def cliente_de_subida(uploader):
+    """Prueba las credenciales de subida: (cliente, None) con la primera sana, (None, fallo) si no.
+
+    `fallo` va a la respuesta del paso. Si ninguna se pudo probar por un corte de red, es
+    `sin_conexion` y no `sin_credenciales`: el 2026-11-15 el servicio arrancó antes que el DNS y
+    `programar` avisó dos veces que no había credenciales, y estaban bien.
+    """
+    try:
+        youtube, *_ = uploader.probar_credenciales_disponibles(
+            prefix="upload", es_error_de_red=es_error_de_conexion
+        )
+    except POSIBLES_ERRORES_DE_CONEXION as exc:
+        if not es_error_de_conexion(exc):
+            raise
+        detalle = f"{type(exc).__name__}: {exc}"[:200]
+        print(f"Sin conexion al probar las credenciales de subida: {detalle}")
+        return None, {"motivo": "sin_conexion", "detalle": detalle}
+    if not youtube:
+        return None, {"motivo": "sin_credenciales"}
+    return youtube, None
 
 
 def ejecutar_api(uploader, yt, llamada):
@@ -1950,9 +1972,9 @@ def programar(
     log = ruta_log("programar")
     with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
         uploader.cargar_env()
-        youtube, *_ = uploader.probar_credenciales_disponibles(prefix="upload")
+        youtube, fallo = cliente_de_subida(uploader)
         if not youtube:
-            return {"ok": False, "motivo": "sin_credenciales", "log": str(log)}
+            return {"ok": False, **fallo, "log": str(log)}
         yt = {"cliente": youtube}
         try:
             while True:
@@ -2827,9 +2849,9 @@ def mapear_canal(uploader=None, abrir_studio=pagina_de_studio, modulo=None, leer
     listas = {"liberados": [], "sin_impugnar": [], "lista_negra": [], "en_proceso": [], "fallos": []}
     with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
         uploader.cargar_env()
-        youtube, *_ = uploader.probar_credenciales_disponibles(prefix="upload")
+        youtube, fallo = cliente_de_subida(uploader)
         if not youtube:
-            return {"ok": False, "motivo": "sin_credenciales", **base}
+            return {"ok": False, **fallo, **base}
         ahora = datetime.now().astimezone()
         yt = {"cliente": youtube}
         try:
@@ -2981,9 +3003,9 @@ def eliminar_video(video_id, retirado=False, uploader=None):
     log = ruta_log("eliminar_video")
     with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
         uploader.cargar_env()
-        youtube, *_ = uploader.probar_credenciales_disponibles(prefix="upload")
+        youtube, fallo = cliente_de_subida(uploader)
         if not youtube:
-            return {"ok": False, "motivo": "sin_credenciales", "video_id": video_id, "log": str(log)}
+            return {"ok": False, **fallo, "video_id": video_id, "log": str(log)}
         yt = {"cliente": youtube}
         try:
             titulo = video_id
@@ -3103,9 +3125,9 @@ def sembrar_publicados(uploader=None):
     log = ruta_log("sembrar_publicados")
     with open(log, "w", encoding="utf-8") as salida, contextlib.redirect_stdout(salida):
         uploader.cargar_env()
-        youtube, *_ = uploader.probar_credenciales_disponibles(prefix="upload")
+        youtube, fallo = cliente_de_subida(uploader)
         if not youtube:
-            return {"ok": False, "motivo": "sin_credenciales", "log": str(log)}
+            return {"ok": False, **fallo, "log": str(log)}
         try:
             canal = subidas_del_canal(uploader, {"cliente": youtube})
         except SinCredenciales:
