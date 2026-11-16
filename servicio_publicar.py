@@ -30,12 +30,14 @@ import subprocess
 import sys
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
 import requests
 
 import pipeline_agente as pa
+import registro_publicados
 from config import PROJECT_ROOT
 
 ESTADO_JSON = pa.DIR_AGENTE / "servicio.json"
@@ -44,6 +46,12 @@ ESPERA_TELEGRAM_S = 20
 # y las tareas terminadas se atienden recién al volver.
 PAUSA_TELEGRAM_MAX_S = 60
 REINTENTO_S = 30 * 60
+# YouTube cuenta las subidas del canal de las últimas 24 horas. Con el límite, el primer
+# reintento es cuando la subida más vieja de esas 24 h las cumple (más un margen); los que
+# siguen, cada hora hasta que entre.
+VENTANA_LIMITE_S = 24 * 3600
+MARGEN_LIMITE_S = 60
+REINTENTO_LIMITE_S = 3600
 INTENTOS_PROGRAMAR = 3  # fallos seguidos de `programar` antes de preguntar
 # Veces que Telegram puede rechazar un aviso de resultado, con Telegram respondiendo, antes de
 # descartarlo: un texto que nunca acepta no puede frenar los avisos que vienen detrás.
@@ -481,6 +489,21 @@ def cantidad_de_albumes(n):
     return f"{n} álbum" if n == 1 else f"{n} álbumes"
 
 
+def subidas_recientes(ahora):
+    """Momentos de las subidas del registro de publicados en las últimas 24 horas, en orden."""
+    momentos = []
+    for fila in registro_publicados.leer(pa.REGISTRO_PUBLICADOS).filas:
+        if fila["origen"] != "subir":
+            continue
+        try:
+            momento = datetime.fromisoformat(fila["fecha"]).timestamp()
+        except ValueError:
+            continue
+        if ahora - VENTANA_LIMITE_S < momento <= ahora:
+            momentos.append(momento)
+    return sorted(momentos)
+
+
 def carpetas_de_origen():
     """Las carpetas de donde toma álbumes el servicio: «a/, b/ ni c/»."""
     nombres = [f"{origen.name}/" for origen in pa.DIRS_ORIGEN_RENDER]
@@ -512,10 +535,13 @@ class Servicio:
         # censura: los álbumes del botón «🔞 Censurar», por nombre: {"paso", "carpeta", "intento"}.
         # paso es lo que les toca: a_censura (apartarlo), censurar (analizar, cuando la GPU esté
         # libre), pregunta (esperan la respuesta), aceptar_censura o eliminar.
+        # limite_canal: la subida que chocó con el límite diario de YouTube y espera para
+        # reintentarse sola: {"carpeta", "hasta"}, con hasta en hora de pared.
         self.estado = {
             "offset": 0, "preguntas": {}, "rechazados": [], "subidos": [], "aceptados": [],
             "aleatorio": False, "modo_lista": False, "lista": [], "despues_de_lista": None,
             "lote_impugnar": None, "avisos_pendientes": [], "ventanas_en_curso": [], "censura": {},
+            "limite_canal": None,
         }
         self.tareas = []
         self.inicios = {}  # proceso -> momento en que se lanzó
@@ -712,6 +738,11 @@ class Servicio:
         adelantar = en_curso == ["subir"]
         if en_curso and not adelantar:
             return
+        if self.estado["limite_canal"]:
+            # Cualquier otra subida chocaría igual con el límite: nada avanza hasta que entre esta.
+            if not en_curso and self.ahora() >= self.estado["limite_canal"]["hasta"]:
+                self.reintentar_tras_el_limite()
+            return
         abiertas = [p for p in self.estado["preguntas"].values() if p["tipo"] in PREGUNTAS_QUE_FRENAN]
         # Un chequeo que falló en un álbum aceptado pregunta sin frenar al resto de la lista.
         sigue_la_lista = self.estado["aceptados"]
@@ -759,6 +790,15 @@ class Servicio:
                 "sin_albumes",
                 f"📭 No quedan álbumes en {carpetas_de_origen()}. Sigo solo cuando aparezca uno.",
             )
+
+    def reintentar_tras_el_limite(self):
+        carpeta = self.estado["limite_canal"]["carpeta"]
+        # Si el servicio se cortó durante el reintento, el video pudo quedar subido.
+        if self.ya_subido(Path(carpeta).name):
+            self.estado["limite_canal"] = None
+            self.guardar()
+            return
+        self.lanzar_paso("subir", "--carpeta", carpeta)
 
     def adelantar_render(self):
         """Renderiza el siguiente álbum aceptado mientras otro se sube.
@@ -915,6 +955,11 @@ class Servicio:
     def tras_subir(self, resultado, argumentos):
         carpeta = valor(argumentos, "--carpeta")
         album = Path(carpeta).name
+        motivo = resultado.get("motivo")
+        espera = self.estado["limite_canal"]
+        if espera and espera["carpeta"] == carpeta and motivo != "limite_canal":
+            self.estado["limite_canal"] = None
+            self.guardar()
         if resultado.get("ok"):
             # Si la carpeta no se pudo borrar, el mp4 sigue ahí: no se vuelve a ofrecer.
             self.estado["subidos"].append(album)
@@ -934,21 +979,60 @@ class Servicio:
             self.avisar(texto)
             self.lanzar_paso("programar", "--video-id", resultado["video_id"], "--esperar")
             return
-        motivo = resultado.get("motivo")
         # Pudo morir después de subir: si el video quedó registrado, no se pregunta otra vez.
-        subido = next((p for p in pa.leer_pendientes() if p.get("album") == album), None)
-        if subido:
-            self.estado["subidos"].append(album)
-            self.guardar()
-            self.avisar(f"⏫ {album} ya estaba subido ({subido['video_id']}); sigo con la fecha.")
-            if not any(valor(a, "--video-id") == subido["video_id"] for a, _ in self.tareas if a[0] == "programar"):
-                self.lanzar_paso("programar", "--video-id", subido["video_id"], "--esperar")
+        if self.ya_subido(album):
+            return
+        if motivo == "limite_canal" and Path(carpeta).is_dir():
+            self.esperar_el_limite(carpeta)
             return
         explicacion = MOTIVOS_SUBIDA.get(motivo) or resultado.get("detalle") or motivo
         if not Path(carpeta).is_dir():
             self.avisar(f"❌ No pude subir {album}: {explicacion}. La carpeta ya no existe.")
             return
         self.preguntar("subir", f"❌ No pude subir {album}: {explicacion}.\n\n¿Reintento?", carpeta=carpeta)
+
+    def ya_subido(self, album):
+        """Si el video del álbum ya quedó registrado, lo da por subido y sigue con su fecha."""
+        subido = next((p for p in pa.leer_pendientes() if p.get("album") == album), None)
+        if not subido:
+            return False
+        self.estado["subidos"].append(album)
+        self.guardar()
+        self.avisar(f"⏫ {album} ya estaba subido ({subido['video_id']}); sigo con la fecha.")
+        if not any(valor(a, "--video-id") == subido["video_id"] for a, _ in self.tareas if a[0] == "programar"):
+            self.lanzar_paso("programar", "--video-id", subido["video_id"], "--esperar")
+        return True
+
+    def esperar_el_limite(self, carpeta):
+        """La subida chocó con el límite diario de YouTube: no se pregunta, porque cada intento
+        fallaría igual, y se reintenta sola. El primer reintento es cuando la subida más vieja
+        de las últimas 24 h las cumple; los que siguen, cada hora."""
+        album = Path(carpeta).name
+        ahora = self.ahora()
+        espera = self.estado["limite_canal"]
+        if espera and espera["carpeta"] == carpeta:
+            # El reintento chocó otra vez: el aviso ya salió.
+            espera["hasta"] = ahora + REINTENTO_LIMITE_S
+            self.guardar()
+            return
+        if espera:
+            # Otro álbum (un «✅ Subir» tocado durante la espera): la espera sigue con el primero.
+            self.avisar(
+                f"❌ No pude subir {album}: YouTube no deja subir más videos por hoy. "
+                f"Te lo vuelvo a ofrecer cuando suba {Path(espera['carpeta']).name}."
+            )
+            return
+        subidas = subidas_recientes(ahora)
+        hasta = subidas[0] + VENTANA_LIMITE_S + MARGEN_LIMITE_S if subidas else ahora + REINTENTO_LIMITE_S
+        self.estado["limite_canal"] = {"carpeta": carpeta, "hasta": hasta}
+        self.guardar()
+        cuantas = f" ({len(subidas)} en 24 h)" if subidas else ""
+        self.avisar(
+            f"⏸ Llegué al límite de subidas de YouTube{cuantas}. {album} espera en "
+            f"{Path(carpeta).parent.name}/ y lo reintento solo a las "
+            f"{time.strftime('%H:%M', time.localtime(hasta))}; si no entra, cada hora. "
+            "Mientras tanto no subo otro."
+        )
 
     def tras_eliminar(self, resultado, argumentos):
         album = Path(valor(argumentos, "--carpeta")).name

@@ -69,13 +69,15 @@ they are rendered, checked and uploaded one after another with no question, and 
 mode off. The album on screen does not join the list: it is asked again, as a normal
 question, when the list ends (`despues_de_lista`). A failed check of a list album asks as
 usual and the rest of the list goes on; a failed upload or a Reintentar render stops it.
+YouTube's daily upload limit only pauses it (see below).
 While an album uploads the GPU is idle, so the next accepted album (from the list, or one
 accepted after Censurar) is rendered meanwhile (`adelantar_render`, added on 2026-11-13: on
 2026-11-12 renders took 2-8 min and uploads 2-10 min, one after the other). It is checked and
 uploaded when that upload ends. Only one album is rendered ahead (the videos wait on the SSD),
 never during a cover analysis; after a failed upload it waits in `Renderizando/` until the
-question is answered. The render and the upload then log in to DeathGrind at the same time; on
-2026-11-13 a second login did not end the first session.
+question is answered, or until the upload that hit the daily limit goes through. The render and
+the upload then log in to DeathGrind at the same time; on 2026-11-13 a second login did not end
+the first session.
 With no albums left to add, one message comes with only ▶️. Writing `/crear_lista` again
 only says how many albums the list holds, and a "Renderizar y subir" question that was
 open comes back with the list buttons. Messages from anyone else, or any other
@@ -88,6 +90,23 @@ gone. It needs `PUBLICAR_TELEGRAM_TOKEN` and
 `PUBLICAR_TELEGRAM_CHAT_ID` in `.env` (its own bot: Hermes keeps
 `@banar_precios_bot`). Open questions survive restarts in
 `data/agente/servicio.json`.
+
+When `subir` hits YouTube's daily upload limit (`limite_canal`), the service asks nothing,
+since every attempt would fail the same way. This was added on 2026-11-14: the limit came at
+12:51, after 102 uploads since 18:12 the day before. "¿Reintento?" was pressed seven times in
+five hours, and the upload went through only 24 h after the first of those uploads.
+- The service sends one notice: how many uploads the last 24 h hold, and when it retries.
+- The first retry comes when the oldest `subir` row of `ya_publicados.tsv` from the last 24 h
+  turns 24 h old, plus one minute (`MARGEN_LIMITE_S`). With no such row, it comes in one hour.
+- A retry that hits the limit again is retried every hour (`REINTENTO_LIMITE_S`), with no new
+  notice.
+- Meanwhile the service starts no check, render, upload or search for another album; a render
+  already running ends and its album waits. When the upload goes through, the list goes on.
+- The wait (`limite_canal` in `servicio.json`) survives restarts. Before each retry the
+  service reads `pendientes.json`: an album that went up before a power cut is not uploaded
+  twice.
+- If a "✅ Subir" pressed for another album during the wait hits the limit too, that album
+  gets one notice. It is offered again once the waiting album goes up.
 
 Albums come from `01_limpieza_de_impurezas`, then `Album/`, then `EP/`
 (`DIRS_ORIGEN_RENDER` in `config.py`), newest year first. The render moves
