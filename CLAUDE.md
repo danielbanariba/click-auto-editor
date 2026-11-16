@@ -605,6 +605,11 @@ For each album folder in `DIR_AUDIO_SCRIPTS`:
   taken from the band's DeathGrind data. It never asks `/posts/<id>/links`: those are download
   links (Mega, Mediafire...), and each request may spend the account's download credits, which
   the scraper needs
+- The title and description `procesar_carpeta` builds (the only ones sent to YouTube) never carry
+  `<` or `>`: YouTube rejects them (400 `invalidDescription`). `sin_angulos` turns them into `‹`
+  and `›` before the 5000-byte trim, since each of those takes 3 bytes. Added on 2026-11-15: on
+  2026-11-14 a DeathGrind track named "larvas up the ass >_<" made the same upload fail three
+  times, and its question held back the queue
 - Schedules uploads in batches at configurable time slots
 - Creates/manages playlists per band and genre
 - Handles quota exceeded errors by rotating credentials

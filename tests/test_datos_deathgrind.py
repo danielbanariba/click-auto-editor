@@ -73,8 +73,8 @@ def test_sin_posts_la_prueba_sigue_apagando_deathgrind(uploader):
     assert uploader.deathgrind_smoke_test(sesion, GENEROS) is False
 
 
-def album_con_audio(tmp_path):
-    carpeta = tmp_path / "Banda - Disco (2020)"
+def album_con_audio(tmp_path, nombre="Banda - Disco (2020)"):
+    carpeta = tmp_path / nombre
     carpeta.mkdir()
     subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=1",
@@ -272,3 +272,49 @@ def test_un_ep_de_deathgrind_se_sube_como_full_ep_aunque_la_carpeta_no_lo_diga(
 def test_el_tipo_sale_del_primer_campo_que_da_un_tipo_conocido(uploader, datos, esperado):
     # Un `releaseTypes` vacío o con ids que no conoce no tapa a `type` ni a `type_id`.
     assert uploader.tipo_de_deathgrind(datos) == esperado
+
+
+def subir_con_temas_de_deathgrind(uploader, monkeypatch, carpeta, temas):
+    monkeypatch.setattr(uploader, "get_repertorio_csv_path", lambda: None)
+    monkeypatch.setattr(uploader, "load_playlist_links_cache", lambda: {})
+    repertorio = [
+        {"band": "Banda", "album": "Disco", "postId": 1, "bandId": 2, "year": 2020, "tracklist": temas}
+    ]
+    return uploader.procesar_carpeta(carpeta, SesionFalsa({}), GENEROS, {}, repertorio)
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="requiere ffmpeg")
+def test_un_tema_con_angulos_no_llega_a_la_descripcion_con_angulos(uploader, monkeypatch, tmp_path):
+    # YouTube rechaza una descripción con < o > (400 invalidDescription). El 2026-11-14
+    # DeathGrind nombró un tema "larvas up the ass >_<" y la subida falló tres veces.
+    datos = subir_con_temas_de_deathgrind(
+        uploader, monkeypatch, album_con_audio(tmp_path), ["larvas up the ass >_<"]
+    )
+
+    assert "<" not in datos["description"] and ">" not in datos["description"]
+    assert "›_‹" in datos["description"]
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="requiere ffmpeg")
+def test_un_disco_con_angulos_no_llega_al_titulo_con_angulos(uploader, monkeypatch, tmp_path):
+    # El título tiene la misma regla que la descripción.
+    monkeypatch.setattr(uploader, "get_repertorio_csv_path", lambda: None)
+    monkeypatch.setattr(uploader, "load_playlist_links_cache", lambda: {})
+
+    datos = uploader.procesar_carpeta(
+        album_con_audio(tmp_path, "Banda - Disco <3 (2020)"), None, GENEROS, {}, None
+    )
+
+    assert "<" not in datos["title"] and ">" not in datos["title"]
+    assert "Disco ‹3" in datos["title"]
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="requiere ffmpeg")
+def test_reemplazar_los_angulos_no_pasa_la_descripcion_del_limite(uploader, monkeypatch, tmp_path):
+    # Cada ‹ ocupa 3 bytes y < uno solo: el reemplazo va antes del recorte a 5000 bytes.
+    datos = subir_con_temas_de_deathgrind(
+        uploader, monkeypatch, album_con_audio(tmp_path), ["<" * 3000]
+    )
+
+    assert "<" not in datos["description"]
+    assert len(datos["description"].encode("utf-8")) <= uploader.DESCRIPTION_MAX_BYTES

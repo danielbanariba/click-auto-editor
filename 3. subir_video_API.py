@@ -1452,6 +1452,14 @@ def limpiar_titulo(nombre):
 
 TITLE_MAX_CHARS = 100
 DESCRIPTION_MAX_BYTES = 5000
+# YouTube rechaza un título o una descripción con < o > (400 invalidDescription). El 2026-11-14
+# DeathGrind nombró un tema "larvas up the ass >_<" y la subida falló tres veces.
+SIN_ANGULOS = str.maketrans({"<": "‹", ">": "›"})
+
+
+def sin_angulos(texto):
+    """Cambia < y > por ‹ y ›, que se ven casi igual y YouTube acepta."""
+    return texto.translate(SIN_ANGULOS) if texto else texto
 FULL_ALBUM_MARKER = "full album"
 
 CENSORED_DIR = Path(
@@ -3118,10 +3126,11 @@ def procesar_carpeta(
         tipo_full=tipo_full,
         playlist_cache=playlist_cache,
     )
-    description = ensure_description_limit(description)
+    # Antes del recorte: ‹ y › ocupan 3 bytes y < y > uno.
+    description = ensure_description_limit(sin_angulos(description))
     title = redact_extremism(title)
     title = censor_profanity(title)
-    title = truncar_titulo(title)
+    title = truncar_titulo(sin_angulos(title))
     description = truncar_descripcion(description)
     genres_list = split_genres(genre_text)
 
