@@ -310,6 +310,20 @@ notice gives the Studio link to delete it by hand. A 404 from `videos.delete` re
 deleted already) and gives the Studio link, instead of "Sigue en YouTube", which any other API
 error keeps.
 
+A video that is not in the channel at all (deleted) is neither a copy nor something to wait for.
+Studio then shows only "Vaya, se ha producido un error." instead of the video, as it does for a
+made-up id. This was added on 2026-11-15: Mithras (lrDI8fXgEjY) and Chaos Inception (byiO8xdI_IQ)
+were gone, and their "rechazó o perdió" notice came back on every restart, 38 times for one of them.
+- When `leer_retiro_en_studio` sees that page, `programar` returns `motivo = inexistente`, and the
+  video leaves `pendientes.json`, so a restart does not launch it again.
+- The album is not added to the registry, since the video is not on YouTube.
+- The service sends one notice ("🗑 YouTube ya no tiene ...") and never retries.
+- A page that cannot be read keeps the old `no_existe` notice, and the video stays pending.
+- If such a video did exist after all, `/mapear_canal` lists it among the private videos with no
+  date.
+- Studio took 22 to 42 s to load `/video/<id>/edit` that night, so the read waits up to 90 s for
+  it (`ESPERA_PAGINA_STUDIO_MS`) instead of the default 30 s.
+
 A claimed video with no blacklist match gets a different Telegram question: its
 title, the claimants, the `/claims` link, the Studio screenshot and a note that
 the dispute goes out with the reason "Licencia" and the configured text and

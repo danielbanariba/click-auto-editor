@@ -1239,6 +1239,14 @@ class Servicio:
             )
         elif motivo == "copia_retirada":
             self.preguntar_por_copia_retirada(resultado, video_id)
+        elif motivo == "inexistente":
+            self.fallos_programar.pop(video_id, None)
+            titulo = resultado.get("titulo")
+            nombre = f"\"{titulo}\" ({video_id})" if titulo and titulo != video_id else video_id
+            self.avisar(
+                f"🗑 YouTube ya no tiene {nombre}: no está ni en la API ni en Studio.\n"
+                "Lo saqué de los pendientes de programar y no vuelvo a avisar."
+            )
         elif motivo in ("fallo", "no_existe"):
             self.avisar(f"❌ YouTube rechazó o perdió el video {video_id} ({motivo}).")
         elif motivo == "no_es_privado":
