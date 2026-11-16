@@ -202,6 +202,23 @@ class TestLeerRetiroEnStudio(unittest.TestCase):
         resultado = self.leer(studio)
         self.assertEqual(resultado["estado"], "copia_retirada", resultado)
 
+    def test_un_error_y_despues_una_pagina_vacia_no_dice_que_el_video_no_existe(self):
+        # Defecto: tomar por inexistente un video del que solo se vio un error y, al recargar,
+        # nada. Una página que no se pudo leer deja el video pendiente, como antes.
+        vacia = "<!doctype html><html><body></body></html>"
+        resultado = self.leer(StudioFalso(html=[PAGINA_DE_ERROR, vacia]))
+        self.assertEqual(resultado["estado"], "otro", resultado)
+
+    def test_la_segunda_mirada_vuelve_a_la_url_del_video(self):
+        # Defecto: recargar la URL en la que quedó la página. Si el error de Studio la movió a otra
+        # ruta, la segunda mirada no miraba el video y no protegía de una falla pasajera.
+        se_mueve = PAGINA_DE_ERROR.replace(
+            "</body>", '<script>history.replaceState(null, "", "/otra-ruta")</script></body>'
+        )
+        studio = StudioFalso(html=se_mueve)
+        self.leer(studio)
+        self.assertEqual(studio.abiertas, ["https://studio.youtube.com/video/V1/edit"] * 2)
+
     def test_un_texto_de_error_oculto_no_tapa_el_aviso_de_retirado(self):
         # Defecto: la espera combinada tomaba el primer texto en el orden de la página, aunque
         # estuviera oculto, y nunca veía el aviso visible que venía después.

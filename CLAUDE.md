@@ -315,9 +315,10 @@ Studio then shows only "Vaya, se ha producido un error." instead of the video, a
 made-up id. This was added on 2026-11-15: Mithras (lrDI8fXgEjY) and Chaos Inception (byiO8xdI_IQ)
 were gone, and their "rechazó o perdió" notice came back on every restart, 38 times for one of them.
 - That page is Studio's generic error page, which a passing failure also shows. So it counts only
-  when `leer_retiro_en_studio` sees it again after a reload, and a visible "Retirado" notice
-  always wins over it. Only then `programar` returns `motivo = inexistente`, and the video leaves
-  `pendientes.json`, so a restart does not launch it again.
+  when `leer_retiro_en_studio` sees it on two loads of `/video/<id>/edit` in a row. On a load where
+  the "Retirado" notice and the error text show together, the notice wins. Only then `programar`
+  returns `motivo = inexistente`, and the video leaves `pendientes.json`, so a restart does not
+  launch it again.
 - The album is not added to the registry, since the video is not on YouTube.
 - The service sends one notice ("🗑 YouTube ya no tiene ...") and never retries.
 - A page that cannot be read keeps the old `no_existe` notice, and the video stays pending.

@@ -1792,7 +1792,10 @@ def aviso_o_error_de_studio(pagina):
         aviso.or_(error).first.wait_for(state="visible", timeout=ESPERA_AVISO_RETIRADO_MS)
     except PlaywrightError:
         return None
-    return "aviso" if aviso.is_visible() else "error"
+    if aviso.is_visible():
+        return "aviso"
+    # El aviso pudo cambiar entre la espera y esta mirada: "error" solo con el error a la vista.
+    return "error" if error.is_visible() else None
 
 
 def leer_retiro_en_studio(video_id, abrir_studio=None):
@@ -1811,18 +1814,16 @@ def leer_retiro_en_studio(video_id, abrir_studio=None):
     try:
         with (abrir_studio or pagina_de_studio)() as pagina:
             try:
-                pagina.goto(
-                    f"{URL_STUDIO}video/{video_id}/edit",
-                    wait_until="domcontentloaded",
-                    timeout=ESPERA_PAGINA_STUDIO_MS,
-                )
+                url = f"{URL_STUDIO}video/{video_id}/edit"
+                pagina.goto(url, wait_until="domcontentloaded", timeout=ESPERA_PAGINA_STUDIO_MS)
                 visto = aviso_o_error_de_studio(pagina)
                 vistas_de_error = 0
                 while visto == "error":
                     vistas_de_error += 1
                     if vistas_de_error >= VISTAS_DE_VIDEO_INEXISTENTE:
                         return {"estado": "inexistente"}
-                    pagina.reload(wait_until="domcontentloaded", timeout=ESPERA_PAGINA_STUDIO_MS)
+                    # A la URL del video y no `reload`: un error de Studio puede cambiar de ruta.
+                    pagina.goto(url, wait_until="domcontentloaded", timeout=ESPERA_PAGINA_STUDIO_MS)
                     visto = aviso_o_error_de_studio(pagina)
                 if visto is None:
                     return {"estado": "otro", "motivo": "sin_aviso_de_retirado"}
