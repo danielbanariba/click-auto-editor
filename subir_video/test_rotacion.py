@@ -175,6 +175,25 @@ def test_probar_credenciales_sin_red_lanza_el_corte_si_se_pide():
         raise AssertionError("debia lanzar el corte de red")
 
 
+def test_probar_credenciales_una_revocada_y_otra_sin_red_lanza_el_corte():
+    """Una revocada no alcanza para decir que no hay credenciales si otra no se
+    pudo probar por la red: esa podia servir. La revocada igual queda marcada."""
+    _instalar_fakes(
+        upload_pool=[_UP1, _UP2],
+        dead={"client_secrets_upload_1.json"},
+        sin_red={"client_secrets_upload_2.json"},
+        cliente_fake=True,
+    )
+
+    try:
+        auth.probar_credenciales_disponibles(prefix="upload", es_error_de_red=_es_de_red)
+    except TransportError:
+        pass
+    else:
+        raise AssertionError("debia lanzar el corte de red")
+    assert str(_UP1[0]) in auth._exhausted_credentials
+
+
 def test_probar_credenciales_sin_red_sin_pedirlo_devuelve_none():
     """Sin es_error_de_red sigue como antes (3. subir_video_API.py): un corte
     de red cuenta como credencial que no sirve y no lanza nada."""

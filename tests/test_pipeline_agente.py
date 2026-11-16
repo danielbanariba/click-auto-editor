@@ -1535,9 +1535,10 @@ class TestCredencialesSinRed(unittest.TestCase):
         # Sin refresh_token no se intenta refrescar: el paso no toca la red.
         self.credencial(1, refresh_token=None)
 
-        with mock.patch("socket.getaddrinfo", side_effect=AssertionError("no debía tocar la red")):
+        with mock.patch("socket.getaddrinfo") as dns:
             resultados = list(self.resultados())
 
+        dns.assert_not_called()
         for nombre, resultado in resultados:
             with self.subTest(paso=nombre):
                 self.assertFalse(resultado["ok"])
