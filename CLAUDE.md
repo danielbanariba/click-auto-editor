@@ -314,8 +314,10 @@ A video that is not in the channel at all (deleted) is neither a copy nor someth
 Studio then shows only "Vaya, se ha producido un error." instead of the video, as it does for a
 made-up id. This was added on 2026-11-15: Mithras (lrDI8fXgEjY) and Chaos Inception (byiO8xdI_IQ)
 were gone, and their "rechazó o perdió" notice came back on every restart, 38 times for one of them.
-- When `leer_retiro_en_studio` sees that page, `programar` returns `motivo = inexistente`, and the
-  video leaves `pendientes.json`, so a restart does not launch it again.
+- That page is Studio's generic error page, which a passing failure also shows. So it counts only
+  when `leer_retiro_en_studio` sees it again after a reload, and a visible "Retirado" notice
+  always wins over it. Only then `programar` returns `motivo = inexistente`, and the video leaves
+  `pendientes.json`, so a restart does not launch it again.
 - The album is not added to the registry, since the video is not on YouTube.
 - The service sends one notice ("🗑 YouTube ya no tiene ...") and never retries.
 - A page that cannot be read keeps the old `no_existe` notice, and the video stays pending.

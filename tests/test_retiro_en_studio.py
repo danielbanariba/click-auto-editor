@@ -71,12 +71,14 @@ class StudioFalso:
     def __init__(
         self, aviso=AVISO, globo=GLOBO_COPIA, dialogo=DIALOGO_COPIA, abre_dialogo=True, html=None, demora_s=0
     ):
-        self.html = html or (
+        self.html = (
             PAGINA.replace("__AVISO__", aviso)
             .replace("__GLOBO__", globo)
             .replace("__DIALOGO__", dialogo)
             .replace("__ABRE_DIALOGO__", "true" if abre_dialogo else "false")
         )
+        # `html`: una página, o una por carga (la última se repite); sin `html`, la de arriba.
+        self.paginas = html if isinstance(html, list) else [html or self.html]
         self.demora_s = demora_s
         self.abiertas = []
         self.pulsados = []
@@ -88,7 +90,8 @@ class StudioFalso:
             return ruta.fulfill(status=200, body="{}", content_type="application/json")
         self.abiertas.append(url)
         time.sleep(self.demora_s)
-        return ruta.fulfill(status=200, body=self.html, content_type="text/html; charset=utf-8")
+        html = self.paginas[min(len(self.abiertas), len(self.paginas)) - 1]
+        return ruta.fulfill(status=200, body=html, content_type="text/html; charset=utf-8")
 
 
 class PaginaQueFallaAlCapturar:
@@ -189,7 +192,28 @@ class TestLeerRetiroEnStudio(unittest.TestCase):
         studio = StudioFalso(html=PAGINA_DE_ERROR)
         resultado = self.leer(studio)
         self.assertEqual(resultado["estado"], "inexistente", resultado)
+        self.assertEqual(len(studio.abiertas), 2)  # la vio dos veces, con una recarga en medio
         self.assertEqual(studio.pulsados, [])
+
+    def test_un_error_pasajero_de_studio_no_dice_que_el_video_no_existe(self):
+        # Defecto: la página de error es la genérica de Studio. Tomada de una sola mirada, una
+        # falla pasajera sacaba de pendientes, para siempre, un video que sí existe.
+        studio = StudioFalso(html=[PAGINA_DE_ERROR, StudioFalso().html])
+        resultado = self.leer(studio)
+        self.assertEqual(resultado["estado"], "copia_retirada", resultado)
+
+    def test_un_texto_de_error_oculto_no_tapa_el_aviso_de_retirado(self):
+        # Defecto: la espera combinada tomaba el primer texto en el orden de la página, aunque
+        # estuviera oculto, y nunca veía el aviso visible que venía después.
+        oculto = '<div style="display: none">Vaya, se ha producido un error.</div>'
+        resultado = self.leer(StudioFalso(aviso=oculto + AVISO))
+        self.assertEqual(resultado["estado"], "copia_retirada", resultado)
+
+    def test_con_el_aviso_de_retirado_un_texto_de_error_no_lo_vuelve_inexistente(self):
+        # Defecto: un error suelto en la página de un video retirado le ganaba al aviso, y la
+        # copia salía de pendientes sin anotar su álbum (que se volvería a subir).
+        resultado = self.leer(StudioFalso(aviso=AVISO + "<div>Vaya, se ha producido un error.</div>"))
+        self.assertEqual(resultado["estado"], "copia_retirada", resultado)
 
     def test_una_pagina_que_tarda_mas_que_la_espera_por_defecto_igual_se_lee(self):
         # Defecto: `goto` usaba la espera por defecto (30 s) y Studio tardó hasta 42 s en cargar

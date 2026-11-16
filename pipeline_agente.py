@@ -1762,6 +1762,9 @@ ESPERA_PAGINA_STUDIO_MS = 90_000
 # Lo que Studio muestra para un video que no es del canal: el 2026-11-15, lrDI8fXgEjY y
 # byiO8xdI_IQ (borrados) y un id inventado; un video que existe abre sus detalles.
 P_VIDEO_INEXISTENTE = re.compile(r"Vaya, se ha producido un error")
+# Es la página de error genérica de Studio: una falla pasajera también la muestra. Solo cuenta
+# si se repite tras recargar.
+VISTAS_DE_VIDEO_INEXISTENTE = 2
 ESPERA_DIALOGO_RETIRADO_MS = 20_000
 
 
@@ -1776,14 +1779,30 @@ def datos_de_la_retirada(texto):
     return list(datos.values())
 
 
+def aviso_o_error_de_studio(pagina):
+    """Lo primero visible en /video/<id>/edit: "aviso" (Retirado), "error" (la página de error) o
+    None si no apareció ninguno a tiempo. Con los dos a la vista, gana el aviso."""
+    from playwright.sync_api import Error as PlaywrightError
+
+    # Solo lo visible: la espera combinada toma el primero en el orden de la página, y un texto
+    # oculto antes del aviso la dejaría esperando algo que nunca se ve.
+    aviso = pagina.get_by_text("Retirado", exact=True).filter(visible=True).first
+    error = pagina.get_by_text(P_VIDEO_INEXISTENTE).filter(visible=True).first
+    try:
+        aviso.or_(error).first.wait_for(state="visible", timeout=ESPERA_AVISO_RETIRADO_MS)
+    except PlaywrightError:
+        return None
+    return "aviso" if aviso.is_visible() else "error"
+
+
 def leer_retiro_en_studio(video_id, abrir_studio=None):
     """Por qué YouTube retiró el video, según Studio.
 
     Solo lee: pulsa el aviso "Retirado" y "Revisar problemas", que abren información, y nada
     dentro del diálogo. Devuelve `estado` "copia_retirada" (con `detalle`, las líneas de quién
     pidió la retirada, y `captura_studio`, None si la captura falló) solo cuando Studio dice que
-    es una copia, e "inexistente" cuando muestra su página de error en vez del video. Cualquier
-    otra cosa, o una página que no se pudo leer, es "otro".
+    es una copia, e "inexistente" cuando muestra su página de error en vez del video en dos cargas
+    seguidas. Cualquier otra cosa, o una página que no se pudo leer, es "otro".
     """
     from playwright.sync_api import Error as PlaywrightError
 
@@ -1797,15 +1816,17 @@ def leer_retiro_en_studio(video_id, abrir_studio=None):
                     wait_until="domcontentloaded",
                     timeout=ESPERA_PAGINA_STUDIO_MS,
                 )
-                aviso = pagina.get_by_text("Retirado", exact=True).first
-                error = pagina.get_by_text(P_VIDEO_INEXISTENTE).first
-                try:
-                    aviso.or_(error).first.wait_for(state="visible", timeout=ESPERA_AVISO_RETIRADO_MS)
-                except PlaywrightError:
+                visto = aviso_o_error_de_studio(pagina)
+                vistas_de_error = 0
+                while visto == "error":
+                    vistas_de_error += 1
+                    if vistas_de_error >= VISTAS_DE_VIDEO_INEXISTENTE:
+                        return {"estado": "inexistente"}
+                    pagina.reload(wait_until="domcontentloaded", timeout=ESPERA_PAGINA_STUDIO_MS)
+                    visto = aviso_o_error_de_studio(pagina)
+                if visto is None:
                     return {"estado": "otro", "motivo": "sin_aviso_de_retirado"}
-                if not aviso.is_visible() and error.is_visible():
-                    return {"estado": "inexistente"}
-                aviso.click()
+                pagina.get_by_text("Retirado", exact=True).filter(visible=True).first.click()
                 globo = pagina.locator("ytcp-video-notices-tooltip-body:visible").first
                 globo.wait_for(timeout=ESPERA_AVISO_RETIRADO_MS)
                 if not P_COPIA_RETIRADA.search(globo.inner_text()):
