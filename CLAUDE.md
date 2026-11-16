@@ -604,7 +604,13 @@ For each album folder in `DIR_AUDIO_SCRIPTS`:
    album in 20 GB) fits in the free ramdisk and in `MemAvailable` minus `RAM_MARGEN_LIBRE_GB`, so a
    render never pushes the system into swap (zram does not compress video). Otherwise it uses
    `SSD_TEMP_DIR`. If `MemAvailable` cannot be read, it uses the SSD
-2. Reads audio metadata (mutagen), generates tracklist overlay with auto-sized fonts
+2. Reads audio metadata (mutagen), generates tracklist overlay with auto-sized fonts.
+   The text color keeps the hue of the inverted cover average. `generate_tracklist_overlays`
+   measures the background behind the list (the cover scaled to fill the frame, as vhs_render
+   builds it) and moves the color toward light or dark, whichever contrasts more, until it reaches
+   7:1 (WCAG, `TRACKLIST_TEXT_CONTRAST`). A soft outline of the shadow color goes around each
+   letter (`TRACKLIST_TEXT_HALO`). This was added on 2026-11-16: the inverse of a mid-tone cover
+   is another mid tone, and Secreted's tracklist came out gray-green on pink and could not be read
 3. Creates drop shadow for cover image (`effects/sombra.py`)
 4. Fetches track titles from DeathGrind API or falls back to filenames
 5. Runs profanity censorship (`limpieza/censura.py`)
