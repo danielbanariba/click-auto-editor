@@ -9,6 +9,7 @@ clic llega al "servidor".
 import contextlib
 import shutil
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -56,6 +57,10 @@ DIALOGO_COPIA = (
     "<div><b>De:</b> Naked Whipper Official</div>"
     "<p>Si no estás de acuerdo con esta decisión, puedes</p>"
 )
+# La que Studio mostró el 2026-11-15 para lrDI8fXgEjY, byiO8xdI_IQ (borrados del canal) y un id
+# inventado; un video que existe abre sus detalles.
+PAGINA_DE_ERROR = """<!doctype html><html><head><meta charset="utf-8"><title>YouTube Creator Studio</title>
+</head><body><div>Vaya, se ha producido un error.</div></body></html>"""
 GLOBO_NORMAS = (
     "Este vídeo se ha retirado de YouTube.<br><br>El motivo es que infringe las Normas de la "
     "comunidad de YouTube.<br><br>"
@@ -63,13 +68,18 @@ GLOBO_NORMAS = (
 
 
 class StudioFalso:
-    def __init__(self, aviso=AVISO, globo=GLOBO_COPIA, dialogo=DIALOGO_COPIA, abre_dialogo=True):
+    def __init__(
+        self, aviso=AVISO, globo=GLOBO_COPIA, dialogo=DIALOGO_COPIA, abre_dialogo=True, html=None, demora_s=0
+    ):
         self.html = (
             PAGINA.replace("__AVISO__", aviso)
             .replace("__GLOBO__", globo)
             .replace("__DIALOGO__", dialogo)
             .replace("__ABRE_DIALOGO__", "true" if abre_dialogo else "false")
         )
+        # `html`: una página, o una por carga (la última se repite); sin `html`, la de arriba.
+        self.paginas = html if isinstance(html, list) else [html or self.html]
+        self.demora_s = demora_s
         self.abiertas = []
         self.pulsados = []
 
@@ -79,7 +89,9 @@ class StudioFalso:
             self.pulsados.append(ruta.request.post_data)
             return ruta.fulfill(status=200, body="{}", content_type="application/json")
         self.abiertas.append(url)
-        return ruta.fulfill(status=200, body=self.html, content_type="text/html; charset=utf-8")
+        time.sleep(self.demora_s)
+        html = self.paginas[min(len(self.abiertas), len(self.paginas)) - 1]
+        return ruta.fulfill(status=200, body=html, content_type="text/html; charset=utf-8")
 
 
 class PaginaQueFallaAlCapturar:
@@ -119,11 +131,13 @@ class TestLeerRetiroEnStudio(unittest.TestCase):
             parche.start()
             self.addCleanup(parche.stop)
 
-    def leer(self, studio, falla_la_captura=None):
+    def leer(self, studio, falla_la_captura=None, espera_por_defecto_ms=None):
         contexto = self.navegador.new_context()
         self.addCleanup(contexto.close)
         contexto.route("https://studio.youtube.com/**", studio.atender)
         pagina = contexto.new_page()
+        if espera_por_defecto_ms:
+            pagina.set_default_navigation_timeout(espera_por_defecto_ms)
 
         @contextlib.contextmanager
         def abrir_studio():
@@ -171,6 +185,61 @@ class TestLeerRetiroEnStudio(unittest.TestCase):
         studio = StudioFalso(abre_dialogo=False)
         resultado = self.leer(studio)
         self.assertEqual((resultado["estado"], resultado["detalle"]), ("copia_retirada", []))
+
+    def test_la_pagina_de_error_de_studio_dice_que_el_video_no_existe(self):
+        # Defecto: un video borrado del canal quedaba en `otro`; `programar` lo dejaba en
+        # pendientes y el aviso «rechazó o perdió» volvía en cada reinicio (38 veces uno).
+        studio = StudioFalso(html=PAGINA_DE_ERROR)
+        resultado = self.leer(studio)
+        self.assertEqual(resultado["estado"], "inexistente", resultado)
+        self.assertEqual(len(studio.abiertas), 2)  # la vio dos veces, con una recarga en medio
+        self.assertEqual(studio.pulsados, [])
+
+    def test_un_error_pasajero_de_studio_no_dice_que_el_video_no_existe(self):
+        # Defecto: la página de error es la genérica de Studio. Tomada de una sola mirada, una
+        # falla pasajera sacaba de pendientes, para siempre, un video que sí existe.
+        studio = StudioFalso(html=[PAGINA_DE_ERROR, StudioFalso().html])
+        resultado = self.leer(studio)
+        self.assertEqual(resultado["estado"], "copia_retirada", resultado)
+
+    def test_un_error_y_despues_una_pagina_vacia_no_dice_que_el_video_no_existe(self):
+        # Defecto: tomar por inexistente un video del que solo se vio un error y, al recargar,
+        # nada. Una página que no se pudo leer deja el video pendiente, como antes.
+        vacia = "<!doctype html><html><body></body></html>"
+        resultado = self.leer(StudioFalso(html=[PAGINA_DE_ERROR, vacia]))
+        self.assertEqual(resultado["estado"], "otro", resultado)
+
+    def test_la_segunda_mirada_vuelve_a_la_url_del_video(self):
+        # Defecto: recargar la URL en la que quedó la página. Si el error de Studio la movió a otra
+        # ruta, la segunda mirada no miraba el video y no protegía de una falla pasajera.
+        se_mueve = PAGINA_DE_ERROR.replace(
+            "</body>", '<script>history.replaceState(null, "", "/otra-ruta")</script></body>'
+        )
+        studio = StudioFalso(html=se_mueve)
+        self.leer(studio)
+        self.assertEqual(studio.abiertas, ["https://studio.youtube.com/video/V1/edit"] * 2)
+
+    def test_un_texto_de_error_oculto_no_tapa_el_aviso_de_retirado(self):
+        # Defecto: la espera combinada tomaba el primer texto en el orden de la página, aunque
+        # estuviera oculto, y nunca veía el aviso visible que venía después.
+        oculto = '<div style="display: none">Vaya, se ha producido un error.</div>'
+        resultado = self.leer(StudioFalso(aviso=oculto + AVISO))
+        self.assertEqual(resultado["estado"], "copia_retirada", resultado)
+
+    def test_con_el_aviso_de_retirado_un_texto_de_error_no_lo_vuelve_inexistente(self):
+        # Defecto: un error suelto en la página de un video retirado le ganaba al aviso, y la
+        # copia salía de pendientes sin anotar su álbum (que se volvería a subir).
+        resultado = self.leer(StudioFalso(aviso=AVISO + "<div>Vaya, se ha producido un error.</div>"))
+        self.assertEqual(resultado["estado"], "copia_retirada", resultado)
+
+    def test_una_pagina_que_tarda_mas_que_la_espera_por_defecto_igual_se_lee(self):
+        # Defecto: `goto` usaba la espera por defecto (30 s) y Studio tardó hasta 42 s en cargar
+        # el 2026-11-15: la lectura se cortaba y una copia retirada no se reconocía.
+        parche = mock.patch.object(pa, "ESPERA_PAGINA_STUDIO_MS", 5000, create=True)
+        parche.start()
+        self.addCleanup(parche.stop)
+        resultado = self.leer(StudioFalso(demora_s=1.5), espera_por_defecto_ms=500)
+        self.assertEqual(resultado["estado"], "copia_retirada", resultado)
 
     def assert_copia_sin_foto(self, resultado):
         self.assertEqual(resultado["estado"], "copia_retirada", resultado)

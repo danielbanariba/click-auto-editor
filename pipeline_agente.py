@@ -375,6 +375,11 @@ def momento_procesado(video_id, ahora):
         return datetime.fromisoformat(pendiente["procesado_en"])
 
 
+def quitar_pendiente(video_id):
+    with bloqueo("estado"):
+        guardar_pendientes([p for p in leer_pendientes() if p["video_id"] != video_id])
+
+
 def buscar_pendiente(video_id):
     for pendiente in leer_pendientes():
         if pendiente["video_id"] == video_id:
@@ -393,8 +398,7 @@ def registrar_programado(video_id, titulo, publica_en, con_reclamo):
             "programado_en": datetime.now().astimezone().isoformat(),
         }
         f.write(json.dumps(registro, ensure_ascii=False) + "\n")
-    with bloqueo("estado"):
-        guardar_pendientes([p for p in leer_pendientes() if p["video_id"] != video_id])
+    quitar_pendiente(video_id)
 
 
 def fechas_programadas_localmente():
@@ -1753,6 +1757,14 @@ P_DATOS_DE_LA_RETIRADA = re.compile(
     r"(Contenido cuyos derechos de autor se infringen|Solicitud recibida|De):\s*([^\n]+)"
 )
 ESPERA_AVISO_RETIRADO_MS = 30_000
+# El 2026-11-15 /video/<id>/edit tardó de 22 a 42 s en cargar: la espera por defecto (30 s) cortaba.
+ESPERA_PAGINA_STUDIO_MS = 90_000
+# Lo que Studio muestra para un video que no es del canal: el 2026-11-15, lrDI8fXgEjY y
+# byiO8xdI_IQ (borrados) y un id inventado; un video que existe abre sus detalles.
+P_VIDEO_INEXISTENTE = re.compile(r"Vaya, se ha producido un error")
+# Es la página de error genérica de Studio: una falla pasajera también la muestra. Solo cuenta
+# si se repite tras recargar.
+VISTAS_DE_VIDEO_INEXISTENTE = 2
 ESPERA_DIALOGO_RETIRADO_MS = 20_000
 
 
@@ -1767,13 +1779,33 @@ def datos_de_la_retirada(texto):
     return list(datos.values())
 
 
+def aviso_o_error_de_studio(pagina):
+    """Lo primero visible en /video/<id>/edit: "aviso" (Retirado), "error" (la página de error) o
+    None si no apareció ninguno a tiempo. Con los dos a la vista, gana el aviso."""
+    from playwright.sync_api import Error as PlaywrightError
+
+    # Solo lo visible: la espera combinada toma el primero en el orden de la página, y un texto
+    # oculto antes del aviso la dejaría esperando algo que nunca se ve.
+    aviso = pagina.get_by_text("Retirado", exact=True).filter(visible=True).first
+    error = pagina.get_by_text(P_VIDEO_INEXISTENTE).filter(visible=True).first
+    try:
+        aviso.or_(error).first.wait_for(state="visible", timeout=ESPERA_AVISO_RETIRADO_MS)
+    except PlaywrightError:
+        return None
+    if aviso.is_visible():
+        return "aviso"
+    # El aviso pudo cambiar entre la espera y esta mirada: "error" solo con el error a la vista.
+    return "error" if error.is_visible() else None
+
+
 def leer_retiro_en_studio(video_id, abrir_studio=None):
     """Por qué YouTube retiró el video, según Studio.
 
     Solo lee: pulsa el aviso "Retirado" y "Revisar problemas", que abren información, y nada
     dentro del diálogo. Devuelve `estado` "copia_retirada" (con `detalle`, las líneas de quién
     pidió la retirada, y `captura_studio`, None si la captura falló) solo cuando Studio dice que
-    es una copia; cualquier otra cosa, o una página que no se pudo leer, es "otro".
+    es una copia, e "inexistente" cuando muestra su página de error en vez del video en dos cargas
+    seguidas. Cualquier otra cosa, o una página que no se pudo leer, es "otro".
     """
     from playwright.sync_api import Error as PlaywrightError
 
@@ -1782,13 +1814,20 @@ def leer_retiro_en_studio(video_id, abrir_studio=None):
     try:
         with (abrir_studio or pagina_de_studio)() as pagina:
             try:
-                pagina.goto(f"{URL_STUDIO}video/{video_id}/edit", wait_until="domcontentloaded")
-                aviso = pagina.get_by_text("Retirado", exact=True).first
-                try:
-                    aviso.wait_for(state="visible", timeout=ESPERA_AVISO_RETIRADO_MS)
-                except PlaywrightError:
+                url = f"{URL_STUDIO}video/{video_id}/edit"
+                pagina.goto(url, wait_until="domcontentloaded", timeout=ESPERA_PAGINA_STUDIO_MS)
+                visto = aviso_o_error_de_studio(pagina)
+                vistas_de_error = 0
+                while visto == "error":
+                    vistas_de_error += 1
+                    if vistas_de_error >= VISTAS_DE_VIDEO_INEXISTENTE:
+                        return {"estado": "inexistente"}
+                    # A la URL del video y no `reload`: un error de Studio puede cambiar de ruta.
+                    pagina.goto(url, wait_until="domcontentloaded", timeout=ESPERA_PAGINA_STUDIO_MS)
+                    visto = aviso_o_error_de_studio(pagina)
+                if visto is None:
                     return {"estado": "otro", "motivo": "sin_aviso_de_retirado"}
-                aviso.click()
+                pagina.get_by_text("Retirado", exact=True).filter(visible=True).first.click()
                 globo = pagina.locator("ytcp-video-notices-tooltip-body:visible").first
                 globo.wait_for(timeout=ESPERA_AVISO_RETIRADO_MS)
                 if not P_COPIA_RETIRADA.search(globo.inner_text()):
@@ -1825,8 +1864,7 @@ def apartar_copia_retirada(video_id, titulo, retiro, log):
         with bloqueo("publicados"):
             if registro_publicados.leer(REGISTRO_PUBLICADOS).buscar(album) is None:
                 registro_publicados.anotar(REGISTRO_PUBLICADOS, [(album, "subir", video_id)])
-    with bloqueo("estado"):
-        guardar_pendientes([p for p in leer_pendientes() if p["video_id"] != video_id])
+    quitar_pendiente(video_id)
     return {
         "ok": False,
         "motivo": "copia_retirada",
@@ -1986,6 +2024,17 @@ def programar(
                         retiro = leer_retiro(video_id)
                     if retiro["estado"] == "copia_retirada":
                         return apartar_copia_retirada(video_id, titulo, retiro, log)
+                    if retiro["estado"] == "inexistente":
+                        # Ni la API ni Studio lo tienen: relanzarlo en cada reinicio solo repite el
+                        # aviso. Si existiera, `mapear_canal` lo lista entre los privados sin fecha.
+                        quitar_pendiente(video_id)
+                        return {
+                            "ok": False,
+                            "motivo": "inexistente",
+                            "video_id": video_id,
+                            "titulo": titulo,
+                            "log": str(log),
+                        }
                 if estado in ("no_existe", "fallo"):
                     return {"ok": False, "motivo": estado, "status": status, "video_id": video_id}
                 if estado == "listo":

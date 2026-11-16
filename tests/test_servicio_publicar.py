@@ -1856,6 +1856,18 @@ class TestCopiaRetirada(BaseServicio):
                 self.assertEqual("registro de publicados" in texto, registrado)
                 self.servicio.estado["preguntas"].clear()
 
+    def test_un_video_que_ya_no_existe_avisa_una_sola_vez_y_no_se_reintenta(self):
+        # Defecto: `inexistente` caía en «Reintento en 30 min» y el video volvía a programarse.
+        self.terminar_programar(
+            {"ok": False, "motivo": "inexistente", "video_id": "VID1", "titulo": "🇬🇧 Mithras - Disco (2002)"}
+        )
+        self.assertEqual([m for m in self.telegram.mensajes if m["botones"]], [])
+        avisos = [m["texto"] for m in self.telegram.mensajes if "Mithras" in m["texto"]]
+        self.assertEqual(len(avisos), 1, avisos)
+        self.assertIn("ni en la API ni en Studio", avisos[0])
+        self.assertIn("no vuelvo a avisar", avisos[0])
+        self.assertEqual(self.servicio.reintentos, [])
+
     def test_un_video_que_no_existe_sigue_con_el_aviso_de_siempre(self):
         # Comportamiento previo: `no_existe` avisa una vez, sin pregunta.
         self.terminar_programar({"ok": False, "motivo": "no_existe", "status": {}, "video_id": "VID1"})

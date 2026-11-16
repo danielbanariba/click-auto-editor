@@ -2070,6 +2070,19 @@ class TestProgramar(unittest.TestCase):
         self.assertEqual(resultado["motivo"], "copia_retirada")
         self.assertEqual(len(pa.registro_publicados.leer(registro).filas), 1)
 
+    def test_un_video_que_ni_la_api_ni_studio_tienen_sale_de_pendientes_sin_anotar_el_album(self):
+        # Defecto: quedaba en pendientes y el servicio lo relanzaba en cada reinicio, con el mismo
+        # aviso cada vez. El álbum no se anota: el video no está en YouTube.
+        pa.registrar_pendiente("V2", "Otra - Banda (2024)", "Otra - Banda (2024)", datetime.now().astimezone())
+        resultado, registro, bloqueado = self.programar_un_video_que_la_api_no_ve({"estado": "inexistente"})
+        self.assertEqual(
+            {k: resultado.get(k) for k in ("ok", "motivo", "video_id", "titulo")},
+            {"ok": False, "motivo": "inexistente", "video_id": "V1", "titulo": "🇩🇪 Banda - Disco (2025)"},
+        )
+        self.assertEqual(bloqueado, [True])
+        self.assertEqual([p["video_id"] for p in pa.leer_pendientes()], ["V2"])
+        self.assertFalse(registro.exists())
+
     def test_un_video_que_no_existe_y_no_es_una_copia_sigue_como_antes(self):
         # Comportamiento previo: `no_existe`, el video sigue en pendientes y no se anota nada.
         resultado, registro, _ = self.programar_un_video_que_la_api_no_ve({"estado": "otro"})
