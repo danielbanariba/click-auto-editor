@@ -1292,6 +1292,26 @@ class TestCrearLista(BaseServicio):
         self.servicio.paso()
         self.assertIn("Banda C - Tres", self.ultima_pregunta()["texto"])
 
+    def test_una_subida_que_falla_por_otra_causa_frena_el_resto_de_la_lista(self):
+        # Defecto: un fallo de subida que no es el límite dejaba seguir la lista (o la esperaba
+        # como el límite), y cada álbum restante se renderizaba y subía sin que nadie decidiera.
+        self.empezar_la_lista("Banda A - Uno", "Banda B - Dos", "Banda C - Tres")
+        self.subiendo("Banda A - Uno")
+
+        self.lanzador.terminar("subir", {"ok": False, "motivo": "sin_credenciales"})
+        self.servicio.paso()
+        self.renderizado_por_adelantado("Banda B - Dos")
+        self.ahora += 2 * 3600
+        self.servicio.paso()
+
+        self.assertIn("¿Reintento?", self.ultima_pregunta()["texto"])
+        self.assertEqual(
+            self.lanzador.lanzados("renderizar"),
+            [["renderizar", "--carpeta", "Banda A - Uno"], ["renderizar", "--carpeta", "Banda B - Dos"]],
+        )
+        self.assertEqual(len(self.lanzador.lanzados("verificar")), 1)
+        self.assertEqual(len(self.lanzador.lanzados("subir")), 1)
+
     def test_con_el_limite_del_canal_la_lista_espera_y_sigue_cuando_la_subida_entra(self):
         # Defecto: con el límite del canal, cada álbum restante se renderizaría y fallaría igual.
         # Solo queda el que se adelantó durante la subida: espera en Renderizando/ sin verificarse.
@@ -1517,6 +1537,24 @@ class TestLimiteDelCanal(BaseServicio):
         self.assertEqual(self.lanzador.lanzados("programar"), [["programar", "--video-id", "VID1", "--esperar"]])
         self.assertEqual(len(self.lanzador.lanzados("verificar")), 1)
         self.assertTrue(Path(carpeta).is_dir())
+
+    def test_si_el_reintento_falla_por_otra_causa_pregunta_y_no_reintenta_solo(self):
+        # Defecto: la espera quedaba guardada con su hora ya pasada y el servicio relanzaba la
+        # subida en cada vuelta mientras la pregunta «¿Reintento?» seguía abierta.
+        carpeta, _ = self.subida_al_limite()
+        self.ahora += self.HORA
+        self.servicio.paso()
+        self.assertEqual(len(self.lanzador.lanzados("subir")), 2)
+
+        self.lanzador.terminar("subir", {"ok": False, "motivo": "sin_credenciales"})
+        self.servicio.paso()
+        self.ahora += 3 * self.HORA
+        self.servicio.paso()
+
+        self.assertEqual(len(self.lanzador.lanzados("subir")), 2)
+        texto = self.ultima_pregunta()["texto"]
+        self.assertIn("¿Reintento?", texto)
+        self.assertIn(Path(carpeta).name, texto)
 
 
 class TestReclamos(BaseServicio):
