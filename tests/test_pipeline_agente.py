@@ -2315,6 +2315,16 @@ class TestProgramar(unittest.TestCase):
         self.assertFalse(resultado["publicado_ahora"])
         self.assertIn(f"programado para {desde:%Y-%m-%d %H:%M}", resultado["resumen"])
 
+    def test_durante_la_veda_el_segundo_video_sale_una_hora_despues_del_primero(self):
+        # El primero queda solo en el registro local, semanas adelante: el segundo tiene que verlo.
+        desde = (datetime.now().astimezone() + timedelta(days=51)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        with mock.patch.object(pa, "PUBLICAR_DESDE", desde):
+            self.programar_sin_reclamo(YouTubeFalso(["succeeded"]))
+            _, status = self.programar_sin_reclamo(YouTubeFalso(["succeeded"]))
+        self.assertEqual(status["publishAt"], (desde + timedelta(hours=1)).isoformat())
+
     def test_el_segundo_video_espera_una_hora_al_primero_aunque_la_api_aun_no_lo_liste(self):
         primero, _ = self.programar_sin_reclamo(YouTubeFalso(["succeeded"]))
         segundo, status = self.programar_sin_reclamo(YouTubeFalso(["succeeded"]))
