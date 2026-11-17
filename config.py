@@ -94,6 +94,10 @@ MODELO_CENSURA = "qwen3.6:27b"
 # Cada caja crece esta fracción de su ancho a cada lado y de su alto arriba y abajo: con 0.5 mide
 # el doble en cada dimensión.
 MARGEN_CENSURA = 0.5
+# Ningún video sin reclamo sale público antes de este día (medianoche, hora local): `programar`
+# lo programa desde ahí. El 2026-11-16 el canal recibió un strike por desnudos y otro por derechos
+# de autor. None quita la veda; pasado ese día no cambia nada.
+NO_PUBLICAR_ANTES = "2027-01-06"
 
 # ============================================================================
 # ARCHIVOS DEL PROYECTO

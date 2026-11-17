@@ -53,6 +53,7 @@ from config import (
     DIRS_ORIGEN_RENDER,
     INTRO_DURATION,
     MIN_FREE_SPACE_GB,
+    NO_PUBLICAR_ANTES,
     PROJECT_ROOT,
     RENDER_SSD_DIR,
     SSD_TEMP_DIR,
@@ -87,6 +88,10 @@ VOLUMEN_MEDIO_MINIMO_DB = -45.0
 SILENCIO_LARGO_S = 20
 # Mínimo de anticipación al programar: YouTube rechaza un publishAt que ya pasó.
 ANTICIPACION_MIN = 2
+# Medianoche local del día de NO_PUBLICAR_ANTES: antes de eso nada sin reclamo sale público.
+PUBLICAR_DESDE = (
+    datetime.fromisoformat(NO_PUBLICAR_ANTES).astimezone() if NO_PUBLICAR_ANTES else None
+)
 # Entre un video publicado o programado y otro tiene que haber al menos esto.
 SEPARACION_ENTRE_VIDEOS = timedelta(hours=1)
 MARGEN_RECLAMO_MIN = 60
@@ -447,11 +452,15 @@ def siguiente_momento_libre(ahora, tomados, separacion=SEPARACION_ENTRE_VIDEOS):
     return momento
 
 
-def elegir_fecha(ahora, con_reclamo, tomados):
-    """Cuándo sale el video. Sin reclamo puede devolver `ahora`: se publica en el acto."""
+def elegir_fecha(ahora, con_reclamo, tomados, publicar_desde=None):
+    """Cuándo sale el video. Sin reclamo puede devolver `ahora`: se publica en el acto.
+
+    Sin reclamo, nunca antes de `publicar_desde` (la veda de NO_PUBLICAR_ANTES).
+    """
     if con_reclamo:
         return siguiente_hora_libre(sumar_dos_anios(ahora), horas_ocupadas(tomados))
-    momento = siguiente_momento_libre(ahora, tomados)
+    desde = max(ahora, publicar_desde) if publicar_desde else ahora
+    momento = siguiente_momento_libre(desde, tomados)
     if momento <= ahora:
         return ahora
     return max(momento, ahora + timedelta(minutes=ANTICIPACION_MIN))
@@ -2097,7 +2106,10 @@ def programar(
                 # calculada antes podría estar ya en el pasado al enviarla.
                 ahora = datetime.now().astimezone().replace(microsecond=0)
                 publica_en = elegir_fecha(
-                    ahora, con_reclamo, momentos_tomados(uploader, yt, ahora, con_reclamo)
+                    ahora,
+                    con_reclamo,
+                    momentos_tomados(uploader, yt, ahora, con_reclamo),
+                    publicar_desde=PUBLICAR_DESDE,
                 )
                 publicado_ahora = publica_en == ahora and not con_reclamo
                 if publicado_ahora:
