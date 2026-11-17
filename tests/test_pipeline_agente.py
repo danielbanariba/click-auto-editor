@@ -99,6 +99,24 @@ class TestHorarios(unittest.TestCase):
         casi_listo = ahora - timedelta(minutes=59, seconds=30)
         self.assertEqual(pa.elegir_fecha(ahora, False, [casi_listo]), momento("2026-11-01 13:22"))
 
+    def test_sin_reclamo_no_sale_antes_del_dia_desde_el_que_se_publica(self):
+        ahora = momento("2026-11-16 18:00")
+        desde = momento("2027-01-06 00:00")
+        self.assertEqual(pa.elegir_fecha(ahora, False, [], publicar_desde=desde), desde)
+
+    def test_desde_ese_dia_los_videos_siguen_a_una_hora_uno_de_otro(self):
+        ahora = momento("2026-11-16 18:00")
+        desde = momento("2027-01-06 00:00")
+        tomados = [desde, desde + timedelta(minutes=40)]
+        self.assertEqual(
+            pa.elegir_fecha(ahora, False, tomados, publicar_desde=desde), momento("2027-01-06 01:40")
+        )
+
+    def test_pasado_ese_dia_se_vuelve_a_publicar_en_el_acto(self):
+        ahora = momento("2027-01-10 18:00")
+        desde = momento("2027-01-06 00:00")
+        self.assertEqual(pa.elegir_fecha(ahora, False, [], publicar_desde=desde), ahora)
+
     def test_dos_anios_desde_29_de_febrero(self):
         self.assertEqual(
             pa.sumar_dos_anios(momento("2028-02-29 10:00")), momento("2030-02-28 10:00")
@@ -1954,6 +1972,8 @@ class TestProgramar(unittest.TestCase):
             mock.patch.object(pa, "PENDIENTES_JSON", self.tmp / "pendientes.json"),
             mock.patch.object(pa, "PROGRAMADOS_JSONL", self.tmp / "programados.jsonl"),
             mock.patch.object(pa, "DIR_LOGS", self.tmp / "logs"),
+            # Los tests no dependen del día de la veda de config.py.
+            mock.patch.object(pa, "PUBLICAR_DESDE", None),
         ]
         for parche in self.parches:
             parche.start()
@@ -2284,6 +2304,26 @@ class TestProgramar(unittest.TestCase):
         ]
         resultado, status = self.programar_sin_reclamo(YouTubeFalso(["succeeded"], subidas=subidas))
         self.assertTrue(resultado["publicado_ahora"])
+
+    def test_durante_la_veda_un_video_sin_reclamo_queda_programado_para_el_primer_dia_permitido(self):
+        desde = (datetime.now().astimezone() + timedelta(days=51)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        with mock.patch.object(pa, "PUBLICAR_DESDE", desde):
+            resultado, status = self.programar_sin_reclamo(YouTubeFalso(["succeeded"]))
+        self.assertEqual((status["privacyStatus"], status["publishAt"]), ("private", desde.isoformat()))
+        self.assertFalse(resultado["publicado_ahora"])
+        self.assertIn(f"programado para {desde:%Y-%m-%d %H:%M}", resultado["resumen"])
+
+    def test_durante_la_veda_el_segundo_video_sale_una_hora_despues_del_primero(self):
+        # El primero queda solo en el registro local, semanas adelante: el segundo tiene que verlo.
+        desde = (datetime.now().astimezone() + timedelta(days=51)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        with mock.patch.object(pa, "PUBLICAR_DESDE", desde):
+            self.programar_sin_reclamo(YouTubeFalso(["succeeded"]))
+            _, status = self.programar_sin_reclamo(YouTubeFalso(["succeeded"]))
+        self.assertEqual(status["publishAt"], (desde + timedelta(hours=1)).isoformat())
 
     def test_el_segundo_video_espera_una_hora_al_primero_aunque_la_api_aun_no_lo_liste(self):
         primero, _ = self.programar_sin_reclamo(YouTubeFalso(["succeeded"]))

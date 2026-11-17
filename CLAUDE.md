@@ -240,6 +240,18 @@ otherwise it is scheduled for the earliest moment that keeps one hour from
 every published or scheduled video. Claimed videos go two years ahead, on the
 first free hour, and monetization is not attempted for them.
 
+No unclaimed video goes public before `NO_PUBLICAR_ANTES` (`config.py`, currently
+"2027-01-06", local midnight).
+- Until that day `programar` schedules the video, private, for the first moment from that
+  midnight that keeps one hour from every other video. The upload notice then says
+  "programado para ...".
+- This holds for every path through `programar`: a new upload, a video freed from its claim, and
+  "▶️ Programar" on a private video with no date.
+- This was added on 2026-11-16, after the channel got a nudity strike and a copyright strike on
+  the same day.
+- Once the day has passed it changes nothing, and `None` removes it.
+- `3. subir_video_API.py`, run by hand, does not read it.
+
 Studio (claim check and monetization) runs Brave headless with a copy of the
 signed-in profile (`.runtime_browser_profiles/agente`). It must launch without
 Playwright's `--password-store=basic` / `--use-mock-keychain` flags (so Brave
