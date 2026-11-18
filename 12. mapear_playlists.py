@@ -297,17 +297,20 @@ def run_with_backoff(
     action, descripcion, max_retries=8, base_delay=2.0, max_delay=120.0
 ):
     attempt = 0
+    # Contador propio para la red: con uno solo, un BrokenPipe justo despues de
+    # 7 rate limits agotaba el reintento y tumbaba el servicio.
+    net_attempt = 0
     while True:
         try:
             return action()
         except (BrokenPipeError, ConnectionError, ConnectionResetError, OSError) as exc:
-            attempt += 1
-            if attempt >= max_retries:
+            net_attempt += 1
+            if net_attempt >= max_retries:
                 raise
-            wait = min(max_delay, base_delay * (2 ** (attempt - 1)))
+            wait = min(max_delay, base_delay * (2 ** (net_attempt - 1)))
             print(
                 f"Error de red al intentar {descripcion}: {exc}. "
-                f"Esperando {wait:.1f}s y reintentando ({attempt}/{max_retries})."
+                f"Esperando {wait:.1f}s y reintentando ({net_attempt}/{max_retries})."
             )
             time.sleep(wait)
         except HttpError as exc:

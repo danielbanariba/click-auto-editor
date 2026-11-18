@@ -316,5 +316,61 @@ class TestAgregarVideoRechazado(MainHarness):
             self.assertNotIn("failedPrecondition", linea)
 
 
+class TestBackoffContadorPropio(unittest.TestCase):
+    def test_broken_pipe_tras_rate_limits_no_agota_el_reintento_de_red(self):
+        rate = make_http_error(
+            403, "rateLimitExceeded", "Rate limit", URI_PLAYLISTS, api_status="RESOURCE_EXHAUSTED"
+        )
+        secuencia = [rate] * 7 + [BrokenPipeError(32, "Broken pipe"), {"id": "ok"}]
+        calls = []
+
+        def action():
+            calls.append(1)
+            item = secuencia[len(calls) - 1]
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        with mock.patch.object(mapear.time, "sleep", lambda *_: None):
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = mapear.run_with_backoff(action, descripcion="crear playlist 'X'")
+        self.assertEqual(result, {"id": "ok"})
+        self.assertEqual(len(calls), 9)
+
+
+    def _contar_llamadas(self, secuencia):
+        calls = []
+
+        def action():
+            calls.append(1)
+            if len(calls) > len(secuencia):
+                raise AssertionError("run_with_backoff siguio reintentando pasado el tope")
+            item = secuencia[len(calls) - 1]
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        return calls, action
+
+    def test_solo_errores_de_red_se_rinde_en_el_tope_y_relanza_el_error(self):
+        # 14., 15. y 16. comparten run_with_backoff: el tope de red no cambia.
+        calls, action = self._contar_llamadas([BrokenPipeError(32, "Broken pipe")] * 9)
+        with mock.patch.object(mapear.time, "sleep", lambda *_: None):
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(BrokenPipeError):
+                    mapear.run_with_backoff(action, descripcion="listar playlists")
+        self.assertEqual(len(calls), 8)
+
+    def test_solo_rate_limits_se_rinde_en_el_tope_con_rate_limit_error(self):
+        rate = make_http_error(
+            403, "rateLimitExceeded", "Rate limit", URI_PLAYLISTS, api_status="RESOURCE_EXHAUSTED"
+        )
+        calls, action = self._contar_llamadas([rate] * 9)
+        with mock.patch.object(mapear.time, "sleep", lambda *_: None):
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(mapear.RateLimitError):
+                    mapear.run_with_backoff(action, descripcion="listar playlists")
+        self.assertEqual(len(calls), 8)
+
 if __name__ == "__main__":
     unittest.main()

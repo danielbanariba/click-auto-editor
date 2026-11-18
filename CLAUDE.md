@@ -758,3 +758,7 @@ Central config for all scripts. Key settings:
   - The same 400 when adding a video to a playlist is logged in one line and skipped.
   - Any other `HttpError` when creating a playlist still stops the run. When adding a video, any
     other error is logged and the run goes on, as it did before.
+- `run_with_backoff` (`12. mapear_playlists.py`, also used by `14.`, `15.` and `16.`) counts
+  network errors (`BrokenPipeError`, `ConnectionError`, `OSError`) apart from rate limits, with the
+  same cap and backoff. With one count, a broken pipe after seven rate limits used up the retries:
+  two of the three runs of 2026-11-17 ended that way.
