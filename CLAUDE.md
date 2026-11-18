@@ -131,6 +131,26 @@ Telegram what was moved (up to 10 names and how many more) and, once per album,
 what could not be moved. It is a name match, not proof: a reissue with the same
 name is moved too, which is why nothing is deleted.
 
+`lista_negra_bandas.txt` (project root) is the band blacklist, added on 2026-11-18 after the
+channel got 3 copyright strikes: "no quiero volver a subir las mismas bandas que se contactaron
+conmigo o me enviaron strike". It is separate from `lista_negra_reclamantes.txt` (Content ID
+claimants). One band per line; blank lines and `#` lines are ignored.
+- `registro_publicados.clave_banda` normalizes a line like a folder name (no case, accents, signs,
+  year or type tag), so "Prophecy" matches "PROPHECY - Devastated by Mankind (2026) [EP]". The
+  whole band name has to match: "Prophecy of Doom" is not blocked by "Prophecy".
+- `buscar` (and `renderizar` without `--carpeta`) moves every album of a listed band it finds on
+  its way to `Lista negra/` (under `BASE_DIR`, with `__N` when the name is taken), under the same
+  `origenes` lock as the registry, and returns (or renders) the next one. An album that is also in
+  the registry goes to `Lista negra/`.
+- The moved names come back under `lista_negra_bandas` in the result, apart from `ya_publicados`.
+  A move that fails leaves that album in place, unrendered. With `--carpeta` the list is not
+  checked, as the registry is not.
+- The file is read on every call, so adding a band needs no restart. Nothing is deleted.
+- The service lists by Telegram what was moved ("⛔ Aparté N álbumes de bandas en la lista negra
+  (Lista negra/)", up to 10 names and how many more) and, once per album, what could not be moved.
+- It matches by band name only: a different band with the same name is blocked too, and that is
+  accepted. The notice is the way to see it; move the folder back by hand if it was a namesake.
+
 `eliminar` never deletes: added on 2026-11-11, after two albums that were not on YouTube were
 deleted by a mistaken press (the drive is NTFS and had no trash). It renames the album into
 `Papelera/<date>-<id>/` next to its root, on the same disk (`BASE_DIR/Papelera` for the source
@@ -211,8 +231,8 @@ logs, screenshots and state go to `data/agente/` (gitignored). A video id that s
 option and the step ends with "expected one argument". The service does it by itself.
 
 ```bash
-env/bin/python pipeline_agente.py buscar [--aleatorio] [--excluir NAME]...  # next album (or a random one) (cola, Album/, EP/), skipping the excluded ones, without rendering: its folder, cover and YouTube search screenshot; already published ones → Ya publicados/
-env/bin/python pipeline_agente.py renderizar             # next album (cola, Album/, EP/) → Renderizando/; already published ones → Ya publicados/
+env/bin/python pipeline_agente.py buscar [--aleatorio] [--excluir NAME]...  # next album (or a random one) (cola, Album/, EP/), skipping the excluded ones, without rendering: its folder, cover and YouTube search screenshot; already published ones → Ya publicados/, blacklisted bands → Lista negra/
+env/bin/python pipeline_agente.py renderizar             # next album (cola, Album/, EP/) → Renderizando/; already published ones → Ya publicados/, blacklisted bands → Lista negra/
 env/bin/python pipeline_agente.py verificar --carpeta "<dir>"  # audio/duration/4K checks, screenshot + YouTube search screenshot
 env/bin/python pipeline_agente.py subir --carpeta "<dir>"      # private upload, mid-video frame as thumbnail, then deletes the album folder
 env/bin/python pipeline_agente.py eliminar --carpeta "<dir>"   # moves the album folder to the trash of its disk without uploading (already published); a direct child of Renderizando/, upload_video/ or a source folder
@@ -704,6 +724,7 @@ Central config for all scripts. Key settings:
 - `data/playlist_links_cache.json`: cached playlist IDs per band/genre
 - `Ya subidos/` (under `BASE_DIR`): album folders moved there after a successful upload
 - `data/agente/ya_publicados.tsv`: registry of already published albums; `renderizar` moves the matching ones to `Ya publicados/` (under `BASE_DIR`) instead of rendering them
+- `lista_negra_bandas.txt`: blacklist of bands (one per line); `buscar` and `renderizar` move their albums to `Lista negra/` (under `BASE_DIR`) instead of offering or rendering them
 - `generos_activos.txt`: tab-separated list of active music genres with IDs
 
 ## Credentials and Secrets (never commit)

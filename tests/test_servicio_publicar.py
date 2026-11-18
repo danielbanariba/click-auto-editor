@@ -166,7 +166,7 @@ class BaseServicio(unittest.TestCase):
         self.servicio.paso()
         return carpeta, self.telegram.mensajes[-1]
 
-    def preguntar_antes_de_renderizar(self, nombre="Banda - Disco", apartados=()):
+    def preguntar_antes_de_renderizar(self, nombre="Banda - Disco", apartados=(), lista_negra=()):
         """Lleva un álbum de la cola hasta la pregunta de antes del render."""
         if not (self.cola / nombre).is_dir():
             self.album_en_cola(nombre)
@@ -181,6 +181,7 @@ class BaseServicio(unittest.TestCase):
                 "captura_busqueda": str(self.tmp / "busqueda.png"),
                 "busqueda": f"{nombre} (Full Album)",
                 "ya_publicados": list(apartados),
+                "lista_negra_bandas": list(lista_negra),
             },
         )
         self.servicio.paso()
@@ -3001,6 +3002,85 @@ class TestAvisos(BaseServicio):
 
         avisos = [m for m in self.telegram.mensajes if "sin permiso" in m["texto"]]
         self.assertEqual(len(avisos), 1)
+
+    def test_avisa_los_albumes_que_buscar_aparto_por_la_lista_negra_de_bandas(self):
+        # Defecto: `buscar` mueve álbumes a Lista negra/ en silencio y un álbum apartado por una
+        # coincidencia de nombre (otra banda con el mismo nombre) no se ve nunca.
+        lista_negra = [{"album": f"Banda {n} - Disco (2020)", "destino": "x"} for n in range(12)] + [
+            {"album": "Banda - Roto (2020)", "error": "sin permiso"},
+        ]
+        _, pregunta = self.preguntar_antes_de_renderizar("Banda - Disco", lista_negra=lista_negra)
+
+        movidos, no_movido, _busqueda, _pregunta = (m["texto"] for m in self.telegram.mensajes)
+        self.assertIn("⛔ Aparté 12 álbumes de bandas en la lista negra (Lista negra/)", movidos)
+        self.assertIn("• Banda 0 - Disco (2020)", movidos)
+        self.assertIn("• Banda 9 - Disco (2020)", movidos)
+        self.assertNotIn("Banda 10 - Disco (2020)", movidos)
+        self.assertIn("y 2 más", movidos)
+        self.assertNotIn("Ya estaban publicados", movidos)
+        self.assertNotIn("Banda - Roto", movidos)
+        self.assertIn("Banda - Roto (2020): sin permiso", no_movido)
+        self.assertIn("lista negra", no_movido)
+        self.assertIn("Banda - Disco", pregunta["texto"])
+
+    def test_sin_albumes_que_preguntar_igual_avisa_lo_que_aparto_por_la_lista_negra(self):
+        # Defecto: el aviso sale solo cuando hay un álbum que preguntar, y cuando todo lo que
+        # quedaba era de bandas de la lista negra no se entera nadie.
+        self.album_en_cola("Prophecy - Disco (2020)")
+        self.servicio.paso()
+        self.lanzador.terminar(
+            "buscar",
+            {"ok": False, "motivo": "sin_albumes", "ya_publicados": [],
+             "lista_negra_bandas": [{"album": "Prophecy - Disco (2020)", "destino": "x"}]},
+        )
+        self.servicio.paso()
+
+        self.assertEqual(len(self.telegram.mensajes), 1)
+        self.assertIn("⛔ Aparté 1 álbum de bandas en la lista negra", self.telegram.mensajes[0]["texto"])
+        self.assertIn("• Prophecy - Disco (2020)", self.telegram.mensajes[0]["texto"])
+
+    def test_un_album_de_la_lista_negra_que_no_se_pudo_apartar_no_relanza_la_busqueda_en_cada_vuelta(self):
+        # Defecto: el álbum sigue en la cola, la búsqueda se relanza en cada vuelta del servicio
+        # (recorriendo miles de carpetas del disco) y el mismo aviso llega una y otra vez.
+        self.album_en_cola("Prophecy - Roto (2020)")
+        self.servicio.paso()
+        self.lanzador.terminar(
+            "buscar",
+            {"ok": False, "motivo": "sin_albumes", "ya_publicados": [],
+             "lista_negra_bandas": [{"album": "Prophecy - Roto (2020)", "error": "sin permiso"}]},
+        )
+        for _ in range(3):
+            self.servicio.paso()
+
+        self.assertEqual(len(self.lanzador.lanzados("buscar")), 1)
+        self.assertEqual(len(self.telegram.mensajes), 1)
+        self.assertIn("Prophecy - Roto (2020): sin permiso", self.telegram.mensajes[0]["texto"])
+
+    def test_un_album_de_la_lista_negra_que_no_se_pudo_apartar_se_avisa_una_sola_vez(self):
+        # Defecto: el álbum sigue al frente de la cola, cada búsqueda vuelve a intentar moverlo y
+        # el mismo aviso llega después de cada una.
+        no_movido = {"album": "Prophecy - Roto (2020)", "error": "sin permiso"}
+        for nombre in ("Banda - Uno", "Banda - Dos"):
+            self.servicio.tras_buscar(
+                {"ok": True, "album": nombre, "carpeta": str(self.cola / nombre),
+                 "lista_negra_bandas": [no_movido]},
+                ["buscar"],
+            )
+
+        avisos = [m for m in self.telegram.mensajes if "sin permiso" in m["texto"]]
+        self.assertEqual(len(avisos), 1)
+
+    def test_avisa_lo_que_renderizar_aparto_por_la_lista_negra(self):
+        # Defecto: `renderizar` sin --carpeta también aparta álbumes; sin aviso, el servicio
+        # los dejaría ir en silencio cuando el próximo paso es un render.
+        self.servicio.tras_renderizar(
+            {"ok": False, "motivo": "sin_albumes", "ya_publicados": [],
+             "lista_negra_bandas": [{"album": "Prophecy - Disco (2020)", "destino": "x"}]},
+            ["renderizar", "--carpeta", "Banda - Otro (2020)"],
+        )
+
+        self.assertEqual(len(self.telegram.mensajes), 1)
+        self.assertIn("Aparté 1 álbum de bandas en la lista negra", self.telegram.mensajes[0]["texto"])
 
     def test_error_de_red_en_telegram_no_frena_el_servicio(self):
         self.album_en_cola("Banda - Disco")

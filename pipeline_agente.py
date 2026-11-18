@@ -47,6 +47,7 @@ from config import (
     CARPETA_RESCATE_RENDER,
     DIR_CENSURA,
     DIR_ERROR404,
+    DIR_LISTA_NEGRA_BANDAS,
     DIR_RENDERIZANDO,
     DIR_UPLOAD,
     DIR_YA_PUBLICADOS,
@@ -71,6 +72,8 @@ REGISTRO_PUBLICADOS = DIR_AGENTE / "ya_publicados.tsv"
 PROGRAMADOS_JSONL = DIR_AGENTE / "programados.jsonl"
 DIR_CAPTURAS = DIR_AGENTE / "capturas"
 LISTA_NEGRA_RECLAMANTES = PROJECT_ROOT / "lista_negra_reclamantes.txt"
+# Las bandas cuyos álbumes no se renderizan ni se suben (pidieron bajar sus videos o dieron strike).
+LISTA_NEGRA_BANDAS = PROJECT_ROOT / "lista_negra_bandas.txt"
 # Los videos que ya se apelaron (o que no se pueden apelar): a ninguno se le manda nada dos veces.
 APELACIONES_JSON = DIR_AGENTE / "apelaciones.json"
 DIR_LOGS = DIR_AGENTE / "logs"
@@ -242,12 +245,32 @@ def destino_libre(directorio, nombre):
     return destino
 
 
-def siguiente_sin_publicar(aleatorio=False, excluir=()):
-    """Como siguiente_album, pero aparta en DIR_YA_PUBLICADOS los que están en el registro.
+def apartar_album(origen, nombre, directorio, apartado):
+    """Mueve `origen/nombre` a `directorio` y anota en `apartado` su `destino`, o el `error`.
 
-    Devuelve el álbum (o None) y los apartados; uno que no se pudo mover lleva `error` y
-    queda en su carpeta sin renderizar. Con `aleatorio`, el orden es al azar entre todas las
-    carpetas de origen. Los nombres de `excluir` (la lista del /crear_lista) se saltan.
+    Un álbum que no se pudo mover queda en su carpeta.
+    """
+    try:
+        directorio.mkdir(parents=True, exist_ok=True)
+        destino = destino_libre(directorio, nombre)
+        # rename y no shutil.move: los orígenes y las carpetas de apartados están en BASE_DIR, y si
+        # rename falla, shutil.move copia el álbum y, sin poder borrar el original, deja
+        # una copia entera en cada vuelta.
+        (origen / nombre).rename(destino)
+        apartado["destino"] = str(destino)
+    except OSError as exc:
+        apartado["error"] = str(exc)
+    return apartado
+
+
+def siguiente_sin_publicar(aleatorio=False, excluir=()):
+    """Como siguiente_album, pero aparta los álbumes que no hay que renderizar.
+
+    Devuelve el álbum (o None), los apartados a DIR_YA_PUBLICADOS por estar en el registro y los
+    apartados a DIR_LISTA_NEGRA_BANDAS por ser de una banda de `lista_negra_bandas.txt`. Un
+    apartado que no se pudo mover lleva `error` y queda en su carpeta sin renderizar. Con
+    `aleatorio`, el orden es al azar entre todas las carpetas de origen. Los nombres de
+    `excluir` (la lista del /crear_lista) se saltan.
     """
     # `restaurar` devuelve álbumes a los orígenes con este candado: sin él, un álbum devuelto
     # mientras se recorre podría verse con el registro leído antes y apartarse.
@@ -257,7 +280,9 @@ def siguiente_sin_publicar(aleatorio=False, excluir=()):
 
 def _siguiente_sin_publicar(aleatorio, excluir):
     registro = registro_publicados.leer(REGISTRO_PUBLICADOS)
-    apartados = []
+    # La lista se lee en cada llamada: agregar una banda no necesita reiniciar el servicio.
+    bandas_negras = registro_publicados.leer_bandas(LISTA_NEGRA_BANDAS)
+    apartados, lista_negra = [], []
     # En orden se listan de a una: un origen se recorre solo si los anteriores no tienen nada.
     candidatos = (
         (origen, nombre)
@@ -270,22 +295,17 @@ def _siguiente_sin_publicar(aleatorio, excluir):
     for origen, nombre in candidatos:
         if nombre in excluir:
             continue
+        # La banda primero: un álbum de una banda de la lista negra va a su carpeta aunque
+        # también esté en el registro.
+        if registro_publicados.clave_banda(nombre) in bandas_negras:
+            lista_negra.append(apartar_album(origen, nombre, DIR_LISTA_NEGRA_BANDAS, {"album": nombre}))
+            continue
         fila = registro.buscar(nombre)
         if fila is None:
-            return origen / nombre, apartados
+            return origen / nombre, apartados, lista_negra
         apartado = {"album": nombre, "origen": fila["origen"], "como": fila["nombre"]}
-        try:
-            DIR_YA_PUBLICADOS.mkdir(parents=True, exist_ok=True)
-            destino = destino_libre(DIR_YA_PUBLICADOS, nombre)
-            # rename y no shutil.move: los orígenes y Ya publicados/ están en BASE_DIR, y si
-            # rename falla, shutil.move copia el álbum y, sin poder borrar el original, deja
-            # una copia entera en cada vuelta.
-            (origen / nombre).rename(destino)
-            apartado["destino"] = str(destino)
-        except OSError as exc:
-            apartado["error"] = str(exc)
-        apartados.append(apartado)
-    return None, apartados
+        apartados.append(apartar_album(origen, nombre, DIR_YA_PUBLICADOS, apartado))
+    return None, apartados, lista_negra
 
 
 def slug(texto):
@@ -584,7 +604,7 @@ def renderizar(carpeta=None):
     if libre_gb < MIN_FREE_SPACE_GB:
         return {"ok": False, "motivo": "sin_espacio", "libre_gb": round(libre_gb, 1)}
 
-    apartados = []
+    apartados, lista_negra = [], []
     if carpeta:
         # Solo un álbum listado: "..", por ejemplo, haría mover la carpeta madre entera.
         candidatas = [o / carpeta for o in DIRS_ORIGEN_RENDER if carpeta in listar_carpetas(o)]
@@ -592,9 +612,14 @@ def renderizar(carpeta=None):
             return {"ok": False, "motivo": "album_no_encontrado", "album": carpeta}
         origen = candidatas[0]
     else:
-        origen, apartados = siguiente_sin_publicar()
+        origen, apartados, lista_negra = siguiente_sin_publicar()
         if origen is None:
-            return {"ok": False, "motivo": "sin_albumes", "ya_publicados": apartados}
+            return {
+                "ok": False,
+                "motivo": "sin_albumes",
+                "ya_publicados": apartados,
+                "lista_negra_bandas": lista_negra,
+            }
 
     renderizando_antes = set(listar_carpetas(DIR_RENDERIZANDO))
     error_antes = set(listar_carpetas(DIR_ERROR404))
@@ -625,6 +650,7 @@ def renderizar(carpeta=None):
                 "video": str(video),
                 "restantes": restantes,
                 "ya_publicados": apartados,
+                "lista_negra_bandas": lista_negra,
                 "log": str(log),
             }
 
@@ -637,6 +663,7 @@ def renderizar(carpeta=None):
         "movido_a_error404": bool(con_error),
         "restantes": restantes,
         "ya_publicados": apartados,
+        "lista_negra_bandas": lista_negra,
         "log": str(log),
         "log_final": cola_de_log(log),
     }
@@ -970,13 +997,19 @@ def buscar(uploader=None, aleatorio=False, excluir=()):
 
     El servicio pregunta con esa captura y la portada antes de renderizar: un álbum que ya está
     publicado se borra sin gastar el render. Los que están en el registro se apartan como en
-    `renderizar`. Sin portada en la carpeta (puede venir dentro del audio), va solo la búsqueda.
+    `renderizar`, y los de las bandas de la lista negra, a Lista negra/. Sin portada en la
+    carpeta (puede venir dentro del audio), va solo la búsqueda.
     Con `aleatorio` (el /aleatorio del servicio), elige al azar entre las carpetas de origen.
     Salta los de `excluir`: los que ya están en la lista del /crear_lista.
     """
-    origen, apartados = siguiente_sin_publicar(aleatorio, excluir)
+    origen, apartados, lista_negra = siguiente_sin_publicar(aleatorio, excluir)
     if origen is None:
-        return {"ok": False, "motivo": "sin_albumes", "ya_publicados": apartados}
+        return {
+            "ok": False,
+            "motivo": "sin_albumes",
+            "ya_publicados": apartados,
+            "lista_negra_bandas": lista_negra,
+        }
     captura, busqueda = capturar_busqueda(origen, uploader)
     portada = elegir_portada(origen)
     return {
@@ -987,6 +1020,7 @@ def buscar(uploader=None, aleatorio=False, excluir=()):
         "captura_busqueda": str(captura) if captura else None,
         "busqueda": busqueda,
         "ya_publicados": apartados,
+        "lista_negra_bandas": lista_negra,
     }
 
 

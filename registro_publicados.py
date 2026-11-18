@@ -13,6 +13,9 @@ se conservan. La censura del canal deja la primera letra y asteriscos del mismo 
 
 Es una comparación de nombres, no una prueba: una reedición con el mismo nombre coincide.
 Por eso quien la usa aparta el álbum en lugar de borrarlo.
+
+La lista negra de bandas (`lista_negra_bandas.txt`) usa la misma normalización, solo con la
+parte de banda: `clave_banda`.
 """
 
 import re
@@ -36,19 +39,39 @@ def _compacto(texto):
     return "".join(c for c in texto if c.isalnum() or c == "*")
 
 
-def clave(nombre):
-    """La clave "banda|álbum" de una carpeta o de un título del canal; None si falta una de las dos."""
+def _limpiar(nombre):
+    """El texto de una carpeta o de un título sin marcas invisibles, género, sufijo `__N` ni etiquetas."""
     texto = unicodedata.normalize("NFKC", str(nombre or ""))
     # Marcas invisibles como U+200E (visto en un título: "Escuela Grind ‎- ...").
     texto = "".join(c for c in texto if unicodedata.category(c) != "Cf")
     texto = texto.split(" • ")[0]  # el género del título
     texto = re.sub(r"__\d+$", "", texto.strip())  # el sufijo del render cuando el nombre se repite
-    texto = ETIQUETA.sub(" ", texto)
+    return ETIQUETA.sub(" ", texto)
+
+
+def _partes(nombre):
+    """(banda, álbum) compactos; sin separador, el nombre entero y None."""
+    texto = _limpiar(nombre)
     for separador in SEPARADORES:
         if separador in texto:
             banda, album = (_compacto(parte) for parte in texto.split(separador, 1))
-            return f"{banda}|{album}" if banda and album else None
-    return None
+            return banda, album
+    return _compacto(texto), None
+
+
+def clave(nombre):
+    """La clave "banda|álbum" de una carpeta o de un título del canal; None si falta una de las dos."""
+    banda, album = _partes(nombre)
+    return f"{banda}|{album}" if banda and album else None
+
+
+def clave_banda(nombre):
+    """La clave de la banda: la parte de banda de `clave`, y para un nombre sin separador, él entero.
+
+    Así la línea "Prophecy" de la lista negra coincide con "PROPHECY - Devastated by Mankind
+    (2026) [EP]". None si el nombre no tiene letras ni números.
+    """
+    return _partes(nombre)[0] or None
 
 
 def _coincide(censurada, otra):
@@ -89,6 +112,21 @@ def leer(ruta):
     lineas = [linea.rstrip("\r") for linea in texto.split("\n")]
     filas = [linea.split("\t") for linea in lineas if linea and not linea.startswith("#")]
     return Registro([dict(zip(COLUMNAS, f)) for f in filas if len(f) == len(COLUMNAS)])
+
+
+def leer_bandas(ruta):
+    """Las claves de banda del archivo de la lista negra: una banda por línea, `#` comenta.
+
+    Un archivo que no existe es una lista vacía. Se lee entero en cada llamada: agregar una banda
+    no necesita reiniciar el servicio.
+    """
+    try:
+        texto = ruta.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return set()
+    lineas = (linea.strip() for linea in texto.split("\n"))
+    claves = (clave_banda(linea) for linea in lineas if linea and not linea.startswith("#"))
+    return {k for k in claves if k}
 
 
 def anotar(ruta, filas):

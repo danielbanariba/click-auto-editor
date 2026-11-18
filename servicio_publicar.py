@@ -65,7 +65,7 @@ MOTIVOS_RESTAURAR = {
     "ya_existe": "ya hay una carpeta con ese nombre en su lugar y no la piso; sigue en la papelera",
     "no_se_pudo_mover": "no se pudo mover; sigue en la papelera",
 }
-# Cuántos álbumes apartados por ya publicados lista el aviso; del resto solo dice cuántos son.
+# Cuántos álbumes apartados (ya publicados o de la lista negra) lista un aviso; del resto, cuántos más.
 MAX_APARTADOS_EN_AVISO = 10
 ORIGEN_PUBLICADO = {"canal": "en el canal", "eliminar": "lo eliminaste", "subir": "lo subiste"}
 LIMITE_LEYENDA = 1024
@@ -490,6 +490,15 @@ def cantidad_de_albumes(n):
     return f"{n} álbum" if n == 1 else f"{n} álbumes"
 
 
+def lista_con_tope(lineas):
+    """Las primeras MAX_APARTADOS_EN_AVISO líneas, y cuántas quedaron fuera."""
+    lineas = list(lineas)
+    visibles = lineas[:MAX_APARTADOS_EN_AVISO]
+    if len(lineas) > MAX_APARTADOS_EN_AVISO:
+        visibles.append(f"y {len(lineas) - MAX_APARTADOS_EN_AVISO} más.")
+    return "\n".join(visibles)
+
+
 def subidas_recientes(ahora):
     """Momentos de las subidas del registro de publicados en las últimas 24 horas, en orden."""
     momentos = []
@@ -824,15 +833,12 @@ class Servicio:
         """Lo que el render movió a Ya publicados/ sin renderizar, y lo que no pudo mover."""
         movidos = [a for a in apartados if "error" not in a]
         if movidos:
-            lineas = [
-                f"• {a['album']} → {a['como']} ({ORIGEN_PUBLICADO.get(a['origen'], a['origen'])})"
-                for a in movidos[:MAX_APARTADOS_EN_AVISO]
-            ]
-            if len(movidos) > MAX_APARTADOS_EN_AVISO:
-                lineas.append(f"y {len(movidos) - MAX_APARTADOS_EN_AVISO} más.")
             self.avisar(
                 f"📦 Ya estaban publicados: los moví a {pa.DIR_YA_PUBLICADOS.name}/ sin renderizar.\n"
-                + "\n".join(lineas)
+                + lista_con_tope(
+                    f"• {a['album']} → {a['como']} ({ORIGEN_PUBLICADO.get(a['origen'], a['origen'])})"
+                    for a in movidos
+                )
             )
         for a in apartados:
             if "error" in a and a["album"] not in self.no_apartados:
@@ -842,9 +848,39 @@ class Servicio:
                     f"{pa.DIR_YA_PUBLICADOS.name}/. Sigue en su carpeta y no lo renderizo."
                 )
 
-    def tras_buscar(self, resultado, argumentos):
+    def avisar_lista_negra(self, lista_negra):
+        """Lo que se movió a Lista negra/ por ser de una banda de la lista, y lo que no se pudo mover.
+
+        Es una coincidencia de nombre: una banda distinta con el mismo nombre también se aparta,
+        y este aviso es la única forma de enterarse.
+        """
+        movidos = [a for a in lista_negra if "error" not in a]
+        if movidos:
+            self.avisar(
+                f"⛔ Aparté {cantidad_de_albumes(len(movidos))} de bandas en la lista negra "
+                f"({pa.DIR_LISTA_NEGRA_BANDAS.name}/), sin renderizar.\n"
+                + lista_con_tope(f"• {a['album']}" for a in movidos)
+            )
+        for a in lista_negra:
+            clave = f"lista_negra:{a['album']}"
+            if "error" in a and clave not in self.no_apartados:
+                self.no_apartados.add(clave)
+                self.avisar(
+                    f"⚠️ {a['album']}: {a['error']}\nEs de una banda en la lista negra y no pude "
+                    f"moverlo a {pa.DIR_LISTA_NEGRA_BANDAS.name}/. Sigue en su carpeta y no lo "
+                    "ofrezco ni lo renderizo."
+                )
+
+    def avisar_lo_apartado(self, resultado):
+        """Avisa lo que el paso apartó a Ya publicados/ y a Lista negra/; True si algo no se pudo mover."""
         apartados = resultado.get("ya_publicados") or []
+        lista_negra = resultado.get("lista_negra_bandas") or []
         self.avisar_apartados(apartados)
+        self.avisar_lista_negra(lista_negra)
+        return any("error" in a for a in apartados + lista_negra)
+
+    def tras_buscar(self, resultado, argumentos):
+        sin_mover = self.avisar_lo_apartado(resultado)
         motivo = resultado.get("motivo")
         if resultado.get("ok"):
             self.avisos.clear()
@@ -853,7 +889,7 @@ class Servicio:
                 resultado["album"], resultado["carpeta"], resultado.get("portada"), previas, enlace
             )
         elif motivo == "sin_albumes":
-            if any("error" in a for a in apartados):
+            if sin_mover:
                 # El álbum que no se pudo mover sigue en la cola: sin pausa, se relanzaría la
                 # búsqueda en cada vuelta.
                 self.album_pausado_hasta = self.reloj() + REINTENTO_S
@@ -873,10 +909,9 @@ class Servicio:
         adelantado = self.render_adelantado is not None and lanzado == self.render_adelantado
         if adelantado:
             self.render_adelantado = None
-        apartados = resultado.get("ya_publicados") or []
-        self.avisar_apartados(apartados)
+        sin_mover = self.avisar_lo_apartado(resultado)
         motivo = resultado.get("motivo")
-        if motivo == "sin_albumes" and any("error" in a for a in apartados):
+        if motivo == "sin_albumes" and sin_mover:
             # El álbum que no se pudo mover sigue en la cola: sin pausa, se relanzaría el render
             # en cada vuelta.
             self.album_pausado_hasta = self.reloj() + REINTENTO_S
