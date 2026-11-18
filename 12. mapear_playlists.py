@@ -264,6 +264,35 @@ def is_access_not_configured_error(exc):
     return any(reason in {"accessNotConfigured", "forbidden"} for reason in reasons)
 
 
+def is_failed_precondition_error(exc):
+    """400 failedPrecondition ("Precondition check failed."): YouTube rechaza la
+    operacion sin dar un motivo mas concreto. No esta en la lista oficial de
+    errores de la Data API."""
+    if not isinstance(exc, HttpError):
+        return False
+    if getattr(exc, "resp", None) is not None and exc.resp.status != 400:
+        return False
+    return "failedPrecondition" in get_error_reasons(exc)
+
+
+def is_playlist_creation_blocked_error(exc):
+    """YouTube no deja crear mas playlists al canal: 400 failedPrecondition o el
+    tope documentado 400 maxPlaylistExceeded. Reintentar con cada item no sirve."""
+    if not isinstance(exc, HttpError):
+        return False
+    if getattr(exc, "resp", None) is not None and exc.resp.status != 400:
+        return False
+    reasons = get_error_reasons(exc)
+    return "failedPrecondition" in reasons or "maxPlaylistExceeded" in reasons
+
+
+def aviso_creacion_bloqueada(playlist_title):
+    return (
+        f"YouTube rechazo crear la playlist '{playlist_title}' "
+        "(400 failedPrecondition/maxPlaylistExceeded). No se crean "
+        "mas playlists en esta ejecucion; los videos quedan pendientes."
+    )
+
 def run_with_backoff(
     action, descripcion, max_retries=8, base_delay=2.0, max_delay=120.0
 ):
@@ -1053,8 +1082,13 @@ def main(youtube=None):
                     time.sleep(60)
                     video_pendiente = True
                     continue
-                except HttpError:
-                    raise
+                except HttpError as exc:
+                    if not is_playlist_creation_blocked_error(exc):
+                        raise
+                    crear_playlists_bloqueado = True
+                    video_pendiente = True
+                    print(aviso_creacion_bloqueada(playlist_title))
+                    continue
             if not playlist_id:
                 video_pendiente = True
                 continue
@@ -1087,14 +1121,34 @@ def main(youtube=None):
                 raise
             except HttpError as exc:
                 if is_playlist_not_found(exc):
-                    playlist_id = refresh_playlist(
-                        youtube, playlist_title, playlist_cache
-                    )
+                    if crear_playlists_bloqueado:
+                        print(
+                            f"Creacion de playlists en pausa. Se salta '{playlist_title}'."
+                        )
+                        video_pendiente = True
+                        continue
+                    try:
+                        playlist_id = refresh_playlist(
+                            youtube, playlist_title, playlist_cache
+                        )
+                    except HttpError as exc_crear:
+                        if not is_playlist_creation_blocked_error(exc_crear):
+                            raise
+                        crear_playlists_bloqueado = True
+                        video_pendiente = True
+                        print(aviso_creacion_bloqueada(playlist_title))
+                        continue
                     if playlist_id:
                         add_video_to_playlist(youtube, playlist_id, video_id)
                         added += 1
                         if pause:
                             time.sleep(pause)
+                    continue
+                if is_failed_precondition_error(exc):
+                    print(
+                        f"No se pudo agregar {video_id} a {playlist_title}: "
+                        "YouTube respondio 400 failedPrecondition. Se omite."
+                    )
                     continue
                 print(f"No se pudo agregar {video_id} a {playlist_title}: {exc}")
 

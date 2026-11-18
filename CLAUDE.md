@@ -748,3 +748,13 @@ Central config for all scripts. Key settings:
     reported `sin_credenciales` twice while all five credentials were fine.
   - `3. subir_video_API.py` still counts a network failure as an unusable credential.
 - `12. mapear_playlists.py` runs as a systemd service (`systemd/mapear_playlists.service`, installed as a copy in `/etc/systemd/system/`) with auto-restart
+- `12. mapear_playlists.py` and YouTube's 400 `failedPrecondition` ("Precondition check failed."),
+  which the Data API error list does not document. Added on 2026-11-17, after a run died on it
+  in `playlists.insert` after almost an hour.
+  - That answer, or 400 `maxPlaylistExceeded`, when creating a playlist stops creating playlists
+    for the rest of the run, and the videos that needed one stay `pendiente` for the next run.
+  - A cached playlist that no longer exists (404 when adding) is created again the same way, so
+    that 400 pauses creation there too; while creation is paused, that playlist is skipped.
+  - The same 400 when adding a video to a playlist is logged in one line and skipped.
+  - Any other `HttpError` when creating a playlist still stops the run. When adding a video, any
+    other error is logged and the run goes on, as it did before.
