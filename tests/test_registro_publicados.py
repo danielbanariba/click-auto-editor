@@ -42,6 +42,66 @@ class TestClave(unittest.TestCase):
                 self.assertIsNone(rp.clave(nombre))
 
 
+class TestClaveBanda(unittest.TestCase):
+    def test_la_carpeta_el_titulo_y_la_linea_de_la_lista_dan_la_misma_clave_de_banda(self):
+        # Defecto: año, tipo, género, bandera, mayúsculas, acentos o el sufijo __N hacen que una
+        # carpeta de una banda de la lista negra no coincida con la línea de la lista.
+        esperada = rp.clave_banda("Prophecy")
+        self.assertTrue(esperada)
+        for nombre in (
+            "PROPHECY - Devastated by Mankind (2026) [EP]",
+            "🇩🇪 PROPHECY - Devastated By Mankind (2026) • [Doom Metal] ⟨FULL EP⟩",
+            "Prophécy - Otro disco (2020)__2",
+            "  prophecy  ",
+        ):
+            with self.subTest(nombre=nombre):
+                self.assertEqual(rp.clave_banda(nombre), esperada)
+
+    def test_la_clave_de_banda_es_la_parte_de_banda_de_la_clave_del_album(self):
+        # Defecto: un segundo normalizador con otra forma (otro orden de pasos, otros separadores)
+        # daría claves distintas a las del registro para el mismo nombre.
+        for nombre in ("Twitch Of The Death Nerve - Beset By False Prophets (2021) [EP]",
+                       "Escuela Grind ‎- Early Recordings 2016-2018 (Full Album)",
+                       "Atra Mustum - Хаос (2012)"):
+            with self.subTest(nombre=nombre):
+                self.assertEqual(rp.clave_banda(nombre), rp.clave(nombre).split("|")[0])
+
+    def test_una_banda_que_solo_comparte_el_comienzo_no_coincide(self):
+        # Defecto: comparar por prefijo o por "contiene" aparta los álbumes de otras bandas.
+        self.assertNotEqual(rp.clave_banda("Prophecy of Doom - Disco (2020)"), rp.clave_banda("Prophecy"))
+        self.assertNotEqual(rp.clave_banda("Eternal - Tragedy (2020)"), rp.clave_banda("Eternal Tragedy"))
+
+    def test_sin_nombre_no_hay_clave_de_banda(self):
+        # Defecto: una clave vacía en la lista negra coincidiría con cualquier banda sin letras.
+        for nombre in ("", "   ", None, "!!!", "(2020)"):
+            with self.subTest(nombre=nombre):
+                self.assertIsNone(rp.clave_banda(nombre))
+
+
+class TestLeerBandas(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.ruta = self.tmp / "lista_negra_bandas.txt"
+
+    def test_lee_una_banda_por_linea_e_ignora_comentarios_y_lineas_en_blanco(self):
+        # Defecto: el encabezado "# ..." o una línea en blanco entran como banda; una línea con
+        # espacios o con fin de línea de Windows no coincide.
+        self.ruta.write_text(
+            "# Lista negra de bandas\n# otra nota\n\nProphecy\r\n  Absurdeity  \n\t\nEternal Tragedy\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(
+            rp.leer_bandas(self.ruta),
+            {rp.clave_banda("Prophecy"), rp.clave_banda("Absurdeity"), rp.clave_banda("Eternal Tragedy")},
+        )
+
+    def test_sin_archivo_no_hay_bandas(self):
+        # Defecto: un archivo que todavía no existe frena `buscar` en lugar de no apartar nada.
+        self.assertEqual(rp.leer_bandas(self.tmp / "no_existe.txt"), set())
+
+
 class TestRegistro(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())

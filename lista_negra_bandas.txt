@@ -1,0 +1,8 @@
+# Lista negra de bandas: las bandas que se contactaron con el canal o mandaron strike.
+# Sus álbumes no se vuelven a preguntar, renderizar ni subir: `buscar` y `renderizar` (sin
+# --carpeta) mueven cada uno a Lista negra/ y el servicio lo avisa por Telegram.
+# Una banda por línea, solo el nombre (sin año ni álbum); no distingue mayúsculas ni acentos.
+# Es por nombre: otra banda con el mismo nombre también se aparta. Las líneas con # se ignoran.
+Prophecy
+Absurdeity
+Eternal Tragedy

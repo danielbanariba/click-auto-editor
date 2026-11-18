@@ -350,10 +350,17 @@ class TestOrigenes(unittest.TestCase):
             mock.patch.object(pa, "analisis_en_curso", return_value=False),
             mock.patch.object(pa, "REGISTRO_PUBLICADOS", self.tmp / "ya_publicados.tsv"),
             mock.patch.object(pa, "DIR_YA_PUBLICADOS", self.tmp / "Ya publicados"),
+            # Nunca la lista ni la carpeta reales: la lista del repo podría apartar un álbum de prueba.
+            mock.patch.object(pa, "LISTA_NEGRA_BANDAS", self.tmp / "lista_negra_bandas.txt"),
+            mock.patch.object(pa, "DIR_LISTA_NEGRA_BANDAS", self.tmp / "Lista negra"),
         ]
         for parche in parches:
             parche.start()
             self.addCleanup(parche.stop)
+
+    def lista_negra(self, *bandas):
+        """Escribe la lista negra de bandas de la prueba, con su encabezado."""
+        pa.LISTA_NEGRA_BANDAS.write_text("# bandas\n" + "\n".join(bandas) + "\n", encoding="utf-8")
 
     def renderizar(self, carpeta=None):
         """Corre renderizar con un render falso; devuelve el resultado y los álbumes renderizados."""
@@ -544,9 +551,125 @@ class TestOrigenes(unittest.TestCase):
              "error": "sin permiso"},
         ])
 
+    def test_renderizar_aparta_las_bandas_de_la_lista_negra_y_renderiza_el_siguiente(self):
+        # Defecto: un álbum de una banda que pidió bajar sus videos se renderiza y se sube, o se
+        # aparta bajo la clave de los ya publicados y el servicio no distingue por qué.
+        self.lista_negra("Prophecy", "Absurdeity")
+        for nombre in ("PROPHECY - Devastated by Mankind (2026) [EP]", "Banda B - Viejo (2019)"):
+            (self.album / nombre).mkdir()
+        (self.album / "PROPHECY - Devastated by Mankind (2026) [EP]" / "01. pista.flac").write_bytes(b"audio")
+
+        resultado, renderizados = self.renderizar()
+
+        self.assertEqual(renderizados, [self.album / "Banda B - Viejo (2019)"])
+        self.assertTrue(resultado["ok"], resultado)
+        destino = pa.DIR_LISTA_NEGRA_BANDAS / "PROPHECY - Devastated by Mankind (2026) [EP]"
+        self.assertEqual((destino / "01. pista.flac").read_bytes(), b"audio")
+        self.assertFalse((self.album / "PROPHECY - Devastated by Mankind (2026) [EP]").exists())
+        self.assertEqual(resultado["lista_negra_bandas"], [
+            {"album": "PROPHECY - Devastated by Mankind (2026) [EP]", "destino": str(destino)},
+        ])
+        self.assertEqual(resultado["ya_publicados"], [])
+
+    def test_la_lista_negra_ignora_mayusculas_acentos_anio_y_etiqueta(self):
+        # Defecto: comparar el nombre de la carpeta tal cual deja pasar la misma banda escrita
+        # con otras mayúsculas, con acento, con año o con la etiqueta [EP].
+        self.lista_negra("prophecy", "ABSURDEITY", "Eternal Tragedy")
+        nombres = (
+            "Prophecy - Disco (2020)", "PROPHÉCY - Otro (2021) [EP]", "absurdeity - Uno (2019) (Full Album)",
+            "Eternal Tragedy - Tres (2018)__2",
+        )
+        for nombre in nombres:
+            (self.ep / nombre).mkdir()
+
+        with mock.patch.object(pa.subprocess, "run", side_effect=AssertionError("lanzó un render")):
+            resultado = pa.renderizar()
+
+        self.assertEqual(resultado["motivo"], "sin_albumes")
+        self.assertEqual(sorted(a["album"] for a in resultado["lista_negra_bandas"]), sorted(nombres))
+        self.assertEqual(pa.listar_carpetas(pa.DIR_LISTA_NEGRA_BANDAS), sorted(nombres))
+        self.assertEqual(pa.listar_carpetas(self.ep), [])
+
+    def test_una_banda_que_no_esta_en_la_lista_negra_no_se_toca(self):
+        # Defecto: comparar por "empieza con" o "contiene" aparta a "Prophecy of Doom" por la lista
+        # de "Prophecy", y apartar de más pierde álbumes sin que nadie lo vea.
+        self.lista_negra("Prophecy")
+        nombre = "Prophecy of Doom - Disco (2020)"
+        (self.album / nombre).mkdir()
+
+        resultado, renderizados = self.renderizar()
+
+        self.assertEqual(renderizados, [self.album / nombre])
+        self.assertEqual(resultado["lista_negra_bandas"], [])
+        self.assertFalse(pa.DIR_LISTA_NEGRA_BANDAS.exists())
+
+    def test_renderizar_con_carpeta_renderiza_aunque_su_banda_este_en_la_lista_negra(self):
+        # Defecto: un álbum pedido a mano con --carpeta se aparta en lugar de renderizarse (la
+        # lista, como el registro, se revisa solo al elegir el próximo).
+        self.lista_negra("Prophecy")
+        nombre = "Prophecy - Disco (2020)"
+        (self.album / nombre).mkdir()
+
+        resultado, renderizados = self.renderizar(nombre)
+
+        self.assertEqual(renderizados, [self.album / nombre])
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertFalse(pa.DIR_LISTA_NEGRA_BANDAS.exists())
+
+    def test_un_album_de_la_lista_negra_que_no_se_puede_apartar_no_se_renderiza_ni_se_copia(self):
+        # Defecto: si moverlo falla, se renderiza igual el álbum de la banda; o el movimiento cae
+        # en copiarlo y, cuando el original no se puede borrar, cada vuelta deja otra copia entera.
+        self.lista_negra("Prophecy")
+        for nombre in ("Prophecy - Disco (2020)", "Banda B - Viejo (2019)"):
+            (self.album / nombre).mkdir()
+        (self.album / "Prophecy - Disco (2020)" / "01. pista.flac").write_bytes(b"audio")
+
+        with mock.patch.object(pa.os, "rename", side_effect=PermissionError("sin permiso")):
+            resultado, renderizados = self.renderizar()
+
+        self.assertEqual(renderizados, [self.album / "Banda B - Viejo (2019)"])
+        self.assertTrue((self.album / "Prophecy - Disco (2020)" / "01. pista.flac").is_file())
+        self.assertEqual(pa.listar_carpetas(pa.DIR_LISTA_NEGRA_BANDAS), [])
+        self.assertEqual(resultado["lista_negra_bandas"], [{"album": "Prophecy - Disco (2020)", "error": "sin permiso"}])
+
+    def test_al_apartar_por_la_lista_negra_no_se_mete_adentro_de_una_carpeta_con_el_mismo_nombre(self):
+        # Defecto: rename sobre una carpeta vacía con el mismo nombre la pisa, y con una llena
+        # falla; el álbum tiene que quedar aparte, con el sufijo __N.
+        self.lista_negra("Prophecy")
+        nombre = "Prophecy - Disco (2020)"
+        (self.album / nombre).mkdir()
+        (pa.DIR_LISTA_NEGRA_BANDAS / nombre).mkdir(parents=True)
+
+        resultado, _ = self.renderizar()
+
+        self.assertEqual(resultado["motivo"], "sin_albumes")
+        self.assertTrue((pa.DIR_LISTA_NEGRA_BANDAS / f"{nombre}__2").is_dir())
+        self.assertEqual(list((pa.DIR_LISTA_NEGRA_BANDAS / nombre).iterdir()), [])
+
+    def test_un_album_publicado_sigue_yendo_a_ya_publicados_y_uno_de_la_lista_negra_a_su_carpeta(self):
+        # Defecto: al agregar la lista negra, el registro de publicados deja de apartar, o ambos
+        # avisos se mezclan en la misma clave del resultado.
+        self.lista_negra("Prophecy")
+        rp.anotar(pa.REGISTRO_PUBLICADOS, [("Banda A - Nuevo (2021)", "subir", "vid00000001")])
+        for nombre in ("Banda A - Nuevo (2021)", "Prophecy - Disco (2020)"):
+            (self.album / nombre).mkdir()
+
+        resultado, renderizados = self.renderizar()
+
+        self.assertEqual(renderizados, [])
+        self.assertEqual(resultado["motivo"], "sin_albumes")
+        self.assertEqual([a["album"] for a in resultado["ya_publicados"]], ["Banda A - Nuevo (2021)"])
+        self.assertEqual([a["album"] for a in resultado["lista_negra_bandas"]], ["Prophecy - Disco (2020)"])
+        self.assertTrue((pa.DIR_YA_PUBLICADOS / "Banda A - Nuevo (2021)").is_dir())
+        self.assertTrue((pa.DIR_LISTA_NEGRA_BANDAS / "Prophecy - Disco (2020)").is_dir())
+        self.assertEqual(pa.listar_carpetas(pa.DIR_YA_PUBLICADOS), ["Banda A - Nuevo (2021)"])
+        self.assertEqual(pa.listar_carpetas(pa.DIR_LISTA_NEGRA_BANDAS), ["Prophecy - Disco (2020)"])
+
 
 class TestPreguntarAntesDeRenderizar(unittest.TestCase):
     """`buscar` elige el álbum sin renderizarlo; `eliminar` borra uno que sigue en su origen."""
+
+    lista_negra = TestOrigenes.lista_negra
 
     def setUp(self):
         TestOrigenes.setUp(self)
@@ -617,6 +740,56 @@ class TestPreguntarAntesDeRenderizar(unittest.TestCase):
         self.assertEqual(siguiente["album"], "Banda B - Segundo (2023)")
         self.assertEqual(todos["motivo"], "sin_albumes")
         self.assertTrue((self.album / "Banda A - Primero (2024)").is_dir())
+
+    def test_buscar_aparta_las_bandas_de_la_lista_negra_y_devuelve_el_siguiente(self):
+        # Defecto: `buscar` ofrece por Telegram un álbum de una banda que pidió bajar sus videos,
+        # o lo aparta y el servicio no se entera porque la clave del resultado no existe.
+        self.lista_negra("Prophecy")
+        (self.album / "Prophecy - Disco (2020)").mkdir()
+        siguiente = self.album / "Banda B - Viejo (2019)"
+        siguiente.mkdir()
+        buscadas = []
+
+        def capturar(carpeta, uploader=None):
+            buscadas.append(Path(carpeta))
+            return None, "busqueda"
+
+        with mock.patch.object(pa.subprocess, "run", side_effect=AssertionError("lanzó un render")), \
+                mock.patch.object(pa, "capturar_busqueda", side_effect=capturar):
+            resultado = pa.buscar()
+
+        self.assertEqual(buscadas, [siguiente])
+        self.assertEqual(resultado["album"], "Banda B - Viejo (2019)")
+        self.assertEqual([a["album"] for a in resultado["lista_negra_bandas"]], ["Prophecy - Disco (2020)"])
+        self.assertEqual(resultado["ya_publicados"], [])
+        self.assertTrue((pa.DIR_LISTA_NEGRA_BANDAS / "Prophecy - Disco (2020)").is_dir())
+        self.assertTrue(siguiente.is_dir())
+
+    def test_buscar_sin_mas_albumes_que_los_de_la_lista_negra_los_aparta_y_los_informa(self):
+        # Defecto: el resultado `sin_albumes` pierde lo que se apartó y nadie lo avisa.
+        self.lista_negra("Prophecy")
+        (self.ep / "Prophecy - Disco (2020) [EP]").mkdir()
+
+        with mock.patch.object(pa, "capturar_busqueda", side_effect=AssertionError("capturó")):
+            resultado = pa.buscar()
+
+        self.assertEqual(resultado["motivo"], "sin_albumes")
+        self.assertEqual([a["album"] for a in resultado["lista_negra_bandas"]], ["Prophecy - Disco (2020) [EP]"])
+
+    def test_buscar_lee_la_lista_negra_en_cada_llamada(self):
+        # Defecto: leer la lista una sola vez (al importar) obliga a reiniciar el servicio en
+        # producción cada vez que se agrega una banda.
+        nombre = "Prophecy - Disco (2020)"
+        (self.album / nombre).mkdir()
+        with mock.patch.object(pa, "capturar_busqueda", return_value=(None, "busqueda")):
+            antes = pa.buscar()
+            self.lista_negra("Prophecy")
+            despues = pa.buscar()
+
+        self.assertEqual(antes["album"], nombre)
+        self.assertEqual(antes["lista_negra_bandas"], [])
+        self.assertEqual(despues["motivo"], "sin_albumes")
+        self.assertEqual([a["album"] for a in despues["lista_negra_bandas"]], [nombre])
 
     def test_el_subcomando_buscar_pasa_cada_excluir(self):
         # Defecto: el servicio manda la lista por la línea de comandos; si no llega, se pierde.
