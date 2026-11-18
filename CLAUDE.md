@@ -32,7 +32,7 @@ Scripts are numbered but **not all are sequential**. The active pipeline is:
 3. subir_video_API.py       → YouTube upload via Data API (scheduled batches)
 10. inpunar_video.py        → Playwright: copyright dispute automation
 11. apelacion.py            → Playwright: copyright appeal automation
-12. mapear_playlists.py     → Maps videos to playlists (runs as systemd service)
+12. mapear_playlists.py     → Maps videos to playlists (runs from a systemd timer)
 13. filtrar_portadas.py     → NSFW cover art filter (ONNX model)
 ```
 
@@ -747,7 +747,15 @@ Central config for all scripts. Key settings:
   - This was added on 2026-11-15. The service started before DNS was up, and `programar`
     reported `sin_credenciales` twice while all five credentials were fine.
   - `3. subir_video_API.py` still counts a network failure as an unusable credential.
-- `12. mapear_playlists.py` runs as a systemd service (`systemd/mapear_playlists.service`, installed as a copy in `/etc/systemd/system/`) with auto-restart
+- `12. mapear_playlists.py` runs from `mapear_playlists.timer` as a oneshot: 2 min after boot, then
+  30 min after each run ends (`OnUnitInactiveSec`).
+  - The repo keeps the copies installed in `/etc/systemd/system/`: `systemd/mapear_playlists.service`,
+    its drop-in `systemd/mapear_playlists.service.d/oneshot.conf` (`Type=oneshot`, `Restart=no`) and
+    `systemd/mapear_playlists.timer`.
+  - The service itself is not enabled: enabling it puts it back in `multi-user.target`, beside the timer.
+  - Changed on 2026-11-17. As a `simple` service with `Restart=on-failure`, started at boot and pulled in
+    by the timer's `Requires=`, a failure relaunched it 5 min later, so the timer almost never found it
+    inactive.
 - `12. mapear_playlists.py` and YouTube's 400 `failedPrecondition` ("Precondition check failed."),
   which the Data API error list does not document. Added on 2026-11-17, after a run died on it
   in `playlists.insert` after almost an hour.
