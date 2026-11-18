@@ -1,0 +1,11 @@
+[Unit]
+Description=Mapear Playlists YouTube (timer)
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=30min
+Unit=mapear_playlists.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target
